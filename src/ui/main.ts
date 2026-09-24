@@ -9,12 +9,17 @@ import type { EventKind, HistoryEvent, RaceDef, WorldConfig } from '../engine/ty
 import { VALUE_KEYS } from '../engine/types';
 import { World } from '../engine/world';
 import { lineChart, compact } from './chart';
+import { renderMarket } from './market';
 import { mountNationCharts, renderNation } from './nation';
-import { MapRenderer, type MapLayer, type ViewState } from './render';
+import { ROAD_NAMES } from '../engine/systems/roads';
+import { CARAVAN_COLOR, MapRenderer, type MapLayer, type ViewState } from './render';
 import { mountTechTree, techDetail } from './techtree';
 import { TRAITS, TRAIT_BY_ID } from '../engine/data/traits';
 
-type Tab = 'inspect' | 'realms' | 'peoples' | 'chronicle' | 'charts' | 'setup';
+type Tab = 'inspect' | 'market' | 'realms' | 'peoples' | 'chronicle' | 'charts' | 'setup';
+
+const MONTHS = ['Deepwinter', 'Thawing', 'Seedtime', 'Rainmoon', 'Bloomtide', 'Highsun', 'Midsummer', 'Harvest', 'Leaffall', 'Mistmoon', 'Frostfall', 'Longnight'];
+const CARAVAN_KIND: Record<string, string> = { merchant: 'Merchant caravan', family: 'Trading family', nomad: 'Nomad caravan tribe', convoy: 'State convoy' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -44,11 +49,16 @@ let renderer = new MapRenderer(world);
 let tab: Tab = (store.get('tab') as Tab) || 'inspect';
 let playing = false;
 let speed = 10;
+/** Real time: the world advances month by month and armies and caravans glide between positions. */
+let realTime = false;
+let monthAcc = 0;
 let pendingYears = 0;
 let yearAcc = 0;
 let lastFrame = performance.now();
 let lastPanel = 0;
 let selectedCulture = -1;
+/** Settlement whose market is shown (-1 for the world overview). */
+let marketFor = -1;
 /** Until the user pans or zooms, keep the whole map fitted to the pane. */
 let autoFit = true;
 const chronicleFilter = { importance: 2, kind: 'all', text: '' };
@@ -66,6 +76,8 @@ const view: ViewState = {
   showRuins: true,
   showCaravans: true,
   showArmies: true,
+  showRoads: true,
+  frac: 1,
   zoom: 4,
   ox: 0,
   oy: 0,
@@ -180,6 +192,7 @@ function pick(e: PointerEvent): void {
   const ty = Math.floor(wy);
   view.selectedTile = tx >= 0 && ty >= 0 && tx < world.map.width && ty < world.map.height ? ty * world.map.width + tx : -1;
   view.selectedSettlement = best;
+  if (best >= 0) marketFor = best;
   view.selectedPolity = best >= 0 ? world.settlements[best].polityId : -1;
   selectedCulture = -1;
   if (best < 0 && view.selectedTile >= 0) {
@@ -187,7 +200,7 @@ function pick(e: PointerEvent): void {
     view.selectedPolity = o >= 0 ? world.settlements[o].polityId : -1;
   }
   renderer.invalidate();
-  setTab('inspect');
+  setTab(tab === 'market' ? 'market' : 'inspect');
   drawMap();
 }
 
@@ -196,7 +209,7 @@ function pick(e: PointerEvent): void {
 function refreshTopbar(): void {
   const st = world.stats[world.stats.length - 1];
   $('world-name').textContent = cfg.name;
-  $('year').textContent = `Year ${world.year}`;
+  $('year').textContent = realTime || world.month > 0 ? `Year ${world.year}, ${MONTHS[world.month]}` : `Year ${world.year}`;
   let era = 0;
   for (const p of world.alivePolities()) for (const t of p.techs) era = Math.max(era, TECH_BY_ID.get(t)?.era ?? 0);
   $('era').textContent = ERA_NAMES[era];
@@ -226,9 +239,21 @@ for (const [id, n] of [['step1', 1], ['step10', 10], ['step100', 100], ['step500
   });
 }
 const speedInput = $<HTMLInputElement>('speed');
+function speedLabel(): void {
+  $('speed-out').textContent = realTime ? `${(speed / 5).toFixed(1)} mo/s` : `${speed} yr/s`;
+}
 speedInput.addEventListener('input', () => {
   speed = Number(speedInput.value);
-  $('speed-out').textContent = `${speed} yr/s`;
+  speedLabel();
+});
+$('realtime').addEventListener('click', () => {
+  realTime = !realTime;
+  monthAcc = 0;
+  yearAcc = 0;
+  view.frac = 1;
+  $('realtime').setAttribute('aria-pressed', String(realTime));
+  speedLabel();
+  refreshTopbar();
 });
 $('theme').addEventListener('click', () => {
   const root = document.documentElement;
@@ -266,7 +291,7 @@ resSel.addEventListener('change', () => {
   renderer.invalidate();
   drawMap();
 });
-for (const [id, key] of [['t-routes', 'showRoutes'], ['t-labels', 'showLabels'], ['t-ruins', 'showRuins'], ['t-caravans', 'showCaravans'], ['t-armies', 'showArmies']] as const) {
+for (const [id, key] of [['t-routes', 'showRoutes'], ['t-labels', 'showLabels'], ['t-ruins', 'showRuins'], ['t-caravans', 'showCaravans'], ['t-armies', 'showArmies'], ['t-roads', 'showRoads']] as const) {
   const box = $<HTMLInputElement>(id);
   box.checked = view[key];
   box.addEventListener('change', () => {
@@ -292,9 +317,14 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('[data-tab]')) b.ad
 
 const panel = $('panel');
 panel.addEventListener('click', (e) => {
-  const a = (e.target as HTMLElement).closest<HTMLElement>('[data-s],[data-p],[data-c],[data-e],[data-nation],[data-tech-for]');
+  const a = (e.target as HTMLElement).closest<HTMLElement>('[data-s],[data-p],[data-c],[data-e],[data-nation],[data-tech-for],[data-market]');
   if (!a) return;
   e.preventDefault();
+  if (a.dataset.market !== undefined) {
+    marketFor = Number(a.dataset.market);
+    setTab('market');
+    return;
+  }
   followLink(a);
 });
 
@@ -304,6 +334,15 @@ function followLink(a: HTMLElement): void {
   closeOverlay();
   if (a.dataset.s) {
     const s = world.settlements[Number(a.dataset.s)];
+    marketFor = s.id;
+    if (tab === 'market') {
+      view.selectedSettlement = s.id;
+      centerOn(s.x, s.y);
+      renderer.invalidate();
+      drawMap();
+      renderPanel(true);
+      return;
+    }
     view.selectedSettlement = s.id;
     view.selectedPolity = s.polityId;
     selectedCulture = -1;
@@ -474,9 +513,10 @@ function renderSettlement(id: number): string {
   const totalLabor = labor.reduce((a, [, l]) => a + l, 0) || 1;
   const events = world.history.filter((e) => e.settlements?.includes(id));
   const allLinks = [...s.links.map((li) => world.links[li]), ...world.hubLinks.filter((l) => l.a === id || l.b === id)];
-  const partners = allLinks.map((l) => ({ o: l.a === id ? l.b : l.a, v: l.volume, sea: l.sea, kind: l.kind, hub: !!l.hub })).filter((x) => world.settlements[x.o].alive).sort((a, b) => b.v - a.v);
-  const KIND_LABEL = { internal: 'internal', treaty: 'treaty', closed: 'border closed' } as const;
+  const partners = allLinks.map((l) => ({ o: l.a === id ? l.b : l.a, v: l.volume, sea: l.sea, kind: l.kind, hub: !!l.hub })).filter((x) => world.settlements[x.o].alive && x.kind === 'internal').sort((a, b) => b.v - a.v);
   const caravans = world.caravans.filter((c) => c.homeId === id);
+  const houses = world.houses.filter((h) => h.homeId === id && h.closed === null);
+  const road = world.map.road[s.tile] | 0;
   return `
     <header class="head">
       <p class="eyebrow">${s.alive ? settlementTier(s.pop) : 'Ruins'}${p.capitalId === id && s.alive ? ' · Capital' : ''}</p>
@@ -500,9 +540,11 @@ function renderSettlement(id: number): string {
       <p><span class="k">Tools</span> ${['stone', 'copper', 'bronze', 'iron', 'steel'][Math.round(s.toolQuality)]} · <span class="k">Arms</span> ${['stone', 'copper', 'bronze', 'iron', 'steel'][Math.round(s.weaponQuality)]}</p>
     </section>
     <section><h3>Trade</h3>
-      <p class="small"><span class="k">Internal</span> ${compact(s.tradeByKind.internal)} · <span class="k">Treaty</span> ${compact(s.tradeByKind.treaty)} · <span class="k">Caravans</span> ${compact(s.tradeByKind.caravan)} <span class="muted">silver/yr</span></p>
-      ${partners.length ? `<ul class="plain">${partners.slice(0, 8).map((x) => `<li>${sLink(x.o)} <span class="chip ${x.kind === 'treaty' ? 'ok' : x.kind === 'closed' ? 'warn' : ''}">${x.hub ? 'road to hub' : KIND_LABEL[x.kind]}</span> <span class="muted small">${x.sea ? 'by sea' : 'overland'} · ${compact(x.v)}/yr</span></li>`).join('')}</ul>` : '<p class="muted">Isolated.</p>'}
-      ${caravans.length ? `<p class="small">${caravans.length} caravan${caravans.length > 1 ? 's' : ''} on the road: ${caravans.map((c) => `${GOOD_NAMES[c.good].toLowerCase()} ${c.returning ? 'coming home from' : 'bound for'} ${sLink(c.returning ? c.fromId : c.toId)}`).join('; ')}.</p>` : ''}
+      <p class="small"><span class="k">Internal</span> ${compact(s.tradeByKind.internal)} · <span class="k">Caravans</span> ${compact(s.tradeByKind.caravan)} · <span class="k">Convoys</span> ${compact(s.tradeByKind.convoy)} · <span class="k">Passing</span> ${compact(s.transit)} <span class="muted">silver/yr</span></p>
+      <p class="small"><span class="k">Road</span> ${road ? ROAD_NAMES[road] : 'No road yet'} · <button type="button" class="mini" data-market="${id}">Open market</button></p>
+      ${partners.length ? `<h4 class="mini-h">Trading neighbours in the realm</h4><ul class="plain">${partners.slice(0, 6).map((x) => `<li>${sLink(x.o)} <span class="chip">${x.hub ? 'road to hub' : 'internal'}</span> <span class="muted small">${x.sea ? 'by sea' : 'overland'} · ${compact(x.v)}/yr</span></li>`).join('')}</ul>` : '<p class="muted small">No trading neighbours in its own realm.</p>'}
+      ${houses.length ? `<p class="small">Home of ${houses.map((h) => `<b>${esc(h.name)}</b> <span class="muted">(${compact(h.wealth)} silver, ${h.trips} ventures)</span>`).join(', ')}.</p>` : ''}
+      ${caravans.length ? `<h4 class="mini-h">On the road</h4><ul class="plain small">${caravans.map((c) => `<li><span class="swatch-dot" style="background:${CARAVAN_COLOR[c.kind]}"></span>${CARAVAN_KIND[c.kind]} (${c.size} beasts) ${c.returning ? 'coming home from' : 'bound for'} ${sLink(c.returning ? c.fromId : c.toId)}${c.cargo.length ? ` with ${c.cargo.map((x) => `${Math.round(x.qty)} ${GOOD_NAMES[x.good].toLowerCase()}`).join(', ')}` : ', empty'}</li>`).join('')}</ul>` : ''}
     </section>` : ''}
     ${s.greatWorks.length ? `<section><h3>Great works</h3><p>${s.greatWorks.map(esc).join(' · ')}</p></section>` : ''}
     <section><h3>Local history</h3>${eventList(events, 15)}</section>`;
@@ -637,7 +679,7 @@ function renderPeoples(): string {
     </table></div></section>`;
 }
 
-const KINDS: EventKind[] = ['war', 'conquest', 'peace', 'rebellion', 'union', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'army', 'agreement', 'caravan'];
+const KINDS: EventKind[] = ['war', 'conquest', 'peace', 'rebellion', 'union', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'army', 'agreement', 'caravan', 'house', 'road'];
 
 function renderChronicleShell(): string {
   return `
@@ -697,7 +739,7 @@ function download(name: string, content: string, type: string): void {
 }
 
 function renderChartsShell(): string {
-  return `<header class="head"><h2>Charts</h2><p class="sub">Sampled every year; realms every five.</p></header><div id="c-race"></div><div id="c-realm"></div><div id="c-count"></div><div id="c-trade"></div>`;
+  return `<header class="head"><h2>Charts</h2><p class="sub">Sampled every year; realms every five.</p></header><div id="c-race"></div><div id="c-realm"></div><div id="c-coin"></div><div id="c-moving"></div><div id="c-count"></div><div id="c-trade"></div>`;
 }
 
 function renderCharts(): void {
@@ -708,6 +750,14 @@ function renderCharts(): void {
   lineChart($('c-race'), 'Population by race', raceSeries);
   const top = [...world.alivePolities()].sort((a, b) => b.pop - a.pop).slice(0, 6);
   lineChart($('c-realm'), 'Six largest realms', top.map((p) => ({ name: p.name, color: p.color, points: p.popHistory })));
+  lineChart($('c-coin'), 'Coin and barter (value traded per year)', [
+    { name: 'Barter', color: '#d99152', points: sampled.map((s) => [s.year, s.barterTrade ?? 0] as [number, number]) },
+    { name: 'Coin', color: '#2a78d6', points: sampled.map((s) => [s.year, s.coinTrade ?? 0] as [number, number]) },
+  ]);
+  lineChart($('c-moving'), 'On the move', [
+    { name: 'Caravans', color: '#e8b923', points: sampled.map((s) => [s.year, s.caravans ?? 0] as [number, number]) },
+    { name: 'Armies', color: '#e34948', points: sampled.map((s) => [s.year, s.armies ?? 0] as [number, number]) },
+  ]);
   lineChart($('c-count'), 'Settlements', [{ name: 'Settlements', color: 'var(--accent)', points: sampled.map((s) => [s.year, s.settlements] as [number, number]) }]);
   lineChart($('c-trade'), 'Trade volume (silver per year)', [{ name: 'Trade', color: 'var(--accent-2)', points: sampled.map((s) => [s.year, s.tradeVolume] as [number, number]) }]);
 }
@@ -830,6 +880,11 @@ function renderPanel(full: boolean): void {
     return;
   }
   const scroll = panel.scrollTop;
+  if (tab === 'market') {
+    panel.innerHTML = renderMarket(world, marketFor, helpers());
+    if (!full) panel.scrollTop = scroll;
+    return;
+  }
   panel.innerHTML = tab === 'inspect' ? renderInspect() : tab === 'realms' ? renderRealms() : renderPeoples();
   if (!full) panel.scrollTop = scroll;
 }
@@ -839,20 +894,32 @@ function renderPanel(full: boolean): void {
 function frame(now: number): void {
   const dt = Math.min(0.25, (now - lastFrame) / 1000);
   lastFrame = now;
-  let ticks = 0;
-  if (playing) {
+  let years = pendingYears;
+  let months = 0;
+  if (playing && !realTime) {
     yearAcc += dt * speed;
-    ticks = Math.floor(yearAcc);
-    yearAcc -= ticks;
+    const n = Math.floor(yearAcc);
+    yearAcc -= n;
+    years += n;
+  } else if (playing && realTime && pendingYears === 0) {
+    monthAcc += (dt * speed) / 5;
+    months = Math.floor(monthAcc);
+    monthAcc -= months;
   }
-  ticks += pendingYears;
   const t0 = performance.now();
   let done = 0;
-  while (done < ticks && performance.now() - t0 < 40) {
+  while (done < years && performance.now() - t0 < 40) {
     world.tick();
     done++;
   }
   if (pendingYears > 0) pendingYears = Math.max(0, pendingYears - done);
+  for (let m = 0; m < months && performance.now() - t0 < 40; m++) {
+    world.stepMonth();
+    done++;
+  }
+  // In real time, redraw every frame so marching armies and caravans move smoothly.
+  view.frac = playing && realTime ? Math.min(1, monthAcc) : 1;
+  if (playing && realTime && done === 0) drawMap();
   if (done > 0) {
     drawMap();
     refreshTopbar();

@@ -4,6 +4,8 @@ import type { MapData } from './types';
 import { DX, DY } from './worldgen';
 
 const SQRT2 = Math.SQRT2;
+/** Travel speed multiplier for each road level: none, trail, cart track, paved road, highway. */
+export const ROAD_SPEED = [1, 1.3, 1.7, 2.3, 3.2];
 
 /**
  * Cost of standing on / passing through a tile for a traveller with the given
@@ -16,7 +18,7 @@ export function tileCost(map: MapData, i: number, seaTravel: number): number {
   if (b === Biome.DeepOcean) return seaTravel >= 3 ? 0.35 : seaTravel >= 2 ? 0.6 : Infinity;
   let c = map.moveCost[i];
   if (map.river[i] > 0) c *= 0.65; // river boats
-  return c / (1 + map.road[i]);
+  return c / ROAD_SPEED[map.road[i] | 0];
 }
 
 /** Reusable Dijkstra over the tile grid, bounded by a maximum travel cost. */
@@ -36,8 +38,11 @@ export class Pathfinder {
     this.done = new Uint32Array(map.size);
   }
 
-  /** Run from `start`; calls `onVisit(tile, cost)` for every settled tile, stopping early if it returns true. */
-  run(start: number, maxCost: number, seaTravel: number, onVisit?: (tile: number, cost: number) => boolean | void): void {
+  /**
+   * Run from `start`; calls `onVisit(tile, cost)` for every settled tile, stopping early if it returns true.
+   * `canEnter` can forbid tiles (closed borders).
+   */
+  run(start: number, maxCost: number, seaTravel: number, onVisit?: (tile: number, cost: number) => boolean | void, canEnter?: (tile: number) => boolean): void {
     const map = this.map;
     const w = map.width;
     const h = map.height;
@@ -66,7 +71,7 @@ export class Pathfinder {
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
         const j = ny * w + nx;
         const cj = tileCost(map, j, seaTravel);
-        if (cj === Infinity) continue;
+        if (cj === Infinity || (canEnter && !canEnter(j))) continue;
         let step = ((ci === Infinity ? cj : ci) + cj) * 0.5 * (d >= 4 ? SQRT2 : 1);
         if (iWater !== map.elevation[j] < 0) step += 1.5; // embark / disembark
         const nd = d0 + step;

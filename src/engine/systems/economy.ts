@@ -247,6 +247,16 @@ function consume(world: World, s: Settlement): void {
   s.pop = pop;
   s.peakPop = Math.max(s.peakPop, pop);
 
+  // Minting: once coinage is known, spare gold is struck into coin.
+  if (pol.techs.has('currency')) {
+    const spare = s.stock[Good.Gold] - s.target[Good.Gold];
+    if (spare > 0) {
+      s.stock[Good.Gold] -= spare * 0.3;
+      s.wealth += spare * 0.3 * 20;
+    }
+  }
+  s.transit *= 0.5;
+
   // Wealth & taxes.
   const tax = s.wealth * 0.06;
   pol.treasury += tax;

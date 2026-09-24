@@ -2,6 +2,15 @@ import { BIOMES, Biome, Relief } from '../engine/data/biomes';
 import { Res } from '../engine/data/economy';
 import type { World } from '../engine/world';
 
+const ROAD_STYLE = [
+  { color: '', width: 0, min: 0 },
+  { color: 'rgba(120, 90, 50, 0.55)', width: 0.08, min: 0.8 },
+  { color: 'rgba(125, 82, 38, 0.8)', width: 0.14, min: 1.2 },
+  { color: 'rgba(95, 95, 100, 0.9)', width: 0.2, min: 1.8 },
+  { color: 'rgba(45, 45, 52, 0.95)', width: 0.28, min: 2.4 },
+];
+export const CARAVAN_COLOR: Record<string, string> = { merchant: '#e8b923', family: '#b57be0', nomad: '#d99152', convoy: '#3fbf7f' };
+
 export type MapLayer = 'terrain' | 'political' | 'culture' | 'race' | 'resource';
 
 export interface ViewState {
@@ -12,6 +21,9 @@ export interface ViewState {
   showRuins: boolean;
   showCaravans: boolean;
   showArmies: boolean;
+  showRoads: boolean;
+  /** Progress through the current month (0..1) for smooth movement in real time. */
+  frac: number;
   /** Screen pixels per tile. */
   zoom: number;
   /** Tile coordinate at the top-left of the canvas. */
@@ -187,66 +199,96 @@ export class MapRenderer {
     this.paintOverlay(view);
     ctx.drawImage(this.overlay, tx(0), ty(0), map.width * z, map.height * z);
 
-    // Roads that trade has worn into the land.
-    if (z >= 3) {
-      ctx.fillStyle = 'rgba(92, 64, 36, 0.55)';
-      const x0 = Math.max(0, Math.floor(view.ox));
-      const y0 = Math.max(0, Math.floor(view.oy));
-      const x1 = Math.min(map.width, Math.ceil(view.ox + cw / z));
-      const y1 = Math.min(map.height, Math.ceil(view.oy + ch / z));
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const r = map.road[y * map.width + x];
-          if (r < 0.15) continue;
-          const s = Math.max(1, z * 0.18 * Math.min(2, r));
-          ctx.fillRect(tx(x + 0.5) - s / 2, ty(y + 0.5) - s / 2, s, s);
-        }
-      }
-    }
-
+    const w = map.width;
+    const cx = (t: number) => tx((t % w) + 0.5);
+    const cy = (t: number) => ty(Math.floor(t / w) + 0.5);
     const pathTo = (path: number[], from = 0) => {
       ctx.beginPath();
       for (let k = from; k < path.length; k++) {
-        const p = path[k];
-        const X = tx((p % map.width) + 0.5);
-        const Y = ty(Math.floor(p / map.width) + 0.5);
-        if (k === from) ctx.moveTo(X, Y);
-        else ctx.lineTo(X, Y);
+        if (k === from) ctx.moveTo(cx(path[k]), cy(path[k]));
+        else ctx.lineTo(cx(path[k]), cy(path[k]));
       }
       ctx.stroke();
     };
+    const x0 = Math.max(0, Math.floor(view.ox) - 1);
+    const y0 = Math.max(0, Math.floor(view.oy) - 1);
+    const x1 = Math.min(w, Math.ceil(view.ox + cw / z) + 1);
+    const y1 = Math.min(map.height, Math.ceil(view.oy + ch / z) + 1);
 
-    if (view.showRoutes) {
-      // Internal trade in earth brown (roads to the hub drawn heavier), treaty trade in green.
+    // Roads: each level drawn as its own line style, joining neighbouring road tiles.
+    if (view.showRoads) {
       ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      let maxVol = 1;
-      for (const l of world.links) maxVol = Math.max(maxVol, l.volume);
-      for (const l of world.hubLinks) maxVol = Math.max(maxVol, l.volume);
-      for (const l of [...world.links, ...world.hubLinks]) {
-        if (l.volume <= 1 || l.path.length < 2 || l.kind === 'closed') continue;
-        const t = Math.sqrt(l.volume / maxVol);
-        const a = 0.25 + 0.6 * t;
-        ctx.strokeStyle = l.kind === 'treaty' ? `rgba(40, 150, 90, ${a})` : l.sea ? `rgba(40, 110, 150, ${a})` : `rgba(150, 96, 30, ${a})`;
-        ctx.lineWidth = Math.max(0.8, Math.min(5, z * 0.12 + t * 3 + (l.hub ? 0.8 : 0)));
-        ctx.setLineDash(l.sea ? [4, 3] : []);
-        pathTo(l.path);
+      for (let level = 1; level <= 4; level++) {
+        const style = ROAD_STYLE[level];
+        ctx.strokeStyle = style.color;
+        ctx.lineWidth = Math.max(style.min, z * style.width);
+        ctx.setLineDash(level === 1 ? [2, 3] : []);
+        ctx.beginPath();
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = y * w + x;
+            if ((map.road[i] | 0) < level) continue;
+            // Right, down, and both down diagonals, so every link is drawn once.
+            for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [-1, 1]]) {
+              const nx = x + dx;
+              const ny = y + dy;
+              if (nx < 0 || nx >= w || ny >= map.height) continue;
+              const j = ny * w + nx;
+              if ((map.road[j] | 0) < level) continue;
+              if (dx !== 0 && dy !== 0 && ((map.road[y * w + nx] | 0) >= level || (map.road[ny * w + x] | 0) >= level)) continue;
+              ctx.moveTo(cx(i), cy(i));
+              ctx.lineTo(cx(j), cy(j));
+            }
+          }
+        }
+        ctx.stroke();
       }
       ctx.setLineDash([]);
     }
 
+    // Trade routes: where free traders and state convoys actually travel.
+    if (view.showRoutes) {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      let maxVol = 1;
+      for (const r of world.routes.values()) maxVol = Math.max(maxVol, r.volume);
+      for (const r of world.routes.values()) {
+        if (r.path.length < 2) continue;
+        const t = Math.sqrt(r.volume / maxVol);
+        const a = 0.3 + 0.55 * t;
+        ctx.strokeStyle = r.kind === 'convoy' ? `rgba(40, 150, 90, ${a})` : `rgba(214, 160, 40, ${a})`;
+        ctx.lineWidth = Math.max(1, Math.min(4.5, 1 + t * 3.5));
+        ctx.setLineDash(r.kind === 'convoy' ? [7, 4] : [4, 4]);
+        pathTo(r.path);
+      }
+      ctx.setLineDash([]);
+    }
+
+    const frac = view.frac;
+    const lerpTile = (a: number, b: number): [number, number] => [cx(a) + (cx(b) - cx(a)) * frac, cy(a) + (cy(b) - cy(a)) * frac];
+    /** Position along a path between last month's step and this month's. */
+    const along = (path: number[], from: number, to: number): [number, number] => {
+      if (frac >= 1 || from >= to) return [cx(path[to]), cy(path[to])];
+      const pos = from + (to - from) * frac;
+      const k = Math.floor(pos);
+      const f = pos - k;
+      const a = path[Math.min(k, path.length - 1)];
+      const b = path[Math.min(k + 1, path.length - 1)];
+      return [cx(a) + (cx(b) - cx(a)) * f, cy(a) + (cy(b) - cy(a)) * f];
+    };
+
     if (view.showCaravans && world.caravans.length) {
-      const r = Math.max(1.8, Math.min(3.5, z * 0.35));
       for (const c of world.caravans) {
-        const t = c.path[Math.min(c.step, c.path.length - 1)];
-        const X = tx((t % map.width) + 0.5);
-        const Y = ty(Math.floor(t / map.width) + 0.5);
+        const to = Math.min(c.step, c.path.length - 1);
+        const [X, Y] = along(c.path, Math.min(c.prevStep, to), to);
+        const r = Math.max(2, Math.min(5, 1.5 + Math.sqrt(c.size) * 0.35)) * Math.max(0.8, Math.min(1.5, z / 5));
         ctx.beginPath();
-        ctx.arc(X, Y, r, 0, Math.PI * 2);
-        ctx.fillStyle = c.qty > 0 ? '#e8b923' : '#b9a978';
+        if (c.kind === 'convoy') ctx.rect(X - r, Y - r, r * 2, r * 2);
+        else ctx.arc(X, Y, r, 0, Math.PI * 2);
+        ctx.fillStyle = CARAVAN_COLOR[c.kind];
         ctx.fill();
         ctx.lineWidth = 1;
-        ctx.strokeStyle = '#4a3a0a';
+        ctx.strokeStyle = '#2b2208';
         ctx.stroke();
       }
     }
@@ -255,7 +297,6 @@ export class MapRenderer {
       for (const a of world.armies) {
         if (!a.alive) continue;
         const color = world.polities[a.polityId].color;
-        // The road ahead.
         if (a.path.length > a.step + 1) {
           ctx.strokeStyle = color;
           ctx.globalAlpha = 0.7;
@@ -265,8 +306,7 @@ export class MapRenderer {
           ctx.setLineDash([]);
           ctx.globalAlpha = 1;
         }
-        const X = tx((a.tile % map.width) + 0.5);
-        const Y = ty(Math.floor(a.tile / map.width) + 0.5);
+        const [X, Y] = lerpTile(a.prevTile, a.tile);
         const s = Math.max(5, Math.min(12, 3 + Math.log10(Math.max(10, a.size)) * 2)) * Math.max(0.8, Math.min(1.4, z / 5));
         ctx.beginPath();
         ctx.moveTo(X, Y - s);
@@ -279,7 +319,7 @@ export class MapRenderer {
         ctx.strokeStyle = a.siege > 0 ? '#b3362f' : '#1b1b1b';
         ctx.stroke();
         if (view.showLabels && z >= 5) {
-          const label = `${a.name} (${Math.round(a.size).toLocaleString('en-US')})`;
+          const label = `${a.name} (${Math.round(a.size).toLocaleString('en-US')})${a.siege > 0 ? ' — besieging' : ''}`;
           ctx.font = `600 11px "Alegreya Sans", system-ui, sans-serif`;
           ctx.lineWidth = 3;
           ctx.strokeStyle = ink.halo;
@@ -287,6 +327,35 @@ export class MapRenderer {
           ctx.fillStyle = ink.text;
           ctx.fillText(label, X + s + 3, Y + s * 0.4);
         }
+      }
+      // Recent battles flare and fade; captured towns ring red.
+      for (const m of world.battleMarks) {
+        const age = world.monthIndex - m.at + (1 - frac);
+        const life = m.kind === 'capture' ? 8 : 5;
+        if (age > life) continue;
+        const alpha = Math.max(0, 1 - age / life);
+        const X = cx(m.tile);
+        const Y = cy(m.tile);
+        const r = (5 + Math.min(10, Math.log10(Math.max(10, m.size)) * 3)) * Math.max(0.8, Math.min(1.5, z / 5));
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = m.kind === 'capture' ? '#d62f2f' : '#1b1b1b';
+        ctx.lineWidth = 2.5;
+        if (m.kind === 'capture') {
+          ctx.beginPath();
+          ctx.arc(X, Y, r * (1 + age * 0.15), 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(X - r, Y - r);
+          ctx.lineTo(X + r, Y + r);
+          ctx.moveTo(X + r, Y - r);
+          ctx.lineTo(X - r, Y + r);
+          ctx.stroke();
+          ctx.strokeStyle = '#f2c14e';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
       }
     }
 

@@ -5,6 +5,9 @@ import { TRAIT_BY_ID } from '../engine/data/traits';
 import type { HistoryEvent, Polity } from '../engine/types';
 import type { World } from '../engine/world';
 import { levy } from '../engine/systems/military';
+import { POLICY_LABEL, accessPolicy } from '../engine/systems/access';
+import { ROAD_NAMES } from '../engine/systems/roads';
+import { usesCoin } from '../engine/systems/trade';
 import { compact, lineChart } from './chart';
 
 export interface UiHelpers {
@@ -33,22 +36,27 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
   const cultures = new Map<number, number>();
   const races = new Map<string, number>();
   let internal = 0;
-  let treaty = 0;
+  let convoy = 0;
   let caravan = 0;
   let wealth = 0;
   for (const s of towns) {
     cultures.set(s.cultureId, (cultures.get(s.cultureId) ?? 0) + s.pop);
     for (const r in s.races) races.set(r, (races.get(r) ?? 0) + s.races[r]);
     internal += s.tradeByKind.internal;
-    treaty += s.tradeByKind.treaty;
+    convoy += s.tradeByKind.convoy;
     caravan += s.tradeByKind.caravan;
     wealth += s.wealth;
   }
   const armies = world.armies.filter((a) => a.alive && a.polityId === id);
   const ownCaravans = world.caravans.filter((c) => world.settlements[c.homeId].polityId === id);
-  const agreements = [...p.agreements].map(([q, aid]) => ({ q, deal: world.agreements[aid] }));
+  const agreements = world.agreements.filter((d) => d.end === null && (d.a === id || d.b === id));
   const pastDeals = world.agreements.filter((d) => (d.a === id || d.b === id) && d.end !== null).slice(-6);
-  const partners = [...p.contacts].filter(([q]) => world.polities[q].alive).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const neighbours = [...new Set([...p.relations.keys()])].filter((q) => world.polities[q].alive).sort((a, b) => world.polities[b].pop - world.polities[a].pop).slice(0, 10);
+  const houses = world.houses.filter((hh) => hh.closed === null && world.settlements[hh.homeId].polityId === id);
+  const roadCount = [0, 0, 0, 0, 0];
+  for (const s of towns) for (const t of s.territory) roadCount[world.map.road[t] | 0]++;
+  const byKind: Record<string, number> = {};
+  for (const c of ownCaravans) byKind[c.kind] = (byKind[c.kind] ?? 0) + 1;
   const wars = [...p.wars].map((w) => world.wars[w]);
   const researching = p.researching ? TECH_BY_ID.get(p.researching) : null;
   const known = TECHS.filter((t) => p.techs.has(t.id)).length;
@@ -92,17 +100,31 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
       <h3>Trade</h3>
       <dl class="facts">
         <div><dt>Internal</dt><dd>${compact(internal / 2)} / yr</dd></div>
-        <div><dt>Treaty</dt><dd>${compact(treaty / 2)} / yr</dd></div>
         <div><dt>Caravans</dt><dd>${compact(caravan)} / yr</dd></div>
+        <div><dt>Convoys</dt><dd>${compact(convoy)} / yr</dd></div>
+        <div><dt>Money</dt><dd>${usesCoin(p) ? 'Coin' : 'Barter'}</dd></div>
         <div><dt>Tariff</dt><dd>${Math.round(p.tariff * 100)}%</dd></div>
-        <div><dt>Caravans abroad</dt><dd>${ownCaravans.length}</dd></div>
         <div><dt>Tolls collected</dt><dd>${compact(p.tariffIncome)}</dd></div>
       </dl>
-      <h4>Trade agreements</h4>
-      ${agreements.length ? `<ul class="plain">${agreements.map(({ q, deal }) => `<li>${pLink(q)} <span class="muted small">— ${esc(deal.name)}, since ${deal.start}${deal.goods.length ? `; for ${deal.goods.slice(0, 4).join(', ').toLowerCase()}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted small">None. Foreign goods arrive only with free traders, who pay the border tolls.</p>'}
+      <p class="small">${ownCaravans.length ? `On the road: ${Object.entries(byKind).map(([k, n]) => `${n} ${{ merchant: 'merchant caravan', family: 'family caravan', nomad: 'nomad caravan', convoy: 'state convoy' }[k]}${n > 1 ? 's' : ''}`).join(', ')}.` : 'No caravans on the road.'}</p>
+      ${houses.length ? `<p class="small">Trading families: ${houses.slice(0, 6).map((hh) => `<b>${esc(hh.name)}</b> of ${sLink(hh.homeId)}`).join(', ')}${houses.length > 6 ? ` and ${houses.length - 6} more` : ''}.</p>` : ''}
+      <h4>Agreements</h4>
+      ${agreements.length ? `<ul class="plain">${agreements.map((d) => {
+        const other = d.a === id ? d.b : d.a;
+        const what = d.type === 'market' ? 'open market, no tolls' : d.type === 'transit' ? (d.a === id ? 'we let their traders pass' : 'their lands are open to our traders') : d.coin ? `${d.a === id ? 'we send' : 'we receive'} ${Math.round(d.giveQty!)} ${GOOD_NAMES[d.giveGood!].toLowerCase()} a year for ${Math.round(d.coin)} silver` : `${d.a === id ? 'we send' : 'we receive'} ${Math.round(d.giveQty!)} ${GOOD_NAMES[d.giveGood!].toLowerCase()} for ${Math.round(d.getQty!)} ${GOOD_NAMES[d.getGood!].toLowerCase()} a year`;
+        return `<li>${pLink(other)} <span class="chip ${d.type === 'convoy' ? 'ok' : ''}">${d.type}</span><br><span class="muted small">${esc(d.name)}, since ${d.start}: ${what}</span></li>`;
+      }).join('')}</ul>` : '<p class="muted small">None.</p>'}
       ${pastDeals.length ? `<details><summary>${pastDeals.length} past agreement${pastDeals.length > 1 ? 's' : ''}</summary><ul class="plain small">${pastDeals.map((d) => `<li>${esc(d.name)} (${d.start}–${d.end}) — ${esc(d.endReason ?? '')}</li>`).join('')}</ul></details>` : ''}
-      <h4>Main foreign partners</h4>
-      ${partners.length ? `<ul class="plain">${partners.map(([q, v]) => `<li>${pLink(q)} <span class="muted small">${compact(v)} contact</span></li>`).join('')}</ul>` : '<p class="muted small">Isolated from other peoples.</p>'}
+      <h4>Borders to traders</h4>
+      ${neighbours.length ? `<div class="table-wrap"><table class="policy-grid"><thead><tr><th>Nation</th><th>Their traders here</th><th>Ours there</th></tr></thead><tbody>${neighbours.map((q) => {
+        const Q = world.polities[q];
+        const mine = accessPolicy(world, p, Q);
+        const theirs = accessPolicy(world, Q, p);
+        const tone = (x: string) => (x === 'closed' ? 'crit' : x === 'transit' ? 'warn' : x === 'open' ? 'ok' : '');
+        return `<tr><td>${pLink(q)}${p.embargoes.has(q) ? ' <span class="chip crit">embargo</span>' : ''}</td><td><span class="chip ${tone(mine)}">${POLICY_LABEL[mine]}</span></td><td><span class="chip ${tone(theirs)}">${POLICY_LABEL[theirs]}</span></td></tr>`;
+      }).join('')}</tbody></table></div>` : '<p class="muted small">No known neighbours.</p>'}
+      <h4>Roads</h4>
+      <p class="small">${[4, 3, 2, 1].filter((l) => roadCount[l]).map((l) => `${ROAD_NAMES[l]}: ${roadCount[l]} tiles`).join(' · ') || 'No roads yet.'}</p>
     </section>
 
     <section class="card">

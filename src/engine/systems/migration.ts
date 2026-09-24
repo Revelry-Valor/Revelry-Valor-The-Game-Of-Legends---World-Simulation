@@ -12,7 +12,9 @@ export function attractiveness(world: World, s: Settlement): number {
     0.35 * Math.max(-0.5, Math.min(0.5, room)) +
     0.25 * s.stability +
     0.15 * Math.log10(1 + wealthPerCap * 5) +
-    0.05 * Math.log10(1 + s.pop) -
+    0.05 * Math.log10(1 + s.pop) +
+    // Towns on busy caravan roads draw people with work and opportunity.
+    0.12 * Math.min(1, s.transit / (s.pop * 0.5 + 1)) -
     s.plague * 0.4 -
     war
   );

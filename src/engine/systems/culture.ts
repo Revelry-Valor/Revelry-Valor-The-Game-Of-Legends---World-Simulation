@@ -152,7 +152,7 @@ function measureEnvironments(world: World): Map<number, CultureEnvironment> {
     if (s.river) a.river += s.pop;
     for (let k = 0; k < a.labor.length; k++) a.labor[k] += s.labor[k];
     for (let g = 0; g < GOOD_COUNT; g++) {
-      a.imports += (s.tradeByKind.treaty + s.tradeByKind.caravan) > 0 ? s.imported[g] * GOOD_BASE_PRICE[g] : 0;
+      a.imports += (s.tradeByKind.caravan + s.tradeByKind.convoy) > 0 ? s.imported[g] * GOOD_BASE_PRICE[g] : 0;
       a.output += s.produced[g] * GOOD_BASE_PRICE[g];
     }
     a.famine += Math.max(0, 1 - s.foodRatio) * s.pop;

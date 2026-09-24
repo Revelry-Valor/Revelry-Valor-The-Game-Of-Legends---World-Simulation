@@ -99,24 +99,29 @@ describe('trade, armies and cultures', () => {
     }
   });
 
-  it('only trades across borders under an agreement', () => {
-    for (const l of [...w.links, ...w.hubLinks]) {
-      const A = w.settlements[l.a];
-      const B = w.settlements[l.b];
-      if (l.kind === 'treaty') expect(w.polities[A.polityId].agreements.has(B.polityId)).toBe(true);
-      if (l.hub) expect(A.polityId === B.polityId || l.kind !== 'treaty').toBe(true);
-    }
+  it('records agreements on both sides', () => {
     for (const d of w.agreements.filter((x) => x.end === null)) {
-      expect(w.polities[d.a].agreements.get(d.b)).toBe(d.id);
-      expect(w.polities[d.b].agreements.get(d.a)).toBe(d.id);
+      expect(w.polities[d.a].agreements.get(d.b)).toContain(d.id);
+      expect(w.polities[d.b].agreements.get(d.a)).toContain(d.id);
+      if (d.type === 'convoy') expect(d.giveGood).toBeDefined();
     }
+  });
+
+  it('builds roads no better than a nation knows how to', () => {
+    for (let i = 0; i < w.map.size; i++) {
+      const lvl = w.map.road[i] | 0;
+      expect(lvl).toBeGreaterThanOrEqual(0);
+      expect(lvl).toBeLessThanOrEqual(4);
+    }
+    expect([...w.map.road].some((r) => r >= 1)).toBe(true);
   });
 
   it('runs free-trader caravans that reach their markets', () => {
     expect(w.caravanTrips).toBeGreaterThan(0);
     for (const c of w.caravans) {
       expect(c.step).toBeLessThan(c.path.length);
-      expect(c.qty).toBeGreaterThanOrEqual(0);
+      for (const x of c.cargo) expect(x.qty).toBeGreaterThanOrEqual(0);
+      expect(c.capacity).toBeGreaterThan(0);
     }
   });
 
@@ -132,6 +137,18 @@ describe('trade, armies and cultures', () => {
   it('develops survival traits from the environment', () => {
     expect(w.cultures.some((c) => c.traits.length > 0)).toBe(true);
     for (const c of w.cultures) expect(c.traits.length).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('real time', () => {
+  it('advances month by month and reaches the same year as whole-year steps', () => {
+    const a = new World(small());
+    const b = new World(small());
+    a.run(3);
+    for (let m = 0; m < 36; m++) b.stepMonth();
+    expect(b.year).toBe(3);
+    expect(b.month).toBe(0);
+    expect(b.stats.at(-1)).toEqual(a.stats.at(-1));
   });
 });
 

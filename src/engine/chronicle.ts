@@ -136,7 +136,7 @@ export function chronicleMarkdown(world: World, minImportance = 2): string {
 
   if (world.agreements.length) {
     out.push('', '## Trade agreements', '');
-    for (const d of world.agreements) out.push(`- **${d.name}** (${d.start}–${d.end ?? 'in force'}): ${world.polities[d.a].name} and ${world.polities[d.b].name}${d.goods.length ? `, for ${d.goods.join(', ').toLowerCase()}` : ''}${d.endReason ? `; ended because ${d.endReason}` : ''}.`);
+    for (const d of world.agreements) out.push(`- **${d.name}** (${d.type}; ${d.start}–${d.end ?? 'in force'}): ${world.polities[d.a].name} and ${world.polities[d.b].name}${d.goods.length ? `, for ${d.goods.join(', ').toLowerCase()}` : ''}${d.endReason ? `; ended because ${d.endReason}` : ''}.`);
   }
 
   out.push('', '## Notable places', '');
@@ -168,7 +168,9 @@ export function worldSnapshot(world: World): unknown {
     wars: world.wars,
     agreements: world.agreements,
     armies: world.armies,
-    caravans: world.caravans.map((c) => ({ home: c.homeId, from: c.fromId, to: c.toId, good: GOOD_NAMES[c.good], qty: Math.round(c.qty), returning: c.returning })),
+    caravans: world.caravans.map((c) => ({ kind: c.kind, name: c.name, home: c.homeId, from: c.fromId, to: c.toId, size: c.size, cargo: c.cargo.map((x) => ({ good: GOOD_NAMES[x.good], qty: Math.round(x.qty) })), returning: c.returning })),
+    houses: world.houses,
+    routes: [...world.routes.values()].map((r) => ({ a: r.a, b: r.b, kind: r.kind, volume: Math.round(r.volume) })),
     history: world.history,
     stats: world.stats,
   };

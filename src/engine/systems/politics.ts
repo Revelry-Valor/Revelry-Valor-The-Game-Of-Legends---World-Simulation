@@ -1,9 +1,11 @@
-import { GOOD_COUNT, GOOD_NAMES, Good } from '../data/economy';
+import { GOOD_COUNT, Good } from '../data/economy';
 import { adjectiveOf } from '../names';
-import type { Government, Polity, Settlement, TradeAgreement, War } from '../types';
+import type { Government, Polity, Settlement, War } from '../types';
 import { pairKey, type World } from '../world';
 import { controlRange } from './migration';
-import { runMilitary } from './military';
+import { updatePolicies } from './access';
+import { endAllDeals, runAgreements } from './agreements';
+import { raiseArmies } from './military';
 
 const GOV_STABILITY: Record<Government, number> = {
   tribe: 0.1, chiefdom: 0.03, 'city-state': 0.06, kingdom: 0.04, empire: -0.02, republic: 0.03, theocracy: 0.07,
@@ -18,9 +20,11 @@ export function runPolitics(world: World): void {
   updateGovernments(world);
   updateRulers(world);
   updateRelations(world);
-  tradeAgreements(world);
+  const pairs = contactPairs(world);
+  updatePolicies(world, pairs);
+  runAgreements(world, pairs);
   declareWars(world);
-  runMilitary(world);
+  raiseArmies(world);
   resolveWars(world);
   rebellions(world);
   unions(world);
@@ -133,7 +137,13 @@ function dissolve(world: World, p: Polity, text: string): void {
   p.dissolved = world.year;
   p.ruler.until = world.year;
   for (const wid of [...p.wars]) endWar(world, world.wars[wid], `${p.name} ceased to exist`);
-  for (const partner of [...p.agreements.keys()]) endAgreement(world, p.id, partner, `the ${p.name} ceased to exist`, false);
+  for (const partner of [...p.agreements.keys()]) for (const id of p.agreements.get(partner) ?? []) {
+    const d = world.agreements[id];
+    d.end = world.year;
+    d.endReason = `the ${p.name} ceased to exist`;
+    world.polities[partner].agreements.delete(p.id);
+  }
+  p.agreements.clear();
   world.hubsDirty = true;
   world.log('polity', p.pop > 5000 || p.settlementIds.length > 3 ? 3 : p.pop > 800 ? 2 : 1, text, { polities: [p.id] });
 }
@@ -229,7 +239,7 @@ function updateRulers(world: World): void {
   }
 }
 
-function contactPairs(world: World): [number, number][] {
+export function contactPairs(world: World): [number, number][] {
   const keys = new Set<number>();
   for (const k of world.borders.keys()) keys.add(k);
   for (const p of world.alivePolities()) for (const q of p.contacts.keys()) keys.add(pairKey(p.id, q));
@@ -314,7 +324,7 @@ export function startWar(world: World, A: Polity, B: Polity, cause: string): War
     conquered: [],
   };
   world.wars.push(war);
-  if (A.agreements.has(B.id)) endAgreement(world, A.id, B.id, 'war broke out between them', true);
+  endAllDeals(world, A.id, B.id, 'war broke out between them');
   A.wars.add(war.id);
   B.wars.add(war.id);
   const imp = A.pop + B.pop > 8000 && Math.min(A.pop, B.pop) > 1500 ? 3 : A.pop + B.pop > 2000 ? 2 : 1;
@@ -397,63 +407,6 @@ function resolveWars(world: World): void {
       world.log('peace', A.pop + B.pop > 8000 && Math.min(A.pop, B.pop) > 1500 ? 3 : A.pop + B.pop > 2000 ? 2 : 1, `The Treaty of ${place.name} ended ${war.name} after ${years} year${years === 1 ? '' : 's'} and ${war.battles} battle${war.battles === 1 ? '' : 's'}; ${outcome}.`, { polities: [A.id, B.id] });
     }
   }
-}
-
-/** Goods one nation has to spare that the other cannot produce enough of. */
-export function complementaryGoods(A: Polity, B: Polity): number[] {
-  const out: number[] = [];
-  for (let g = 0; g < GOOD_COUNT; g++) if (B.deficit[g] && A.produced[g] > A.needed[g] * 1.1) out.push(g);
-  return out;
-}
-
-/**
- * Trade agreements: friendly neighbours whose economies complement each other sign treaties
- * that open their borders to direct trade in the goods each lacks, and spare each other's
- * caravans the border tolls. War tears them up; souring relations let them lapse.
- */
-function tradeAgreements(world: World): void {
-  const rng = world.rng;
-  for (const [a, b] of contactPairs(world)) {
-    const A = world.polities[a];
-    const B = world.polities[b];
-    const rel = A.relations.get(b) ?? 0;
-    if (A.agreements.has(b)) {
-      if (rel < -0.1 && rng.chance(0.25)) endAgreement(world, a, b, 'relations soured', true);
-      continue;
-    }
-    if (rel < 0.15 || world.atWar(a, b) || A.settlementIds.length === 0 || B.settlementIds.length === 0) continue;
-    const aToB = complementaryGoods(A, B);
-    const bToA = complementaryGoods(B, A);
-    if (aToB.length + bToA.length === 0) continue;
-    const merc = (world.cultures[A.cultureId].values.mercantilism + world.cultures[B.cultureId].values.mercantilism) / 2;
-    if (!rng.chance(0.04 * (rel + 0.3) * (0.5 + merc) * Math.min(3, aToB.length + bToA.length))) continue;
-    const place = world.settlements[rng.chance(0.5) ? A.hubId : B.hubId];
-    const deal: TradeAgreement = {
-      id: world.agreements.length,
-      name: `the ${rng.pick(['Accord', 'Compact', 'Pact', 'Concord', 'Charter'])} of ${place.name}`,
-      a, b, start: world.year, end: null,
-      goods: [...new Set([...aToB, ...bToA].map((g) => GOOD_NAMES[g]))],
-    };
-    world.agreements.push(deal);
-    A.agreements.set(b, deal.id);
-    B.agreements.set(a, deal.id);
-    const what = (list: number[], from: Polity) => (list.length ? `${from.name}'s ${list.slice(0, 3).map((g) => GOOD_NAMES[g].toLowerCase()).join(', ')}` : '');
-    const terms = [what(aToB, A), what(bToA, B)].filter(Boolean).join(' for ');
-    world.log('agreement', A.pop + B.pop > 20000 ? 3 : 2, `The ${A.name} and the ${B.name} signed ${deal.name}, opening their borders to trade${terms ? `: ${terms}` : ''}.`, { polities: [a, b], settlements: [place.id] });
-  }
-}
-
-function endAgreement(world: World, a: number, b: number, reason: string, log: boolean): void {
-  const A = world.polities[a];
-  const B = world.polities[b];
-  const id = A.agreements.get(b);
-  if (id === undefined) return;
-  A.agreements.delete(b);
-  B.agreements.delete(a);
-  const deal = world.agreements[id];
-  deal.end = world.year;
-  deal.endReason = reason;
-  if (log) world.log('agreement', 2, `${deal.name.charAt(0).toUpperCase() + deal.name.slice(1)} between the ${A.name} and the ${B.name} was broken: ${reason}.`, { polities: [a, b] });
 }
 
 function rebellions(world: World): void {

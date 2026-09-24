@@ -114,7 +114,7 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px 24px;
+  gap: 10px 16px;
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -175,7 +175,7 @@ button.ghost {
   color: var(--ink-2);
 }
 .speed input {
-  width: 90px;
+  width: 64px;
   accent-color: var(--accent);
 }
 .speed output {
@@ -221,7 +221,7 @@ button.ghost {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 14px;
+  gap: 8px 10px;
   padding: 8px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -1042,4 +1042,66 @@ span.cat {
 }
 .tt-detail-head .cat {
   height: 18px;
+}
+
+/* real time & market */
+#realtime[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.mini-h {
+  margin: 6px 0 2px;
+  font: 700 11px var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.swatch-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+table.market td.up {
+  color: var(--crit);
+}
+table.market td.down {
+  color: var(--ok);
+}
+.policy-grid td {
+  white-space: nowrap;
+}
+
+.controls button {
+  padding: 5px 9px;
+}
+.stats dd {
+  font-size: 15px;
+}
+span.need {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: var(--line);
+  vertical-align: middle;
+}
+span.need.crit { background: var(--crit); }
+span.need.warn { background: var(--warn); }
+span.need.ok { background: var(--ok); }
+.legend-line {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+}
+table.market th,
+table.market td {
+  padding: 5px 4px;
+  white-space: nowrap;
 }

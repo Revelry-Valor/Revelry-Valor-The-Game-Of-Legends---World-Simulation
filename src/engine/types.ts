@@ -139,32 +139,76 @@ export interface TradeLink {
   volume: number;
   /** A road from a settlement to its nation's hub (largest settlement). */
   hub?: boolean;
-  /** How the link traded last year: within a nation, under a trade agreement, or not at all. */
-  kind: 'internal' | 'treaty' | 'closed';
+  /** Whether goods moved along it last year: only within a nation. */
+  kind: 'internal' | 'closed';
 }
 
-export type TradeKind = 'internal' | 'treaty' | 'caravan';
+export type TradeKind = 'internal' | 'caravan' | 'convoy';
 
-/** A free-trader caravan carrying one cargo from market to market for profit. */
+/** What a nation lets another nation's traders do. */
+export type AccessPolicy = 'open' | 'tolled' | 'transit' | 'closed';
+
+export type CaravanKind = 'merchant' | 'family' | 'nomad' | 'convoy';
+
+export interface Cargo {
+  good: number;
+  qty: number;
+  /** Value per unit where it was loaded. */
+  cost: number;
+}
+
+/**
+ * Anything that carries goods across the map: free traders (merchant caravans, trading-family
+ * caravans, nomad caravan tribes) and state convoys running a trade agreement.
+ */
 export interface Caravan {
   id: number;
-  /** Settlement whose merchants own the caravan. */
+  kind: CaravanKind;
+  name: string;
+  /** Settlement the caravan belongs to. */
   homeId: number;
   polityId: number;
+  houseId: number;
+  dealId: number;
   fromId: number;
   toId: number;
   path: number[];
-  /** Index of the tile the caravan is on. */
+  /** Index of the tile the caravan is on, and where it was last month (for smooth drawing). */
   step: number;
-  good: number;
-  qty: number;
-  /** Price paid per unit at the market of origin. */
-  cost: number;
-  /** Terrain cost of the route. */
+  prevStep: number;
+  cargo: Cargo[];
+  /** Pack animals, wagons or ships' holds. */
+  size: number;
+  /** Value it can carry at base prices. */
+  capacity: number;
+  /** Coin carried to buy with. */
+  purse: number;
   tripCost: number;
+  /** Nomads wander several markets before going home. */
+  legs: number;
   returning: boolean;
-  /** Year the caravan set out. */
   started: number;
+}
+
+/** A merchant family whose caravans grow with its fortune. */
+export interface TradingHouse {
+  id: number;
+  name: string;
+  homeId: number;
+  wealth: number;
+  founded: number;
+  closed: number | null;
+  trips: number;
+}
+
+/** A trade route in use by free traders or convoys (roads are separate). */
+export interface TradeRoute {
+  a: number;
+  b: number;
+  path: number[];
+  kind: 'caravan' | 'convoy';
+  volume: number;
+  lastYear: number;
 }
 
 export interface Army {
@@ -181,24 +225,40 @@ export interface Army {
   targetArmy: number;
   path: number[];
   step: number;
-  /** Years spent besieging the current target. */
+  /** Tile at the start of the month, for smooth drawing. */
+  prevTile: number;
+  /** Months spent besieging the current target. */
   siege: number;
   victories: number;
-  /** Year of its last field battle (one per year). */
+  /** Month (year * 12 + month) of its last field battle. */
   fought: number;
   alive: boolean;
 }
 
 export interface TradeAgreement {
   id: number;
+  /**
+   * market: open borders to each other's free traders, no tolls.
+   * transit: a (grantor) lets b's traders cross its lands.
+   * convoy: a state deal; a sends giveQty of giveGood to b each year, b pays in getGood or coin.
+   */
+  type: 'market' | 'transit' | 'convoy';
   name: string;
   a: number;
   b: number;
   start: number;
   end: number | null;
-  /** Goods each side was short of when it was signed. */
   goods: string[];
   endReason?: string;
+  giveGood?: number;
+  giveQty?: number;
+  getGood?: number;
+  getQty?: number;
+  /** Coin paid per year instead of goods. */
+  coin?: number;
+  /** Convoy road between the two hubs, re-surveyed now and then. */
+  route?: number[];
+  routeYear?: number;
 }
 
 /** Aggregated modifiers from a culture's environmental traits. */
@@ -254,6 +314,10 @@ export interface Settlement {
   tributeIn: number;
   /** Value traded last year by kind. */
   tradeByKind: Record<TradeKind, number>;
+  /** Value of caravan goods passing through last year. */
+  transit: number;
+  /** Prices a year ago, for market trends. */
+  lastPrice: Float64Array;
   coastal: boolean;
   river: boolean;
   landmass: number;
@@ -331,8 +395,12 @@ export interface Polity {
   parentPolity: number;
   /** Largest settlement: the hub internal trade and roads converge on. */
   hubId: number;
-  /** Partner polity id -> agreement id. */
-  agreements: Map<number, number>;
+  /** Partner polity id -> agreement ids (market, transit, convoy). */
+  agreements: Map<number, number[]>;
+  /** How this nation treats each other nation's traders (default tolled). */
+  policy: Map<number, AccessPolicy>;
+  /** Nations whose trade this nation blocks from passing through. */
+  embargoes: Set<number>;
   /** National totals last year per good. */
   produced: Float64Array;
   needed: Float64Array;
@@ -382,7 +450,9 @@ export type EventKind =
   | 'milestone'
   | 'agreement'
   | 'army'
-  | 'caravan';
+  | 'caravan'
+  | 'road'
+  | 'house';
 
 export interface HistoryEvent {
   year: number;
@@ -405,4 +475,8 @@ export interface YearStats {
   byRace: Record<string, number>;
   wars: number;
   tradeVolume: number;
+  coinTrade: number;
+  barterTrade: number;
+  caravans: number;
+  armies: number;
 }

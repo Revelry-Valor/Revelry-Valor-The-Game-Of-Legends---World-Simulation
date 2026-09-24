@@ -32,7 +32,7 @@ function searchLinks(world: World, s: Settlement, found: Map<number, TradeLink>)
     const path = pf.pathTo(r.tile);
     let isSea = false;
     for (const t of path) if (map.elevation[t] < 0) isSea = true;
-    found.set(key, { a: Math.min(s.id, r.id), b: Math.max(s.id, r.id), cost: r.cost, path, sea: isSea, volume: existing?.volume ?? 0, kind: 'closed' });
+    found.set(key, { a: Math.min(s.id, r.id), b: Math.max(s.id, r.id), cost: r.cost, path, sea: isSea, volume: existing?.volume ?? 0, kind: 'internal' });
   }
 }
 
@@ -90,7 +90,9 @@ export function buildHubLinks(world: World): void {
     let remaining = members.size;
     const reach = 45 + p.effects.roads * 20 + p.effects.seaTravel * 10;
     const hits: number[] = [];
+    let explored = 0;
     pf.run(hub.tile, reach, p.effects.seaTravel, (tile) => {
+      if (++explored > 8000) return true;
       const o = map.settlementAt[tile];
       if (o >= 0 && members.has(o)) {
         hits.push(tile);
@@ -114,28 +116,28 @@ export function buildHubLinks(world: World): void {
   world.lastHubBuild = world.year;
 }
 
-/** Can goods cross this link this year, and on what terms? */
-export function linkKind(world: World, A: Settlement, B: Settlement): TradeLink['kind'] {
-  if (A.polityId === B.polityId) return 'internal';
-  const pa = world.polities[A.polityId];
-  if (pa.agreements.has(B.polityId) && !world.atWar(A.polityId, B.polityId)) return 'treaty';
-  return 'closed';
+/** Settlement-level trade happens only inside a nation; foreign goods travel with caravans and convoys. */
+export function linkKind(A: Settlement, B: Settlement): TradeLink['kind'] {
+  return A.polityId === B.polityId ? 'internal' : 'closed';
 }
 
-export function hasAgreement(world: World, a: Polity, b: Polity): boolean {
-  return a.id === b.id || a.agreements.has(b.id);
+/** Whether a nation's people pay in coin (after Currency) or barter goods for goods. */
+export function usesCoin(p: Polity): boolean {
+  return p.techs.has('currency');
 }
 
 /**
- * Settlement-to-settlement trade along roads and sea lanes.
- * - Internal: within a nation, cheap and plentiful, flowing along the roads to the hub.
- * - Treaty: across a border only under a trade agreement, and only for goods the buying
- *   nation cannot produce enough of itself — nations stay self-reliant and trade for needs.
- * Everything else crosses borders only with free-trader caravans (see caravans.ts).
+ * Internal trade: the everyday exchange between a nation's own towns and villages, along
+ * neighbour roads and the roads to the nation's hub. Goods flow from where they are plentiful
+ * to where they are needed. Before coinage it is barter — clumsier, so less of it happens.
+ * The traffic it carries is what builds the nation's roads.
  */
 export function runTrade(world: World): void {
   for (const p of world.alivePolities()) p.imported.fill(0);
-  for (const s of world.aliveSettlements()) s.tradeByKind = { internal: 0, treaty: 0, caravan: 0 };
+  for (const s of world.aliveSettlements()) {
+    s.tradeByKind = { internal: 0, caravan: 0, convoy: 0 };
+    s.lastPrice.set(s.price);
+  }
   const all = [...world.links, ...world.hubLinks];
   const order = all.map((_, i) => i);
   world.rng.shuffle(order);
@@ -146,22 +148,18 @@ export function runTrade(world: World): void {
     const B = world.settlements[link.b];
     link.volume *= 0.5;
     if (!A.alive || !B.alive) continue;
-    const kind = linkKind(world, A, B);
-    link.kind = kind;
-    if (kind === 'closed') continue;
+    link.kind = linkKind(A, B);
+    if (link.kind === 'closed') continue;
     const pa = world.polities[A.polityId];
-    const pb = world.polities[B.polityId];
     const ca = world.cultures[A.cultureId];
     const cb = world.cultures[B.cultureId];
-    const eff = (pa.effects.tradeEff + pb.effects.tradeEff) / 2;
+    const coin = usesCoin(pa);
+    const eff = pa.effects.tradeEff;
     const merc = (ca.values.mercantilism + cb.values.mercantilism) / 2;
     const traitBonus = 1 + (ca.traitEffects.tradeCapacity + cb.traitEffects.tradeCapacity) / 2;
-    const internal = kind === 'internal';
-    const transport = (link.cost * (internal ? 0.008 : 0.012)) / (1 + eff);
+    const transport = (link.cost * 0.008) / (1 + eff);
     const size = Math.sqrt(A.pop * B.pop);
-    let capacity = internal
-      ? (40 + size * 0.45) * (1 + eff) * (0.7 + merc * 0.6) * (link.hub ? 1.3 : 1) * traitBonus
-      : (20 + size * 0.25) * (1 + eff) * (0.6 + merc) * traitBonus;
+    let capacity = (40 + size * 0.45) * (1 + eff) * (0.7 + merc * 0.6) * (link.hub ? 1.3 : 1) * traitBonus * (coin ? 1 : 0.7);
     let volume = 0;
     const start = world.rng.int(0, GOOD_COUNT - 1);
     for (let n = 0; n < GOOD_COUNT && capacity > 0; n++) {
@@ -175,8 +173,6 @@ export function runTrade(world: World): void {
         src = B;
         dst = A;
       } else continue;
-      const dstPolity = world.polities[dst.polityId];
-      if (!internal && !dstPolity.deficit[g]) continue;
       const surplus = Math.max(0, src.stock[g] - src.target[g] * 0.6);
       const want = Math.max(0, dst.target[g] * 1.3 - dst.stock[g]);
       let q = Math.min(surplus, want) * 0.5;
@@ -187,30 +183,27 @@ export function runTrade(world: World): void {
       dst.stock[g] += q;
       src.exported[g] += q;
       dst.imported[g] += q;
-      if (!internal) dstPolity.imported[g] += q;
       const value = q * GOOD_BASE_PRICE[g];
       capacity -= value;
       volume += value;
       const profit = q * margin;
       src.wealth += profit * 0.6 + value * 0.05;
       dst.wealth += profit * 0.4;
-      src.tradeByKind[kind] += value;
-      dst.tradeByKind[kind] += value;
+      src.tradeByKind.internal += value;
+      dst.tradeByKind.internal += value;
       reprice(src, g);
       reprice(dst, g);
     }
     link.volume += volume;
     total += volume;
-    if (volume > 0 && !internal) {
-      pa.contacts.set(pb.id, (pa.contacts.get(pb.id) ?? 0) + volume);
-      pb.contacts.set(pa.id, (pb.contacts.get(pa.id) ?? 0) + volume);
-    }
+    if (coin) world.coinTrade += volume;
+    else world.barterTrade += volume;
   }
   world.tradeVolume = total;
-  // Traffic wears paths into the land; the roads to the hub carry the most.
+  // Traffic wears roads into the land; the roads to the hub carry the most.
   const traffic = world.map.traffic;
   for (const link of all) {
-    if (link.volume <= 0) continue;
+    if (link.volume <= 0 || link.kind !== 'internal') continue;
     const w = link.hub ? link.volume * 2 : link.volume;
     for (const t of link.path) traffic[t] += w;
   }
@@ -252,20 +245,4 @@ export function reprice(s: Settlement, g: Good): void {
   const e = Math.max(0.5, s.target[g] * 0.05);
   const ratio = (s.target[g] + e) / (s.stock[g] + e);
   s.price[g] = GOOD_BASE_PRICE[g] * Math.pow(Math.min(5, Math.max(0.2, ratio)), 0.8);
-}
-
-/** Busy routes become trails, then paved roads and highways where the polity knows how. */
-export function updateRoads(world: World): void {
-  const map = world.map;
-  for (let i = 0; i < map.size; i++) {
-    const t = map.traffic[i];
-    if (t <= 0 && map.road[i] <= 0) continue;
-    map.traffic[i] = t * 0.6;
-    if (map.elevation[i] < 0) continue;
-    const o = map.owner[i];
-    const maxRoad = 0.4 + (o >= 0 ? world.polities[world.settlements[o].polityId].effects.roads : 0);
-    const want = Math.min(maxRoad, Math.log10(1 + t / 150) * 0.6);
-    map.road[i] = want > map.road[i] ? map.road[i] + (want - map.road[i]) * 0.5 : map.road[i] * 0.97;
-    if (map.road[i] < 0.02) map.road[i] = 0;
-  }
 }

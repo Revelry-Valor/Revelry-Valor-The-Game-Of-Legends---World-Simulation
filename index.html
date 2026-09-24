@@ -19,6 +19,7 @@
       </div>
       <div class="controls" role="group" aria-label="Time">
         <button id="play" class="primary" type="button" aria-pressed="false">Play</button>
+        <button id="realtime" type="button" aria-pressed="false" title="Advance month by month and watch armies and caravans move">Real time</button>
         <button id="step1" type="button">+1 yr</button>
         <button id="step10" type="button">+10</button>
         <button id="step100" type="button">+100</button>
@@ -46,12 +47,13 @@
           <label class="toggle" for="t-routes"><input id="t-routes" type="checkbox" /> Trade routes</label>
           <label class="toggle" for="t-labels"><input id="t-labels" type="checkbox" /> Names</label>
           <label class="toggle" for="t-ruins"><input id="t-ruins" type="checkbox" /> Ruins</label>
+          <label class="toggle" for="t-roads"><input id="t-roads" type="checkbox" /> Roads</label>
           <label class="toggle" for="t-caravans"><input id="t-caravans" type="checkbox" /> Caravans</label>
           <label class="toggle" for="t-armies"><input id="t-armies" type="checkbox" /> Armies</label>
           <button id="fit" type="button" class="ghost">Fit map</button>
         </div>
         <canvas id="map"></canvas>
-        <p class="hint">Scroll to zoom · drag to pan · click to inspect · ◆ capital · ▲ army · ● caravan</p>
+        <p class="hint">Scroll to zoom · drag to pan · click to inspect · ◆ capital · ▲ army · ● caravan · ■ convoy · ✕ battle</p>
         <p id="busy" class="busy" hidden></p>
         <div id="overlay" class="overlay" hidden>
           <div class="overlay-bar">
@@ -66,6 +68,7 @@
       <aside class="side">
         <nav class="tabs" role="tablist" aria-label="Panels">
           <button type="button" role="tab" data-tab="inspect">Inspect</button>
+          <button type="button" role="tab" data-tab="market">Market</button>
           <button type="button" role="tab" data-tab="realms">Realms</button>
           <button type="button" role="tab" data-tab="peoples">Peoples</button>
           <button type="button" role="tab" data-tab="chronicle">Chronicle</button>

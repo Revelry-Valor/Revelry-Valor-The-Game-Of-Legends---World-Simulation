@@ -4,19 +4,21 @@ import { combineTraits } from './data/traits';
 import { NameBook, adjectiveOf, deriveLanguage, mutateLanguage, randomColor } from './names';
 import { Pathfinder } from './pathfinding';
 import { Rng } from './rng';
-import { runCaravans } from './systems/caravans';
+import { caravansMonth, planCaravans } from './systems/caravans';
 import { runCulture } from './systems/culture';
 import { runConsumption, runProduction } from './systems/economy';
 import { runEvents } from './systems/events';
 import { runMigration } from './systems/migration';
+import { militaryMonth } from './systems/military';
+import { updateRoads } from './systems/roads';
 import { runPolitics } from './systems/politics';
 import { placePeoples } from './systems/setup';
 import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
-import { buildHubLinks, buildTradeLinks, runTrade, runTribute, updateRoads } from './systems/trade';
+import { buildHubLinks, buildTradeLinks, runTrade, runTribute } from './systems/trade';
 import type {
   Army, Caravan, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
-  Settlement, TradeAgreement, TradeLink, War, WorldConfig, YearStats,
+  Settlement, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
 } from './types';
 import { VALUE_KEYS } from './types';
 import { generateMap } from './worldgen';
@@ -46,6 +48,15 @@ export class World {
   /** Roads from each settlement to its nation's hub. */
   hubLinks: TradeLink[] = [];
   caravans: Caravan[] = [];
+  houses: TradingHouse[] = [];
+  /** Routes travelled by free traders and convoys, keyed by settlement pair. */
+  routes = new Map<number, TradeRoute>();
+  /** Recent battles and sieges, for drawing on the map. */
+  battleMarks: { tile: number; at: number; size: number; kind: 'battle' | 'capture' }[] = [];
+  /** Month within the year, 0-11. The yearly systems run as month 11 ends. */
+  month = 0;
+  coinTrade = 0;
+  barterTrade = 0;
   armies: Army[] = [];
   agreements: TradeAgreement[] = [];
   nextCaravanId = 0;
@@ -84,29 +95,53 @@ export class World {
 
   // ---------------------------------------------------------------- main loop
 
-  /** Advance the world by one year. */
+  /** Months elapsed since the world began. */
+  get monthIndex(): number {
+    return this.year * 12 + this.month;
+  }
+
+  /** Advance one month: armies march and fight, caravans travel and trade. At year's end the yearly systems run. */
+  stepMonth(): void {
+    militaryMonth(this);
+    caravansMonth(this);
+    this.month++;
+    if (this.month === 12) {
+      this.month = 0;
+      this.yearly();
+    }
+  }
+
+  /** Advance to the start of the next year. */
   tick(): void {
+    do this.stepMonth();
+    while (this.month !== 0);
+  }
+
+  private yearly(): void {
     this.year++;
+    this.battleMarks = this.battleMarks.filter((b) => this.monthIndex - b.at < 24);
     if (this.territoryDirty || this.year % 5 === 0) updateTerritory(this);
+    updateRoads(this);
     if (this.year % 10 === 0) {
-      updateRoads(this);
       buildTradeLinks(this, true);
       buildHubLinks(this);
     } else {
       if (this.linksDirty) buildTradeLinks(this, false);
-      if (this.hubsDirty && this.year - this.lastHubBuild >= 5) buildHubLinks(this);
+      if (this.hubsDirty && this.year - this.lastHubBuild >= 8) buildHubLinks(this);
     }
     runEvents(this);
     runProduction(this);
     runTrade(this);
-    runCaravans(this);
     runTribute(this);
     runConsumption(this);
     runMigration(this);
     runCulture(this);
     runPolitics(this);
     runTechnology(this);
+    planCaravans(this);
     this.recordStats();
+    this.coinTrade = 0;
+    this.barterTrade = 0;
   }
 
   run(years: number): void {
@@ -233,7 +268,9 @@ export class World {
       resSum: new Float64Array(RES_COUNT),
       habitat: 0,
       tributeIn: 0,
-      tradeByKind: { internal: 0, treaty: 0, caravan: 0 },
+      tradeByKind: { internal: 0, caravan: 0, convoy: 0 },
+      transit: 0,
+      lastPrice: Float64Array.from(GOOD_BASE_PRICE),
       coastal: map.coastal[tile] === 1,
       river: map.river[tile] > 0,
       landmass: map.landmass[tile],
@@ -288,6 +325,8 @@ export class World {
       parentPolity,
       hubId: capital.id,
       agreements: new Map(),
+      policy: new Map(),
+      embargoes: new Set(),
       produced: new Float64Array(GOOD_COUNT),
       needed: new Float64Array(GOOD_COUNT),
       imported: new Float64Array(GOOD_COUNT),
@@ -392,7 +431,10 @@ export class World {
     for (const c of this.cultures) if (c.alive) cultures++;
     let wars = 0;
     for (const w of this.wars) if (w.end === null) wars++;
-    this.stats.push({ year: this.year, population, settlements, polities, cultures, byRace, wars, tradeVolume: this.tradeVolume });
+    this.stats.push({
+      year: this.year, population, settlements, polities, cultures, byRace, wars, tradeVolume: this.tradeVolume,
+      coinTrade: this.coinTrade, barterTrade: this.barterTrade, caravans: this.caravans.length, armies: this.armies.length,
+    });
   }
 }
 
