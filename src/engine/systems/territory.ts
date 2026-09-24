@@ -57,9 +57,14 @@ export function updateTerritory(world: World): void {
     for (let r = 0; r < RES_COUNT; r++) s.resSum[r] += R[r][j];
   }
   for (const s of alive) {
-    const habitat = world.majorityRace(s).habitat;
+    // Food from land most peoples find barren: the race's own gifts plus what its culture has learned.
+    const habitat = world.majorityRace(s).habitat ?? {};
+    const learned = world.cultures[s.cultureId].traitEffects.habitat;
     s.habitat = 0;
-    if (habitat) for (const j of s.territory) s.habitat += habitat[BIOMES[map.biome[j]].key] ?? 0;
+    for (const j of s.territory) {
+      const key = BIOMES[map.biome[j]].key;
+      s.habitat += (habitat[key] ?? 0) + (learned[key] ?? 0);
+    }
     s.river = false;
     for (const j of s.territory) if (map.river[j] > 0 && Math.abs((j % w) - s.x) <= 1 && Math.abs(Math.floor(j / w) - s.y) <= 1) s.river = true;
   }

@@ -9,7 +9,10 @@ import type { EventKind, HistoryEvent, RaceDef, WorldConfig } from '../engine/ty
 import { VALUE_KEYS } from '../engine/types';
 import { World } from '../engine/world';
 import { lineChart, compact } from './chart';
+import { mountNationCharts, renderNation } from './nation';
 import { MapRenderer, type MapLayer, type ViewState } from './render';
+import { mountTechTree, techDetail } from './techtree';
+import { TRAITS, TRAIT_BY_ID } from '../engine/data/traits';
 
 type Tab = 'inspect' | 'realms' | 'peoples' | 'chronicle' | 'charts' | 'setup';
 
@@ -49,6 +52,11 @@ let selectedCulture = -1;
 /** Until the user pans or zooms, keep the whole map fitted to the pane. */
 let autoFit = true;
 const chronicleFilter = { importance: 2, kind: 'all', text: '' };
+/** Full-screen views over the map: a nation dossier or the tech tree. */
+let overlay: 'nation' | 'tech' | null = null;
+let overlayPolity = -1;
+let selectedTech: string | null = null;
+let lastOverlay = 0;
 
 const view: ViewState = {
   layer: 'political',
@@ -56,6 +64,8 @@ const view: ViewState = {
   showRoutes: true,
   showLabels: true,
   showRuins: true,
+  showCaravans: true,
+  showArmies: true,
   zoom: 4,
   ox: 0,
   oy: 0,
@@ -256,7 +266,7 @@ resSel.addEventListener('change', () => {
   renderer.invalidate();
   drawMap();
 });
-for (const [id, key] of [['t-routes', 'showRoutes'], ['t-labels', 'showLabels'], ['t-ruins', 'showRuins']] as const) {
+for (const [id, key] of [['t-routes', 'showRoutes'], ['t-labels', 'showLabels'], ['t-ruins', 'showRuins'], ['t-caravans', 'showCaravans'], ['t-armies', 'showArmies']] as const) {
   const box = $<HTMLInputElement>(id);
   box.checked = view[key];
   box.addEventListener('change', () => {
@@ -282,9 +292,16 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('[data-tab]')) b.ad
 
 const panel = $('panel');
 panel.addEventListener('click', (e) => {
-  const a = (e.target as HTMLElement).closest<HTMLElement>('[data-s],[data-p],[data-c],[data-e]');
+  const a = (e.target as HTMLElement).closest<HTMLElement>('[data-s],[data-p],[data-c],[data-e],[data-nation],[data-tech-for]');
   if (!a) return;
   e.preventDefault();
+  followLink(a);
+});
+
+function followLink(a: HTMLElement): void {
+  if (a.dataset.nation) return openOverlay('nation', Number(a.dataset.nation));
+  if (a.dataset.techFor) return openOverlay('tech', Number(a.dataset.techFor));
+  closeOverlay();
   if (a.dataset.s) {
     const s = world.settlements[Number(a.dataset.s)];
     view.selectedSettlement = s.id;
@@ -321,6 +338,101 @@ panel.addEventListener('click', (e) => {
   renderer.invalidate();
   drawMap();
   setTab('inspect');
+}
+
+// ------------------------------------------------------------------ overlays
+
+const overlayEl = $('overlay');
+const overlayBody = $('overlay-body');
+const overlaySel = $<HTMLSelectElement>('overlay-nation');
+const ttDetail = $('tt-detail');
+
+function helpers() {
+  return { esc, sLink, pLink, cLink, meter, eventList };
+}
+
+function openOverlay(mode: 'nation' | 'tech', polityId = view.selectedPolity): void {
+  overlay = mode;
+  if (polityId < 0 || !world.polities[polityId]) {
+    const biggest = [...world.alivePolities()].sort((a, b) => b.pop - a.pop)[0];
+    polityId = mode === 'nation' ? (biggest?.id ?? -1) : -1;
+  }
+  overlayPolity = polityId;
+  overlayEl.hidden = false;
+  overlayBody.scrollTop = 0;
+  renderOverlay(true);
+}
+
+function closeOverlay(): void {
+  if (!overlay) return;
+  overlay = null;
+  overlayEl.hidden = true;
+  ttDetail.hidden = true;
+}
+
+function renderOverlay(full: boolean): void {
+  if (!overlay) return;
+  lastOverlay = performance.now();
+  const alive = [...world.alivePolities()].sort((a, b) => b.pop - a.pop);
+  const current = world.polities[overlayPolity];
+  const options = alive.map((p) => `<option value="${p.id}">${esc(p.name)} (${compact(p.pop)})</option>`);
+  if (current && !current.alive) options.unshift(`<option value="${current.id}">${esc(current.name)} (fallen)</option>`);
+  if (overlay === 'tech') options.unshift('<option value="-1">The whole world</option>');
+  overlaySel.innerHTML = options.join('');
+  overlaySel.value = String(overlayPolity);
+  $('overlay-title').textContent = overlay === 'nation' ? 'Nation' : 'Tech tree';
+  for (const b of document.querySelectorAll<HTMLButtonElement>('[data-overlay]')) b.setAttribute('aria-pressed', String(b.dataset.overlay === overlay));
+  const scrollTop = overlayBody.scrollTop;
+  if (overlay === 'nation') {
+    ttDetail.hidden = true;
+    if (overlayPolity < 0) {
+      overlayBody.innerHTML = '<p class="muted">No nations remain.</p>';
+      return;
+    }
+    overlayBody.innerHTML = `<div class="dossier">${renderNation(world, overlayPolity, helpers())}</div>`;
+    mountNationCharts(world, overlayPolity);
+  } else {
+    const scroller = overlayBody.querySelector('.tt-scroll');
+    const left = scroller?.scrollLeft ?? 0;
+    overlayBody.innerHTML = `<div class="tt-legend">
+      <span><i class="sw known"></i>Known</span><span><i class="sw researching"></i>Researching</span><span><i class="sw available"></i>Can research</span>
+      <span><i class="sw blocked"></i>Missing a resource</span><span><i class="sw locked"></i>Locked</span>
+      <span class="cats">${['agriculture', 'industry', 'military', 'maritime', 'society', 'science', 'arcane'].map((c) => `<i class="cat c-${c}"></i>${c}`).join(' ')}</span>
+      <span class="muted">Select a tech to trace the path to it.</span></div><div id="tt-host"></div>`;
+    mountTechTree($('tt-host'), world, overlayPolity, selectedTech, (id) => {
+      selectedTech = selectedTech === id ? null : id;
+      renderOverlay(true);
+    }, esc);
+    const sc = overlayBody.querySelector('.tt-scroll');
+    if (sc) sc.scrollLeft = left;
+    ttDetail.hidden = !selectedTech;
+    if (selectedTech) ttDetail.innerHTML = techDetail(world, overlayPolity, selectedTech, esc, pLink);
+  }
+  if (!full) overlayBody.scrollTop = scrollTop;
+}
+
+overlaySel.addEventListener('change', () => {
+  overlayPolity = Number(overlaySel.value);
+  renderOverlay(true);
+});
+$('overlay-close').addEventListener('click', closeOverlay);
+for (const b of document.querySelectorAll<HTMLButtonElement>('[data-overlay]')) {
+  b.addEventListener('click', () => (overlay === b.dataset.overlay ? closeOverlay() : openOverlay(b.dataset.overlay as 'nation' | 'tech', overlay ? overlayPolity : view.selectedPolity)));
+}
+for (const el of [overlayBody, ttDetail]) {
+  el.addEventListener('click', (e) => {
+    const a = (e.target as HTMLElement).closest<HTMLElement>('[data-s],[data-p],[data-c],[data-e],[data-tech-for]');
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.p) {
+      openOverlay(overlay ?? 'nation', Number(a.dataset.p));
+      return;
+    }
+    followLink(a);
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeOverlay();
 });
 
 const sLink = (id: number) => {
@@ -361,7 +473,10 @@ function renderSettlement(id: number): string {
   const labor = [...s.labor].map((l, k) => [k, l] as const).filter(([, l]) => l > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const totalLabor = labor.reduce((a, [, l]) => a + l, 0) || 1;
   const events = world.history.filter((e) => e.settlements?.includes(id));
-  const partners = s.links.map((li) => world.links[li]).map((l) => ({ o: l.a === id ? l.b : l.a, v: l.volume, sea: l.sea })).filter((x) => world.settlements[x.o].alive).sort((a, b) => b.v - a.v);
+  const allLinks = [...s.links.map((li) => world.links[li]), ...world.hubLinks.filter((l) => l.a === id || l.b === id)];
+  const partners = allLinks.map((l) => ({ o: l.a === id ? l.b : l.a, v: l.volume, sea: l.sea, kind: l.kind, hub: !!l.hub })).filter((x) => world.settlements[x.o].alive).sort((a, b) => b.v - a.v);
+  const KIND_LABEL = { internal: 'internal', treaty: 'treaty', closed: 'border closed' } as const;
+  const caravans = world.caravans.filter((c) => c.homeId === id);
   return `
     <header class="head">
       <p class="eyebrow">${s.alive ? settlementTier(s.pop) : 'Ruins'}${p.capitalId === id && s.alive ? ' · Capital' : ''}</p>
@@ -384,7 +499,11 @@ function renderSettlement(id: number): string {
       <p><span class="k">Imports</span> ${top(s.imported).map(([g]) => GOOD_NAMES[g]).join(', ') || '—'}</p>
       <p><span class="k">Tools</span> ${['stone', 'copper', 'bronze', 'iron', 'steel'][Math.round(s.toolQuality)]} · <span class="k">Arms</span> ${['stone', 'copper', 'bronze', 'iron', 'steel'][Math.round(s.weaponQuality)]}</p>
     </section>
-    <section><h3>Trade partners</h3>${partners.length ? `<ul class="plain">${partners.slice(0, 6).map((x) => `<li>${sLink(x.o)} <span class="muted">${x.sea ? 'by sea' : 'overland'} · ${compact(x.v)} silver/yr</span></li>`).join('')}</ul>` : '<p class="muted">Isolated.</p>'}</section>` : ''}
+    <section><h3>Trade</h3>
+      <p class="small"><span class="k">Internal</span> ${compact(s.tradeByKind.internal)} · <span class="k">Treaty</span> ${compact(s.tradeByKind.treaty)} · <span class="k">Caravans</span> ${compact(s.tradeByKind.caravan)} <span class="muted">silver/yr</span></p>
+      ${partners.length ? `<ul class="plain">${partners.slice(0, 8).map((x) => `<li>${sLink(x.o)} <span class="chip ${x.kind === 'treaty' ? 'ok' : x.kind === 'closed' ? 'warn' : ''}">${x.hub ? 'road to hub' : KIND_LABEL[x.kind]}</span> <span class="muted small">${x.sea ? 'by sea' : 'overland'} · ${compact(x.v)}/yr</span></li>`).join('')}</ul>` : '<p class="muted">Isolated.</p>'}
+      ${caravans.length ? `<p class="small">${caravans.length} caravan${caravans.length > 1 ? 's' : ''} on the road: ${caravans.map((c) => `${GOOD_NAMES[c.good].toLowerCase()} ${c.returning ? 'coming home from' : 'bound for'} ${sLink(c.returning ? c.fromId : c.toId)}`).join('; ')}.</p>` : ''}
+    </section>` : ''}
     ${s.greatWorks.length ? `<section><h3>Great works</h3><p>${s.greatWorks.map(esc).join(' · ')}</p></section>` : ''}
     <section><h3>Local history</h3>${eventList(events, 15)}</section>`;
 }
@@ -403,6 +522,7 @@ function renderPolity(id: number): string {
       <p class="eyebrow">${p.alive ? `${p.government} · ${polityEra(p)}` : `Fallen realm · ${p.founded}–${p.dissolved}`}</p>
       <h2><span class="dot big" style="background:${p.color}"></span>${esc(p.name)}</h2>
       <p class="sub">${cLink(p.cultureId)} culture · capital ${sLink(p.capitalId)}${p.parentPolity >= 0 ? ` · broke from ${pLink(p.parentPolity)}` : ''}</p>
+      <p class="actions"><button type="button" data-nation="${id}">Open nation view</button> <button type="button" data-tech-for="${id}">Tech tree</button></p>
     </header>
     <dl class="facts">
       <div><dt>Population</dt><dd>${fmt(p.pop)}</dd></div>
@@ -446,6 +566,16 @@ function renderCulture(id: number): string {
       <div><dt>Arose</dt><dd>Year ${c.founded}</dd></div>
       <div><dt>Parent</dt><dd>${c.parentId >= 0 ? cLink(c.parentId) : 'Ancestral'}</dd></div>
     </dl>
+    <section><h3>Survival traits</h3>
+      ${c.traits.length ? c.traits.map((t) => {
+        const d = TRAIT_BY_ID.get(t);
+        return `<p><span class="chip trait">${esc(d?.name ?? t)}</span> <span class="small">${esc(d?.description ?? '')}</span></p>`;
+      }).join('') : '<p class="muted small">None yet. Traits develop over generations from the land and life a people lives.</p>'}
+      ${(() => {
+        const growing = TRAITS.filter((t) => !c.traits.includes(t.id) && (c.exposure[t.id] ?? 0) > 0.1).sort((a, b) => (c.exposure[b.id] ?? 0) - (c.exposure[a.id] ?? 0)).slice(0, 4);
+        return growing.length ? `<p class="muted small">Adapting towards:</p>${growing.map((t) => meter(t.name, Math.min(1, c.exposure[t.id] ?? 0))).join('')}` : '';
+      })()}
+    </section>
     <section><h3>Values</h3>${VALUE_KEYS.map((k) => meter(k.charAt(0).toUpperCase() + k.slice(1), c.values[k])).join('')}</section>
     <section><h3>Tongue</h3><p>Sounds like: <i>${sample.map(esc).join(', ')}</i></p><p class="muted">Place-name endings: ${c.language.settlementSuffixes.map((x) => `-${esc(x)}`).join(', ')}</p></section>
     ${daughters.length ? `<section><h3>Daughter cultures</h3><p>${daughters.map((d) => cLink(d.id)).join(', ')}</p></section>` : ''}
@@ -479,8 +609,8 @@ function renderRealms(): string {
   return `
     <header class="head"><h2>Realms</h2><p class="sub">${alive.length} living realms, ${wars.length} at war. Select one to see its rulers, knowledge and history.</p></header>
     <div class="table-wrap"><table>
-      <thead><tr><th>Realm</th><th class="num">People</th><th class="num">Towns</th><th>Era</th></tr></thead>
-      <tbody>${alive.slice(0, 80).map((p) => `<tr><td>${pLink(p.id)}<div class="muted small">${p.government}${p.wars.size ? ' · <span class="chip crit">war</span>' : ''}</div></td><td class="num">${compact(p.pop)}</td><td class="num">${p.settlementIds.length}</td><td class="small">${polityEra(p).replace(' Age', '')}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>Realm</th><th class="num">People</th><th class="num">Towns</th><th>Era</th><th></th></tr></thead>
+      <tbody>${alive.slice(0, 80).map((p) => `<tr><td>${pLink(p.id)}<div class="muted small">${p.government}${p.wars.size ? ' · <span class="chip crit">war</span>' : ''}</div></td><td class="num">${compact(p.pop)}</td><td class="num">${p.settlementIds.length}</td><td class="small">${polityEra(p).replace(' Age', '')}</td><td><button type="button" class="mini" data-nation="${p.id}" aria-label="Open nation view for ${esc(p.name)}">View</button></td></tr>`).join('')}</tbody>
     </table></div>
     ${wars.length ? `<section><h3>Wars being fought</h3><ul class="plain">${wars.map((w) => `<li><b>${esc(w.name)}</b> <span class="muted">since ${w.start}</span><br>${pLink(w.attacker)} vs ${pLink(w.defender)}</li>`).join('')}</ul></section>` : ''}
     ${fallen.length ? `<section><h3>Fallen realms</h3><ul class="plain">${fallen.slice(0, 20).map((p) => `<li>${pLink(p.id)} <span class="muted">${p.founded}–${p.dissolved}</span></li>`).join('')}</ul></section>` : ''}`;
@@ -507,7 +637,7 @@ function renderPeoples(): string {
     </table></div></section>`;
 }
 
-const KINDS: EventKind[] = ['war', 'conquest', 'peace', 'rebellion', 'union', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'trade'];
+const KINDS: EventKind[] = ['war', 'conquest', 'peace', 'rebellion', 'union', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'army', 'agreement', 'caravan'];
 
 function renderChronicleShell(): string {
   return `
@@ -601,6 +731,7 @@ function renderSetup(): string {
       ${num('s-abund', 'Mineral wealth', cfg.resourceAbundance, 0.3, 2.5, 0.1, 'How rich the ore, gold and gem deposits are.')}
       ${num('s-magic', 'Magic', cfg.magic, 0, 2, 1, '0 none · 1 low · 2 high. Ley lines, arcane techs and monsters.')}
       ${num('s-cal', 'Calamity', cfg.calamity, 0, 3, 0.1, 'Frequency of plagues, disasters and beasts.')}
+      ${num('s-space', 'Settlement spacing', cfg.settlementSpacing, 3, 8, 1, 'Minimum tiles between towns. Wider spacing means fewer, larger settlements.')}
       <div class="row">
         <label class="field" for="s-home"><span>Homelands per race</span><input id="s-home" type="number" min="1" max="4" value="${cfg.homelandsPerRace}"></label>
         <label class="field" for="s-tribes"><span>Tribes per homeland</span><input id="s-tribes" type="number" min="1" max="8" value="${cfg.tribesPerHomeland}"></label>
@@ -616,7 +747,7 @@ function renderSetup(): string {
 
 function wireSetup(): void {
   const form = $<HTMLFormElement>('setup');
-  for (const id of ['s-land', 's-temp', 's-moist', 's-abund', 's-magic', 's-cal']) {
+  for (const id of ['s-land', 's-temp', 's-moist', 's-abund', 's-magic', 's-cal', 's-space']) {
     const inp = $<HTMLInputElement>(id);
     inp.addEventListener('input', () => ($(id + '-o').textContent = inp.value));
   }
@@ -649,6 +780,7 @@ function wireSetup(): void {
       resourceAbundance: v('s-abund'),
       magic: v('s-magic'),
       calamity: v('s-cal'),
+      settlementSpacing: v('s-space'),
       homelandsPerRace: Math.max(1, Math.min(4, Math.floor(v('s-home')))),
       tribesPerHomeland: Math.max(1, Math.min(8, Math.floor(v('s-tribes')))),
       races: races.map((r) => ({ ...DEFAULT_RACES[0], ...r })),
@@ -659,6 +791,8 @@ function wireSetup(): void {
 }
 
 function newWorld(): void {
+  closeOverlay();
+  selectedTech = null;
   playing = false;
   pendingYears = 0;
   world = new World(cfg);
@@ -723,6 +857,7 @@ function frame(now: number): void {
     drawMap();
     refreshTopbar();
     if (now - lastPanel > 400) renderPanel(false);
+    if (overlay && now - lastOverlay > 1000) renderOverlay(false);
   }
   requestAnimationFrame(frame);
 }

@@ -95,6 +95,8 @@ export interface WorldConfig {
   homelandsPerRace: number;
   /** Tribes that start in each homeland. */
   tribesPerHomeland: number;
+  /** Minimum distance in tiles between settlements. */
+  settlementSpacing: number;
   races: RaceDef[];
 }
 
@@ -135,6 +137,80 @@ export interface TradeLink {
   sea: boolean;
   /** Value traded along the link last year. */
   volume: number;
+  /** A road from a settlement to its nation's hub (largest settlement). */
+  hub?: boolean;
+  /** How the link traded last year: within a nation, under a trade agreement, or not at all. */
+  kind: 'internal' | 'treaty' | 'closed';
+}
+
+export type TradeKind = 'internal' | 'treaty' | 'caravan';
+
+/** A free-trader caravan carrying one cargo from market to market for profit. */
+export interface Caravan {
+  id: number;
+  /** Settlement whose merchants own the caravan. */
+  homeId: number;
+  polityId: number;
+  fromId: number;
+  toId: number;
+  path: number[];
+  /** Index of the tile the caravan is on. */
+  step: number;
+  good: number;
+  qty: number;
+  /** Price paid per unit at the market of origin. */
+  cost: number;
+  /** Terrain cost of the route. */
+  tripCost: number;
+  returning: boolean;
+  /** Year the caravan set out. */
+  started: number;
+}
+
+export interface Army {
+  id: number;
+  name: string;
+  polityId: number;
+  warId: number;
+  /** Soldiers in the field. */
+  size: number;
+  raised: number;
+  tile: number;
+  /** Settlement it marches on, or -1 when hunting an enemy army. */
+  targetSettlement: number;
+  targetArmy: number;
+  path: number[];
+  step: number;
+  /** Years spent besieging the current target. */
+  siege: number;
+  victories: number;
+  /** Year of its last field battle (one per year). */
+  fought: number;
+  alive: boolean;
+}
+
+export interface TradeAgreement {
+  id: number;
+  name: string;
+  a: number;
+  b: number;
+  start: number;
+  end: number | null;
+  /** Goods each side was short of when it was signed. */
+  goods: string[];
+  endReason?: string;
+}
+
+/** Aggregated modifiers from a culture's environmental traits. */
+export interface TraitEffects {
+  production: Partial<Record<SectorKey, number>>;
+  habitat: Partial<Record<BiomeKey, number>>;
+  famineResist: number;
+  plagueResist: number;
+  military: number;
+  defense: number;
+  tradeCapacity: number;
+  foodNeed: number;
 }
 
 export interface Settlement {
@@ -176,6 +252,8 @@ export interface Settlement {
   habitat: number;
   /** Food received as tribute last year (capitals only). */
   tributeIn: number;
+  /** Value traded last year by kind. */
+  tradeByKind: Record<TradeKind, number>;
   coastal: boolean;
   river: boolean;
   landmass: number;
@@ -202,6 +280,11 @@ export interface Culture {
   values: CultureValues;
   language: Phonemes;
   originSettlement: number;
+  /** Environmental adaptations the people have developed (trait ids). */
+  traits: string[];
+  /** Progress towards (or away from) each trait, 1 = earned. */
+  exposure: Record<string, number>;
+  traitEffects: TraitEffects;
 }
 
 export interface Ruler {
@@ -246,6 +329,19 @@ export interface Polity {
   access: Uint8Array;
   popHistory: [number, number][];
   parentPolity: number;
+  /** Largest settlement: the hub internal trade and roads converge on. */
+  hubId: number;
+  /** Partner polity id -> agreement id. */
+  agreements: Map<number, number>;
+  /** National totals last year per good. */
+  produced: Float64Array;
+  needed: Float64Array;
+  imported: Float64Array;
+  /** 1 where the nation cannot meet its own needs. */
+  deficit: Uint8Array;
+  /** Share of a foreign caravan's sales taken at the border. */
+  tariff: number;
+  tariffIncome: number;
 }
 
 export interface War {
@@ -283,7 +379,10 @@ export type EventKind =
   | 'monster'
   | 'wonder'
   | 'trade'
-  | 'milestone';
+  | 'milestone'
+  | 'agreement'
+  | 'army'
+  | 'caravan';
 
 export interface HistoryEvent {
   year: number;

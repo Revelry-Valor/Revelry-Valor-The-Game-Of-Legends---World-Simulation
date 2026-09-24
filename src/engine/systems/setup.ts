@@ -40,13 +40,14 @@ export function placePeoples(world: World): void {
         let tile = -1;
         let ts = -Infinity;
         for (let a = 0; a < 80; a++) {
-          const x = hx + rng.int(-7, 7);
-          const y = hy + rng.int(-7, 7);
+          const spread = 5 + cfg.settlementSpacing;
+          const x = hx + rng.int(-spread, spread);
+          const y = hy + rng.int(-spread, spread);
           if (x < 0 || y < 0 || x >= map.width || y >= map.height) continue;
           const t = y * map.width + x;
           if (map.settlementAt[t] >= 0 || map.landmass[t] !== map.landmass[best]) continue;
           let tooClose = false;
-          for (const p of placed) if (Math.hypot((p % map.width) - x, Math.floor(p / map.width) - y) < 3) tooClose = true;
+          for (const o of world.settlements) if (Math.hypot(o.x - x, o.y - y) < cfg.settlementSpacing) tooClose = true;
           if (tooClose) continue;
           const sc = siteScore(map, race, t) + rng.range(0, 1);
           if (sc > ts) {

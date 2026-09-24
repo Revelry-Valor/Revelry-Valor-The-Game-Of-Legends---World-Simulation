@@ -88,6 +88,53 @@ describe('simulation', () => {
   });
 });
 
+describe('trade, armies and cultures', () => {
+  const w = new World(small());
+  w.run(350);
+
+  it('keeps settlements at least the configured spacing apart', () => {
+    const alive = [...w.aliveSettlements()];
+    for (const a of alive) for (const b of alive) {
+      if (a.id < b.id) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(w.cfg.settlementSpacing - 1e-9);
+    }
+  });
+
+  it('only trades across borders under an agreement', () => {
+    for (const l of [...w.links, ...w.hubLinks]) {
+      const A = w.settlements[l.a];
+      const B = w.settlements[l.b];
+      if (l.kind === 'treaty') expect(w.polities[A.polityId].agreements.has(B.polityId)).toBe(true);
+      if (l.hub) expect(A.polityId === B.polityId || l.kind !== 'treaty').toBe(true);
+    }
+    for (const d of w.agreements.filter((x) => x.end === null)) {
+      expect(w.polities[d.a].agreements.get(d.b)).toBe(d.id);
+      expect(w.polities[d.b].agreements.get(d.a)).toBe(d.id);
+    }
+  });
+
+  it('runs free-trader caravans that reach their markets', () => {
+    expect(w.caravanTrips).toBeGreaterThan(0);
+    for (const c of w.caravans) {
+      expect(c.step).toBeLessThan(c.path.length);
+      expect(c.qty).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('fields armies only for wars that are being fought', () => {
+    for (const a of w.armies) {
+      expect(a.alive).toBe(true);
+      expect(w.wars[a.warId].end).toBeNull();
+      expect(a.size).toBeGreaterThan(0);
+    }
+    expect(w.history.some((e) => e.kind === 'army')).toBe(true);
+  });
+
+  it('develops survival traits from the environment', () => {
+    expect(w.cultures.some((c) => c.traits.length > 0)).toBe(true);
+    for (const c of w.cultures) expect(c.traits.length).toBeLessThanOrEqual(4);
+  });
+});
+
 describe('exports', () => {
   it('writes a readable chronicle and a JSON-safe snapshot', () => {
     const w = new World(small());

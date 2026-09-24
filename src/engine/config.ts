@@ -22,6 +22,7 @@ export function defaultConfig(overrides: Partial<WorldConfig> = {}): WorldConfig
     calamity: 1,
     homelandsPerRace: 1,
     tribesPerHomeland: 3,
+    settlementSpacing: 4,
     races: structuredClone(DEFAULT_RACES),
     ...overrides,
   };

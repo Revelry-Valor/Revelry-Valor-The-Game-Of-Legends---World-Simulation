@@ -1,9 +1,9 @@
-import { Good } from '../data/economy';
-import { Relief } from '../data/biomes';
+import { GOOD_COUNT, GOOD_NAMES, Good } from '../data/economy';
 import { adjectiveOf } from '../names';
-import type { Government, Polity, Settlement, War } from '../types';
+import type { Government, Polity, Settlement, TradeAgreement, War } from '../types';
 import { pairKey, type World } from '../world';
 import { controlRange } from './migration';
+import { runMilitary } from './military';
 
 const GOV_STABILITY: Record<Government, number> = {
   tribe: 0.1, chiefdom: 0.03, 'city-state': 0.06, kingdom: 0.04, empire: -0.02, republic: 0.03, theocracy: 0.07,
@@ -18,7 +18,9 @@ export function runPolitics(world: World): void {
   updateGovernments(world);
   updateRulers(world);
   updateRelations(world);
+  tradeAgreements(world);
   declareWars(world);
+  runMilitary(world);
   resolveWars(world);
   rebellions(world);
   unions(world);
@@ -83,13 +85,44 @@ export function refreshPolities(world: World): void {
       const weapons = Math.min(1, s.stock[Good.Weapons] / (s.pop * 0.02 + 1));
       const horses = Math.min(1, s.stock[Good.Horses] / (s.pop * 0.004 + 1));
       const mob = 0.04 + 0.08 * culture.values.militarism;
-      mil += s.pop * mob * race.military * (1 + p.effects.military) * (1 + weapons * (0.3 + 0.2 * s.weaponQuality) + horses * 0.2);
+      const trait = world.cultures[s.cultureId].traitEffects.military;
+      mil += s.pop * mob * race.military * (1 + p.effects.military + trait) * (1 + weapons * (0.3 + 0.2 * s.weaponQuality) + horses * 0.2);
     }
     p.military = mil;
+    // The hub is the largest settlement: internal trade and roads converge on it.
+    const hub = p.settlementIds.map((id) => world.settlements[id]).reduce((a, b) => (b.pop > a.pop ? b : a));
+    if (hub.id !== p.hubId) {
+      p.hubId = hub.id;
+      world.hubsDirty = true;
+    }
+    // National accounts: what the nation makes, what it needs, and what it cannot supply itself.
+    p.produced.fill(0);
+    p.needed.fill(0);
+    for (const id of p.settlementIds) {
+      const s = world.settlements[id];
+      for (let g = 0; g < GOOD_COUNT; g++) {
+        p.produced[g] += s.produced[g];
+        p.needed[g] += s.target[g] * 0.8;
+      }
+    }
+    for (let g = 0; g < GOOD_COUNT; g++) p.deficit[g] = p.needed[g] > 1 && p.produced[g] < p.needed[g] * 0.75 ? 1 : 0;
+    const TARIFF: Record<Government, number> = { tribe: 0.04, chiefdom: 0.08, 'city-state': 0.06, kingdom: 0.12, empire: 0.15, republic: 0.05, theocracy: 0.12 };
+    p.tariff = Math.max(0, TARIFF[p.government] - culture.values.mercantilism * 0.06 + culture.values.xenophobia * 0.08);
+    p.tariffIncome *= 0.5;
     for (const [k, v] of p.contacts) {
       if (v * 0.7 < 1) p.contacts.delete(k);
       else p.contacts.set(k, v * 0.7);
     }
+  }
+  // Neighbours learn of each other across their borders even without trade.
+  for (const [key, len] of world.borders) {
+    const a = world.polities[Math.floor(key / 65536)];
+    const b = world.polities[key % 65536];
+    if (!a?.alive || !b?.alive) continue;
+    a.contacts.set(b.id, (a.contacts.get(b.id) ?? 0) + len * 3);
+    b.contacts.set(a.id, (b.contacts.get(a.id) ?? 0) + len * 3);
+  }
+  for (const p of world.alivePolities()) {
     p.treasury *= 0.98;
     if (p.wars.size === 0) p.warExhaustion = Math.max(0, p.warExhaustion - 0.08);
   }
@@ -100,6 +133,8 @@ function dissolve(world: World, p: Polity, text: string): void {
   p.dissolved = world.year;
   p.ruler.until = world.year;
   for (const wid of [...p.wars]) endWar(world, world.wars[wid], `${p.name} ceased to exist`);
+  for (const partner of [...p.agreements.keys()]) endAgreement(world, p.id, partner, `the ${p.name} ceased to exist`, false);
+  world.hubsDirty = true;
   world.log('polity', p.pop > 5000 || p.settlementIds.length > 3 ? 3 : p.pop > 800 ? 2 : 1, text, { polities: [p.id] });
 }
 
@@ -223,6 +258,7 @@ function updateRelations(world: World): void {
     for (const t of [...A.ruler.traits, ...B.ruler.traits]) target -= (TRAIT_AGGRESSION[t] ?? 0) * 0.4;
     // Great powers that share a border become rivals.
     if (border > 0 && A.pop > 30000 && B.pop > 30000) target -= 0.2;
+    if (A.agreements.has(b)) target += 0.12;
     if (world.atWar(a, b)) target = -0.8;
     const cur = A.relations.get(b) ?? 0;
     const next = Math.max(-1, Math.min(1, cur + (target - cur) * 0.08 + world.rng.normal() * 0.03));
@@ -278,6 +314,7 @@ export function startWar(world: World, A: Polity, B: Polity, cause: string): War
     conquered: [],
   };
   world.wars.push(war);
+  if (A.agreements.has(B.id)) endAgreement(world, A.id, B.id, 'war broke out between them', true);
   A.wars.add(war.id);
   B.wars.add(war.id);
   const imp = A.pop + B.pop > 8000 && Math.min(A.pop, B.pop) > 1500 ? 3 : A.pop + B.pop > 2000 ? 2 : 1;
@@ -298,33 +335,11 @@ function endWar(world: World, war: War, outcome: string): void {
   B.truces.set(A.id, truce);
   A.relations.set(B.id, -0.25);
   B.relations.set(A.id, -0.25);
+  for (const army of world.armies) if (army.warId === war.id) army.alive = false;
+  world.armies = world.armies.filter((a) => a.alive);
 }
 
-function nearestPair(world: World, att: Polity, def: Polity): { target: Settlement; dist: number } | null {
-  let best: Settlement | null = null;
-  let bd = Infinity;
-  for (const ai of att.settlementIds) {
-    const a = world.settlements[ai];
-    for (const di of def.settlementIds) {
-      const d = world.settlements[di];
-      if (!d.alive) continue;
-      let dist = Math.hypot(a.x - d.x, a.y - d.y);
-      if (a.landmass !== d.landmass) {
-        if (att.effects.seaTravel < 1) continue;
-        dist += 6;
-      }
-      // Prefer weakly defended frontier towns.
-      dist += Math.sqrt(d.pop) * 0.05;
-      if (dist < bd) {
-        bd = dist;
-        best = d;
-      }
-    }
-  }
-  return best ? { target: best, dist: bd } : null;
-}
-
-function spreadLosses(world: World, p: Polity, n: number): void {
+export function spreadLosses(world: World, p: Polity, n: number): void {
   if (p.pop <= 0) return;
   for (const id of p.settlementIds) {
     const s = world.settlements[id];
@@ -332,6 +347,29 @@ function spreadLosses(world: World, p: Polity, n: number): void {
   }
 }
 
+/** Transfer a conquered settlement to the victor. */
+export function captureSettlement(world: World, war: War, att: Polity, def: Polity, target: Settlement, by: string): void {
+  const wasCapital = def.capitalId === target.id;
+  target.polityId = att.id;
+  target.stability = 0.25;
+  att.treasury += target.wealth * 0.4;
+  target.wealth *= 0.5;
+  war.conquered.push(target.id);
+  def.settlementIds = def.settlementIds.filter((id) => id !== target.id);
+  att.settlementIds.push(target.id);
+  def.pop -= target.pop;
+  att.pop += target.pop;
+  world.territoryDirty = true;
+  world.hubsDirty = true;
+  world.log('conquest', (wasCapital && def.pop > 3000) || target.pop > 5000 ? 3 : wasCapital || target.pop > 800 ? 2 : 1, `${by.charAt(0).toUpperCase() + by.slice(1)} of the ${att.name} stormed ${target.name}${wasCapital ? `, capital of the ${def.name}` : ` and took it from the ${def.name}`}.`, { polities: [att.id, def.id], settlements: [target.id] });
+  if (wasCapital) def.warExhaustion += 0.25;
+  if (def.settlementIds.length === 0) {
+    endWar(world, war, `the ${att.name} conquered the ${def.name}`);
+    dissolve(world, def, `The ${def.name} fell to the ${att.name}.`);
+  }
+}
+
+/** Collapsed belligerents end their wars; exhausted ones make peace. The fighting itself is in military.ts. */
 function resolveWars(world: World): void {
   const rng = world.rng;
   for (const war of world.wars) {
@@ -342,63 +380,9 @@ function resolveWars(world: World): void {
       endWar(world, war, !A.alive ? `${A.name} collapsed` : `${B.name} was destroyed`);
       continue;
     }
-    const total = A.military + B.military + 1;
-    const attackerActs = rng.chance(0.5 + 0.3 * (A.military - B.military) / total);
-    const att = attackerActs ? A : B;
-    const def = attackerActs ? B : A;
-    const front = nearestPair(world, att, def);
-    if (front && front.dist < 22) {
-      const target = front.target;
-      const defFx = def.effects;
-      const relief = world.map.relief[target.tile];
-      const terrain = relief === Relief.Mountains ? 1.5 : relief === Relief.Hills ? 1.25 : 1;
-      const supply = 1 / (1 + front.dist / (controlRange(world, att.id) * 2));
-      const force = att.military * rng.range(0.3, 0.6) * supply + 1;
-      const garrison = (target.pop * 0.07 * (1 + defFx.defense) * terrain + def.military * rng.range(0.15, 0.35)) + 1;
-      const ratio = force / garrison;
-      const win = rng.chance((ratio * ratio) / (1 + ratio * ratio));
-      const attLoss = force * rng.range(0.05, 0.2) * (win ? 0.6 : 1.2);
-      const defLoss = garrison * rng.range(0.05, 0.2) * (win ? 1.3 : 0.6);
-      spreadLosses(world, att, attLoss);
-      killPop(target, defLoss * 0.6);
-      spreadLosses(world, def, defLoss * 0.4);
-      att.warExhaustion += (attLoss / Math.max(1, att.pop)) * 4 + 0.02;
-      def.warExhaustion += (defLoss / Math.max(1, def.pop)) * 4 + 0.03;
-      war.battles++;
-      if (att.id === war.attacker) {
-        war.attackerLosses += attLoss;
-        war.defenderLosses += defLoss;
-      } else {
-        war.attackerLosses += defLoss;
-        war.defenderLosses += attLoss;
-      }
-      target.stability -= 0.1;
-      const big = attLoss + defLoss > 1500;
-      if (win && ratio > 1.1 && target.pop > 0) {
-        const wasCapital = def.capitalId === target.id;
-        target.polityId = att.id;
-        target.stability = 0.25;
-        att.treasury += target.wealth * 0.4;
-        target.wealth *= 0.5;
-        war.conquered.push(target.id);
-        def.settlementIds = def.settlementIds.filter((id) => id !== target.id);
-        att.settlementIds.push(target.id);
-        def.pop -= target.pop;
-        att.pop += target.pop;
-        world.territoryDirty = true;
-        world.log('conquest', (wasCapital && def.pop > 3000) || target.pop > 5000 ? 3 : wasCapital || target.pop > 800 ? 2 : 1, `${big ? `At the Battle of ${target.name}, ` : ''}the ${att.name} captured ${target.name}${wasCapital ? `, capital of the ${def.name}` : ` from the ${def.name}`}.`, { polities: [att.id, def.id], settlements: [target.id] });
-        if (wasCapital) def.warExhaustion += 0.25;
-        if (def.settlementIds.length === 0) {
-          endWar(world, war, `the ${att.name} conquered the ${def.name}`);
-          dissolve(world, def, `The ${def.name} fell to the ${att.name}.`);
-          continue;
-        }
-      } else if (big) {
-        world.log('battle', 2, `The ${att.name} ${win ? 'won a costly victory' : 'was thrown back'} at ${target.name}; some ${Math.round(attLoss + defLoss).toLocaleString('en-US')} fell.`, { polities: [att.id, def.id], settlements: [target.id] });
-      }
-    }
     const years = world.year - war.start;
-    const pPeace = 0.03 + (A.warExhaustion + B.warExhaustion) * 0.35 + years * 0.008 + (front ? 0 : 0.15);
+    const fighting = world.armies.some((a) => a.warId === war.id && a.path.length > 0);
+    const pPeace = 0.02 + (A.warExhaustion + B.warExhaustion) * 0.3 + years * 0.006 + (fighting || years < 2 ? 0 : 0.12);
     if (rng.chance(pPeace)) {
       const gained = war.conquered.filter((id) => world.settlements[id].alive && world.settlements[id].polityId === A.id).length;
       const lost = war.conquered.filter((id) => world.settlements[id].alive && world.settlements[id].polityId === B.id).length;
@@ -413,6 +397,63 @@ function resolveWars(world: World): void {
       world.log('peace', A.pop + B.pop > 8000 && Math.min(A.pop, B.pop) > 1500 ? 3 : A.pop + B.pop > 2000 ? 2 : 1, `The Treaty of ${place.name} ended ${war.name} after ${years} year${years === 1 ? '' : 's'} and ${war.battles} battle${war.battles === 1 ? '' : 's'}; ${outcome}.`, { polities: [A.id, B.id] });
     }
   }
+}
+
+/** Goods one nation has to spare that the other cannot produce enough of. */
+export function complementaryGoods(A: Polity, B: Polity): number[] {
+  const out: number[] = [];
+  for (let g = 0; g < GOOD_COUNT; g++) if (B.deficit[g] && A.produced[g] > A.needed[g] * 1.1) out.push(g);
+  return out;
+}
+
+/**
+ * Trade agreements: friendly neighbours whose economies complement each other sign treaties
+ * that open their borders to direct trade in the goods each lacks, and spare each other's
+ * caravans the border tolls. War tears them up; souring relations let them lapse.
+ */
+function tradeAgreements(world: World): void {
+  const rng = world.rng;
+  for (const [a, b] of contactPairs(world)) {
+    const A = world.polities[a];
+    const B = world.polities[b];
+    const rel = A.relations.get(b) ?? 0;
+    if (A.agreements.has(b)) {
+      if (rel < -0.1 && rng.chance(0.25)) endAgreement(world, a, b, 'relations soured', true);
+      continue;
+    }
+    if (rel < 0.15 || world.atWar(a, b) || A.settlementIds.length === 0 || B.settlementIds.length === 0) continue;
+    const aToB = complementaryGoods(A, B);
+    const bToA = complementaryGoods(B, A);
+    if (aToB.length + bToA.length === 0) continue;
+    const merc = (world.cultures[A.cultureId].values.mercantilism + world.cultures[B.cultureId].values.mercantilism) / 2;
+    if (!rng.chance(0.04 * (rel + 0.3) * (0.5 + merc) * Math.min(3, aToB.length + bToA.length))) continue;
+    const place = world.settlements[rng.chance(0.5) ? A.hubId : B.hubId];
+    const deal: TradeAgreement = {
+      id: world.agreements.length,
+      name: `the ${rng.pick(['Accord', 'Compact', 'Pact', 'Concord', 'Charter'])} of ${place.name}`,
+      a, b, start: world.year, end: null,
+      goods: [...new Set([...aToB, ...bToA].map((g) => GOOD_NAMES[g]))],
+    };
+    world.agreements.push(deal);
+    A.agreements.set(b, deal.id);
+    B.agreements.set(a, deal.id);
+    const what = (list: number[], from: Polity) => (list.length ? `${from.name}'s ${list.slice(0, 3).map((g) => GOOD_NAMES[g].toLowerCase()).join(', ')}` : '');
+    const terms = [what(aToB, A), what(bToA, B)].filter(Boolean).join(' for ');
+    world.log('agreement', A.pop + B.pop > 20000 ? 3 : 2, `The ${A.name} and the ${B.name} signed ${deal.name}, opening their borders to trade${terms ? `: ${terms}` : ''}.`, { polities: [a, b], settlements: [place.id] });
+  }
+}
+
+function endAgreement(world: World, a: number, b: number, reason: string, log: boolean): void {
+  const A = world.polities[a];
+  const B = world.polities[b];
+  const id = A.agreements.get(b);
+  if (id === undefined) return;
+  A.agreements.delete(b);
+  B.agreements.delete(a);
+  const deal = world.agreements[id];
+  deal.end = world.year;
+  deal.endReason = reason;
+  if (log) world.log('agreement', 2, `${deal.name.charAt(0).toUpperCase() + deal.name.slice(1)} between the ${A.name} and the ${B.name} was broken: ${reason}.`, { polities: [a, b] });
 }
 
 function rebellions(world: World): void {
@@ -437,6 +478,7 @@ function rebellions(world: World): void {
     np.relations.set(p.id, -0.5);
     p.relations.set(np.id, -0.5);
     world.territoryDirty = true;
+    world.hubsDirty = true;
     const imp = rebels.length > 2 || s.pop > 5000 ? 3 : s.pop > 800 ? 2 : 1;
     world.log('rebellion', imp, `${s.name}${rebels.length > 1 ? ` and ${rebels.length - 1} other settlement${rebels.length > 2 ? 's' : ''}` : ''} rose against the ${p.name}, proclaiming the ${np.name}.`, { polities: [np.id, p.id], settlements: rebels.map((r) => r.id) });
     const mil = world.cultures[p.cultureId].values.militarism;

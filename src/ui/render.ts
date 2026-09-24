@@ -10,6 +10,8 @@ export interface ViewState {
   showRoutes: boolean;
   showLabels: boolean;
   showRuins: boolean;
+  showCaravans: boolean;
+  showArmies: boolean;
   /** Screen pixels per tile. */
   zoom: number;
   /** Tile coordinate at the top-left of the canvas. */
@@ -202,29 +204,90 @@ export class MapRenderer {
       }
     }
 
+    const pathTo = (path: number[], from = 0) => {
+      ctx.beginPath();
+      for (let k = from; k < path.length; k++) {
+        const p = path[k];
+        const X = tx((p % map.width) + 0.5);
+        const Y = ty(Math.floor(p / map.width) + 0.5);
+        if (k === from) ctx.moveTo(X, Y);
+        else ctx.lineTo(X, Y);
+      }
+      ctx.stroke();
+    };
+
     if (view.showRoutes) {
+      // Internal trade in earth brown (roads to the hub drawn heavier), treaty trade in green.
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       let maxVol = 1;
       for (const l of world.links) maxVol = Math.max(maxVol, l.volume);
-      for (const l of world.links) {
-        if (l.volume <= 1 || l.path.length < 2) continue;
+      for (const l of world.hubLinks) maxVol = Math.max(maxVol, l.volume);
+      for (const l of [...world.links, ...world.hubLinks]) {
+        if (l.volume <= 1 || l.path.length < 2 || l.kind === 'closed') continue;
         const t = Math.sqrt(l.volume / maxVol);
-        ctx.strokeStyle = l.sea ? `rgba(40, 110, 150, ${0.25 + 0.6 * t})` : `rgba(150, 96, 30, ${0.25 + 0.6 * t})`;
-        ctx.lineWidth = Math.max(0.8, Math.min(4, z * 0.12 + t * 3));
-        if (l.sea) ctx.setLineDash([4, 3]);
-        else ctx.setLineDash([]);
-        ctx.beginPath();
-        for (let k = 0; k < l.path.length; k++) {
-          const p = l.path[k];
-          const X = tx((p % map.width) + 0.5);
-          const Y = ty(Math.floor(p / map.width) + 0.5);
-          if (k === 0) ctx.moveTo(X, Y);
-          else ctx.lineTo(X, Y);
-        }
-        ctx.stroke();
+        const a = 0.25 + 0.6 * t;
+        ctx.strokeStyle = l.kind === 'treaty' ? `rgba(40, 150, 90, ${a})` : l.sea ? `rgba(40, 110, 150, ${a})` : `rgba(150, 96, 30, ${a})`;
+        ctx.lineWidth = Math.max(0.8, Math.min(5, z * 0.12 + t * 3 + (l.hub ? 0.8 : 0)));
+        ctx.setLineDash(l.sea ? [4, 3] : []);
+        pathTo(l.path);
       }
       ctx.setLineDash([]);
+    }
+
+    if (view.showCaravans && world.caravans.length) {
+      const r = Math.max(1.8, Math.min(3.5, z * 0.35));
+      for (const c of world.caravans) {
+        const t = c.path[Math.min(c.step, c.path.length - 1)];
+        const X = tx((t % map.width) + 0.5);
+        const Y = ty(Math.floor(t / map.width) + 0.5);
+        ctx.beginPath();
+        ctx.arc(X, Y, r, 0, Math.PI * 2);
+        ctx.fillStyle = c.qty > 0 ? '#e8b923' : '#b9a978';
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#4a3a0a';
+        ctx.stroke();
+      }
+    }
+
+    if (view.showArmies && world.armies.length) {
+      for (const a of world.armies) {
+        if (!a.alive) continue;
+        const color = world.polities[a.polityId].color;
+        // The road ahead.
+        if (a.path.length > a.step + 1) {
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.7;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([3, 3]);
+          pathTo(a.path, a.step);
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+        }
+        const X = tx((a.tile % map.width) + 0.5);
+        const Y = ty(Math.floor(a.tile / map.width) + 0.5);
+        const s = Math.max(5, Math.min(12, 3 + Math.log10(Math.max(10, a.size)) * 2)) * Math.max(0.8, Math.min(1.4, z / 5));
+        ctx.beginPath();
+        ctx.moveTo(X, Y - s);
+        ctx.lineTo(X + s * 0.9, Y + s * 0.7);
+        ctx.lineTo(X - s * 0.9, Y + s * 0.7);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = a.siege > 0 ? 2.5 : 1.5;
+        ctx.strokeStyle = a.siege > 0 ? '#b3362f' : '#1b1b1b';
+        ctx.stroke();
+        if (view.showLabels && z >= 5) {
+          const label = `${a.name} (${Math.round(a.size).toLocaleString('en-US')})`;
+          ctx.font = `600 11px "Alegreya Sans", system-ui, sans-serif`;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = ink.halo;
+          ctx.strokeText(label, X + s + 3, Y + s * 0.4);
+          ctx.fillStyle = ink.text;
+          ctx.fillText(label, X + s + 3, Y + s * 0.4);
+        }
+      }
     }
 
     // Settlements, largest last so they sit on top.

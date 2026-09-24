@@ -1,5 +1,6 @@
 import { BIOMES, Biome, Relief } from '../data/biomes';
 import { Res } from '../data/economy';
+import type { BiomeKey } from '../data/biomes';
 import type { MapData, RaceDef } from '../types';
 
 /** How much a race likes a single tile for living on, -1..1 (-Infinity if uninhabitable). */
@@ -16,8 +17,9 @@ export function tileAffinity(map: MapData, race: RaceDef, i: number): number {
  * Score a candidate settlement site for a race: its preferred terrain, food potential,
  * fresh water, coast, and the resources its people are good at exploiting.
  */
-export function siteScore(map: MapData, race: RaceDef, tile: number): number {
-  const aff = tileAffinity(map, race, tile);
+export function siteScore(map: MapData, race: RaceDef, tile: number, learned: Partial<Record<BiomeKey, number>> = {}): number {
+  // A culture adapted to a land (mountain folk, sand-walkers...) seeks out more of it.
+  const aff = tileAffinity(map, race, tile) + (learned[BIOMES[map.biome[tile]].key] ?? 0) * 2;
   if (aff === -Infinity || aff < -0.55) return -Infinity;
   const w = map.width;
   const h = map.height;

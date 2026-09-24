@@ -1,4 +1,8 @@
+import { BIOMES, Relief, type BiomeKey } from '../data/biomes';
+import { GOOD_BASE_PRICE, GOOD_COUNT, Res, SECTOR_KEYS, type SectorKey } from '../data/economy';
+import { MAX_TRAITS, TRAITS, TRAIT_BY_ID, combineTraits, type CultureEnvironment } from '../data/traits';
 import type { Culture, CultureValues, Settlement } from '../types';
+import { VALUE_KEYS } from '../types';
 import type { World } from '../world';
 
 interface CultureAgg {
@@ -50,7 +54,13 @@ export function runCulture(world: World): void {
     v.mercantilism = clamp01(lerp(v.mercantilism, Math.min(0.95, (a.trade / Math.max(1, a.pop)) * 2), r * 0.5));
     v.piety = clamp01(lerp(v.piety, 0.35 + Math.min(0.6, (a.hardship / a.pop) * 3), r * 0.5));
     v.tradition = clamp01(v.tradition + 0.0008 * (0.95 - v.tradition));
+    // Traits pull values towards the way of life they reflect.
+    for (const id of c.traits) {
+      const tv = TRAIT_BY_ID.get(id)?.values;
+      if (tv) for (const k of VALUE_KEYS) if (tv[k] !== undefined) v[k] = clamp01(lerp(v[k], tv[k]!, 0.01));
+    }
   }
+  if (world.year % 5 === 0) developTraits(world);
 
   const alive = [...world.aliveSettlements()];
   for (const s of alive) {
@@ -116,4 +126,93 @@ function splitCulture(world: World, s: Settlement): void {
     `Around ${s.name}, the ${parent.adjective} ways had drifted so far that a new people arose: the ${nc.name}${group.length > 1 ? `, spanning ${group.length} settlements` : ''}.`,
     { settlements: group.map((g) => g.id), cultures: [nc.id, parent.id], polities: [s.polityId] },
   );
+}
+
+/** What each culture's people live with: their land, their work, their hardships. */
+function measureEnvironments(world: World): Map<number, CultureEnvironment> {
+  const map = world.map;
+  const acc = new Map<number, { tiles: number; biome: Record<string, number>; hills: number; mountains: number; horses: number; pop: number; coastal: number; river: number; labor: Float64Array; imports: number; output: number; famine: number; plague: number; war: number }>();
+  for (const s of world.aliveSettlements()) {
+    let a = acc.get(s.cultureId);
+    if (!a) {
+      a = { tiles: 0, biome: {}, hills: 0, mountains: 0, horses: 0, pop: 0, coastal: 0, river: 0, labor: new Float64Array(SECTOR_KEYS.length), imports: 0, output: 0, famine: 0, plague: 0, war: 0 };
+      acc.set(s.cultureId, a);
+    }
+    for (const t of s.territory) {
+      if (map.elevation[t] < 0) continue;
+      a.tiles++;
+      const key = BIOMES[map.biome[t]].key;
+      a.biome[key] = (a.biome[key] ?? 0) + 1;
+      if (map.relief[t] === Relief.Hills) a.hills++;
+      else if (map.relief[t] === Relief.Mountains) a.mountains++;
+    }
+    a.horses += s.resSum[Res.Horses];
+    a.pop += s.pop;
+    if (s.coastal) a.coastal += s.pop;
+    if (s.river) a.river += s.pop;
+    for (let k = 0; k < a.labor.length; k++) a.labor[k] += s.labor[k];
+    for (let g = 0; g < GOOD_COUNT; g++) {
+      a.imports += (s.tradeByKind.treaty + s.tradeByKind.caravan) > 0 ? s.imported[g] * GOOD_BASE_PRICE[g] : 0;
+      a.output += s.produced[g] * GOOD_BASE_PRICE[g];
+    }
+    a.famine += Math.max(0, 1 - s.foodRatio) * s.pop;
+    a.plague += s.plague * s.pop;
+    if (world.polities[s.polityId].wars.size > 0) a.war += s.pop;
+  }
+  const out = new Map<number, CultureEnvironment>();
+  for (const [id, a] of acc) {
+    const tiles = Math.max(1, a.tiles);
+    const pop = Math.max(1, a.pop);
+    const laborTotal = a.labor.reduce((x, y) => x + y, 0) || 1;
+    const biome: Partial<Record<BiomeKey, number>> = {};
+    for (const k in a.biome) biome[k as BiomeKey] = a.biome[k] / tiles;
+    const labor: Partial<Record<SectorKey, number>> = {};
+    SECTOR_KEYS.forEach((k, i) => (labor[k] = a.labor[i] / laborTotal));
+    out.set(id, {
+      biome, hills: a.hills / tiles, mountains: a.mountains / tiles, horses: a.horses / tiles,
+      coastal: a.coastal / pop, river: a.river / pop, labor,
+      tradeReliance: a.output > 0 ? a.imports / a.output : 0,
+      famine: a.famine / pop, plague: a.plague / pop, war: a.war / pop,
+    });
+  }
+  return out;
+}
+
+/**
+ * Cultures adapt to survive where they live. Pressure from the environment builds exposure
+ * to a trait over the generations; once it is strong enough the culture earns the trait,
+ * and if it moves away from that way of life the trait fades again.
+ */
+function developTraits(world: World): void {
+  const envs = measureEnvironments(world);
+  for (const c of world.cultures) {
+    if (!c.alive) continue;
+    const env = envs.get(c.id);
+    if (!env) continue;
+    let changed = false;
+    for (const t of TRAITS) {
+      const p = t.pressure(env);
+      const e = Math.max(0, Math.min(1.6, (c.exposure[t.id] ?? 0) + 0.12 * Math.max(-1, Math.min(1.5, p - 1))));
+      c.exposure[t.id] = e;
+      const has = c.traits.includes(t.id);
+      if (has && e < 0.3) {
+        c.traits = c.traits.filter((x) => x !== t.id);
+        changed = true;
+        world.log('culture', 1, `The ${c.name} lost the ways of the ${t.name}, their old life left behind.`, { cultures: [c.id] });
+      } else if (!has && e >= 1) {
+        if (c.traits.length >= MAX_TRAITS) {
+          const weakest = c.traits.reduce((a, b) => ((c.exposure[a] ?? 0) <= (c.exposure[b] ?? 0) ? a : b));
+          if ((c.exposure[weakest] ?? 0) > e - 0.3) continue;
+          c.traits = c.traits.filter((x) => x !== weakest);
+        }
+        c.traits.push(t.id);
+        changed = true;
+        world.log('culture', 2, t.earned.replace('{c}', c.name), { cultures: [c.id] });
+      }
+    }
+    if (changed) {
+      c.traitEffects = combineTraits(c.traits);
+      world.territoryDirty = true;
+    }
+  }
 }

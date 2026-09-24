@@ -1,8 +1,10 @@
 import { GOOD_BASE_PRICE, GOOD_COUNT, Good, RES_COUNT, SECTOR_COUNT } from './data/economy';
 import { MAX_EFFECTS, TECH_BY_ID, baseEffects, type TechEffects } from './data/techs';
+import { combineTraits } from './data/traits';
 import { NameBook, adjectiveOf, deriveLanguage, mutateLanguage, randomColor } from './names';
 import { Pathfinder } from './pathfinding';
 import { Rng } from './rng';
+import { runCaravans } from './systems/caravans';
 import { runCulture } from './systems/culture';
 import { runConsumption, runProduction } from './systems/economy';
 import { runEvents } from './systems/events';
@@ -11,10 +13,10 @@ import { runPolitics } from './systems/politics';
 import { placePeoples } from './systems/setup';
 import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
-import { buildTradeLinks, runTrade, runTribute, updateRoads } from './systems/trade';
+import { buildHubLinks, buildTradeLinks, runTrade, runTribute, updateRoads } from './systems/trade';
 import type {
-  Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
-  Settlement, TradeLink, War, WorldConfig, YearStats,
+  Army, Caravan, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
+  Settlement, TradeAgreement, TradeLink, War, WorldConfig, YearStats,
 } from './types';
 import { VALUE_KEYS } from './types';
 import { generateMap } from './worldgen';
@@ -39,7 +41,19 @@ export class World {
   polities: Polity[] = [];
   cultures: Culture[] = [];
   wars: War[] = [];
+  /** Links between neighbouring settlements. */
   links: TradeLink[] = [];
+  /** Roads from each settlement to its nation's hub. */
+  hubLinks: TradeLink[] = [];
+  caravans: Caravan[] = [];
+  armies: Army[] = [];
+  agreements: TradeAgreement[] = [];
+  nextCaravanId = 0;
+  nextArmyId = 0;
+  /** How many armies each polity has raised, for naming them. */
+  armiesRaised = new Map<number, number>();
+  /** Caravan trips completed and their value, for statistics. */
+  caravanTrips = 0;
   history: HistoryEvent[] = [];
   stats: YearStats[] = [];
   /** Border length (tiles) between pairs of polities, key = pairKey(a, b). */
@@ -50,6 +64,8 @@ export class World {
   readonly pathfinder: Pathfinder;
   linksDirty = true;
   territoryDirty = true;
+  hubsDirty = true;
+  lastHubBuild = -99;
   tradeVolume = 0;
   /** One-off markers (milestones reached, throttled log keys). */
   flags = new Set<string>();
@@ -75,10 +91,15 @@ export class World {
     if (this.year % 10 === 0) {
       updateRoads(this);
       buildTradeLinks(this, true);
-    } else if (this.linksDirty) buildTradeLinks(this, false);
+      buildHubLinks(this);
+    } else {
+      if (this.linksDirty) buildTradeLinks(this, false);
+      if (this.hubsDirty && this.year - this.lastHubBuild >= 5) buildHubLinks(this);
+    }
     runEvents(this);
     runProduction(this);
     runTrade(this);
+    runCaravans(this);
     runTribute(this);
     runConsumption(this);
     runMigration(this);
@@ -166,6 +187,10 @@ export class World {
       values: v,
       language,
       originSettlement,
+      // Daughter cultures keep most of what their ancestors learned about survival.
+      traits: parent ? [...parent.traits] : [],
+      exposure: parent ? Object.fromEntries(Object.entries(parent.exposure).map(([k, e]) => [k, e * 0.8])) : {},
+      traitEffects: combineTraits(parent ? parent.traits : []),
     };
     this.cultures.push(c);
     return c;
@@ -208,6 +233,7 @@ export class World {
       resSum: new Float64Array(RES_COUNT),
       habitat: 0,
       tributeIn: 0,
+      tradeByKind: { internal: 0, treaty: 0, caravan: 0 },
       coastal: map.coastal[tile] === 1,
       river: map.river[tile] > 0,
       landmass: map.landmass[tile],
@@ -260,7 +286,16 @@ export class World {
       access: new Uint8Array(GOOD_COUNT),
       popHistory: [],
       parentPolity,
+      hubId: capital.id,
+      agreements: new Map(),
+      produced: new Float64Array(GOOD_COUNT),
+      needed: new Float64Array(GOOD_COUNT),
+      imported: new Float64Array(GOOD_COUNT),
+      deficit: new Uint8Array(GOOD_COUNT),
+      tariff: 0.1,
+      tariffIncome: 0,
     };
+    this.hubsDirty = true;
     this.polities.push(p);
     capital.polityId = p.id;
     this.recomputeEffects(p);

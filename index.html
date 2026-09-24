@@ -26,7 +26,11 @@
         <label class="speed" for="speed">Speed <input id="speed" type="range" min="1" max="60" value="10" /> <output id="speed-out">10 yr/s</output></label>
       </div>
       <dl class="stats" id="stats"></dl>
-      <button id="theme" type="button" class="ghost" title="Switch colour theme">Auto</button>
+      <div class="views" role="group" aria-label="Views">
+        <button type="button" data-overlay="nation" aria-pressed="false">Nation view</button>
+        <button type="button" data-overlay="tech" aria-pressed="false">Tech tree</button>
+        <button id="theme" type="button" class="ghost" title="Switch colour theme">Auto</button>
+      </div>
     </header>
     <main class="app">
       <section class="map-pane" aria-label="World map">
@@ -42,11 +46,22 @@
           <label class="toggle" for="t-routes"><input id="t-routes" type="checkbox" /> Trade routes</label>
           <label class="toggle" for="t-labels"><input id="t-labels" type="checkbox" /> Names</label>
           <label class="toggle" for="t-ruins"><input id="t-ruins" type="checkbox" /> Ruins</label>
+          <label class="toggle" for="t-caravans"><input id="t-caravans" type="checkbox" /> Caravans</label>
+          <label class="toggle" for="t-armies"><input id="t-armies" type="checkbox" /> Armies</label>
           <button id="fit" type="button" class="ghost">Fit map</button>
         </div>
         <canvas id="map"></canvas>
-        <p class="hint">Scroll to zoom · drag to pan · click to inspect · ◆ capital</p>
+        <p class="hint">Scroll to zoom · drag to pan · click to inspect · ◆ capital · ▲ army · ● caravan</p>
         <p id="busy" class="busy" hidden></p>
+        <div id="overlay" class="overlay" hidden>
+          <div class="overlay-bar">
+            <h2 id="overlay-title">Nation</h2>
+            <label for="overlay-nation">Showing <select id="overlay-nation"></select></label>
+            <button id="overlay-close" type="button">Close (Esc)</button>
+          </div>
+          <div id="overlay-body" class="overlay-body"></div>
+          <div id="tt-detail" class="tt-detail" hidden></div>
+        </div>
       </section>
       <aside class="side">
         <nav class="tabs" role="tablist" aria-label="Panels">

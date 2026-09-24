@@ -97,7 +97,8 @@ function colonize(world: World, s: Settlement): void {
   const map = world.map;
   const race = world.majorityRace(s);
   const fx = pol.effects;
-  const R = Math.round(5 + fx.tradeRange * 4 + (fx.seaTravel > 0 ? 3 + fx.seaTravel * 3 : 0));
+  const spacing = world.cfg.settlementSpacing;
+  const R = Math.round(spacing + 3 + fx.tradeRange * 4 + (fx.seaTravel > 0 ? 3 + fx.seaTravel * 3 : 0));
   let best = -1;
   let bestScore = -Infinity;
   for (let a = 0; a < 50; a++) {
@@ -107,16 +108,17 @@ function colonize(world: World, s: Settlement): void {
     const t = y * map.width + x;
     if (map.elevation[t] < 0) continue;
     const dist = Math.hypot(x - s.x, y - s.y);
-    if (dist < 3) continue;
+    if (dist < spacing) continue;
     const sameLand = map.landmass[t] === s.landmass;
     if (!sameLand && !(fx.seaTravel >= 1 && s.coastal && map.coastal[t])) continue;
     // Keep clear of other towns and of land another polity already works.
     let blocked = false;
-    for (let dy = -2; dy <= 2 && !blocked; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
+    const reach = Math.ceil(spacing) - 1;
+    for (let dy = -reach; dy <= reach && !blocked; dy++) {
+      for (let dx = -reach; dx <= reach; dx++) {
         const nx = x + dx;
         const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= map.width || ny >= map.height) continue;
+        if (nx < 0 || ny < 0 || nx >= map.width || ny >= map.height || dx * dx + dy * dy >= spacing * spacing) continue;
         if (map.settlementAt[ny * map.width + nx] >= 0) {
           blocked = true;
           break;
@@ -126,7 +128,7 @@ function colonize(world: World, s: Settlement): void {
     if (blocked) continue;
     const owner = map.owner[t];
     if (owner >= 0 && world.settlements[owner].polityId !== s.polityId) continue;
-    let score = siteScore(map, race, t);
+    let score = siteScore(map, race, t, culture.traitEffects.habitat);
     if (score === -Infinity) continue;
     score -= dist * 0.12;
     if (!sameLand) score += culture.values.seafaring * 1.5;
@@ -184,6 +186,7 @@ export function abandon(world: World, s: Settlement): void {
   pol.settlementIds = pol.settlementIds.filter((id) => id !== s.id);
   world.territoryDirty = true;
   world.linksDirty = true;
+  world.hubsDirty = true;
   const imp = s.peakPop > 5000 ? 3 : s.peakPop > 800 ? 2 : 1;
   world.log('abandonment', imp, `${s.name} was abandoned${s.peakPop > 800 ? `, its ruins a memory of ${Math.round(s.peakPop).toLocaleString('en-US')} souls` : ''}.`, { settlements: [s.id], polities: [pol.id] });
 }

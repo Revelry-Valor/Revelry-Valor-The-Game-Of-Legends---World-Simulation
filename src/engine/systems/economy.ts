@@ -22,7 +22,7 @@ const marginal = (k: number) => (cap[k] > 0 ? yld[k] * Math.exp((-L[k] * yld[k])
 export function foodNeed(world: World, s: Settlement): number {
   let n = 0;
   for (const r in s.races) n += s.races[r] * (world.raceById.get(r)?.foodNeed ?? 1);
-  return n;
+  return n * (1 + world.cultures[s.cultureId].traitEffects.foodNeed);
 }
 
 /**
@@ -38,6 +38,7 @@ function produce(world: World, s: Settlement): void {
   const pol = world.polities[s.polityId];
   const fx = pol.effects;
   const race = world.majorityRace(s);
+  const trait = world.cultures[s.cultureId].traitEffects;
   // In lean years the old and the young join the fields.
   const workers = s.pop * (WORK_FRACTION + 0.2 * Math.max(0, 1 - s.foodRatio));
   const toolCover = Math.min(1, s.stock[Good.Tools] / (workers * 0.08 + 1));
@@ -64,7 +65,7 @@ function produce(world: World, s: Settlement): void {
     if (sec.output === Good.Food) c *= sec.key === 'fishing' ? 0.5 + 0.5 * s.climate : s.climate;
     if (sec.key === 'arcanaGathering' && world.cfg.magic <= 0) c = 0;
     cap[k] = c;
-    yld[k] = sec.yieldPerWorker * toolMult * (race.production[sec.key] ?? 1) * (1 + e * 0.5);
+    yld[k] = sec.yieldPerWorker * toolMult * (race.production[sec.key] ?? 1) * (trait.production[sec.key] ?? 1) * (1 + e * 0.5);
   }
   for (let c = 0; c < CRAFT_SECTORS.length; c++) {
     const k = EXT + c;
@@ -85,7 +86,7 @@ function produce(world: World, s: Settlement): void {
       if (limit < 0.5) continue;
       recipes[c] = r;
       cap[k] = limit;
-      yld[k] = sec.yieldPerWorker * (1 + fx.craft) * (race.production[sec.key] ?? 1) * toolMult;
+      yld[k] = sec.yieldPerWorker * (1 + fx.craft) * (race.production[sec.key] ?? 1) * (trait.production[sec.key] ?? 1) * toolMult;
       val[k] = s.price[sec.output] * (1 + r.quality * 0.15) - inputCost;
       break;
     }
@@ -226,8 +227,9 @@ function consume(world: World, s: Settlement): void {
   // Population change per race.
   const room = 1 - s.pop / Math.max(1, s.housing);
   const crowd = room > 0 ? Math.min(1, room * 3) : Math.max(-0.6, room * 2);
-  const famine = s.foodRatio < 0.98 ? (1 - s.foodRatio) * 0.3 : 0;
-  const plague = s.plague * 0.22 * (1 - Math.min(0.8, fx.sanitation));
+  const adapt = culture.traitEffects;
+  const famine = s.foodRatio < 0.98 ? (1 - s.foodRatio) * 0.3 * (1 - Math.min(0.8, adapt.famineResist)) : 0;
+  const plague = s.plague * 0.22 * (1 - Math.min(0.8, fx.sanitation)) * (1 - Math.min(0.8, adapt.plagueResist));
   const feed = Math.min(1, s.foodRatio);
   let pop = 0;
   for (const r in s.races) {

@@ -1,6 +1,7 @@
 import { BIOMES } from './data/biomes';
 import { GOOD_NAMES } from './data/economy';
 import { ERA_NAMES, TECH_BY_ID } from './data/techs';
+import { TRAIT_BY_ID } from './data/traits';
 import type { Polity, Settlement } from './types';
 import { VALUE_KEYS } from './types';
 import type { World } from './world';
@@ -125,12 +126,17 @@ export function chronicleMarkdown(world: World, minImportance = 2): string {
   out.push('## Cultures', '');
   for (const c of world.cultures) {
     const parent = c.parentId >= 0 ? world.cultures[c.parentId] : null;
-    out.push(`- **${c.name}** (${c.adjective}; ${world.raceById.get(c.raceId)?.plural ?? c.raceId}) — ${describeValues(world, c.id)}. Arose year ${c.founded}${parent ? ` from the ${parent.name}` : ''}${c.extinct !== null ? `; faded year ${c.extinct}` : ''}. Sample words: ${c.language.onsets.slice(0, 3).map((o, i) => o + (c.language.vowels[i % c.language.vowels.length] ?? '') + (c.language.codas[i % c.language.codas.length] ?? '')).join(', ')}.`);
+    out.push(`- **${c.name}** (${c.adjective}; ${world.raceById.get(c.raceId)?.plural ?? c.raceId}) — ${describeValues(world, c.id)}${c.traits.length ? `; ${c.traits.map((t) => TRAIT_BY_ID.get(t)?.name ?? t).join(', ')}` : ''}. Arose year ${c.founded}${parent ? ` from the ${parent.name}` : ''}${c.extinct !== null ? `; faded year ${c.extinct}` : ''}. Sample words: ${c.language.onsets.slice(0, 3).map((o, i) => o + (c.language.vowels[i % c.language.vowels.length] ?? '') + (c.language.codas[i % c.language.codas.length] ?? '')).join(', ')}.`);
   }
 
   out.push('', '## Wars', '');
   for (const w of world.wars) {
     out.push(`- **${w.name}** (${w.start}–${w.end ?? 'ongoing'}): ${world.polities[w.attacker].name} vs ${world.polities[w.defender].name}; ${w.battles} battles, ~${fmt(w.attackerLosses + w.defenderLosses)} dead${w.outcome ? `; ${w.outcome}` : ''}.`);
+  }
+
+  if (world.agreements.length) {
+    out.push('', '## Trade agreements', '');
+    for (const d of world.agreements) out.push(`- **${d.name}** (${d.start}–${d.end ?? 'in force'}): ${world.polities[d.a].name} and ${world.polities[d.b].name}${d.goods.length ? `, for ${d.goods.join(', ').toLowerCase()}` : ''}${d.endReason ? `; ended because ${d.endReason}` : ''}.`);
   }
 
   out.push('', '## Notable places', '');
@@ -155,10 +161,14 @@ export function worldSnapshot(world: World): unknown {
     polities: world.polities.map((p) => ({
       id: p.id, name: p.name, government: p.government, alive: p.alive, founded: p.founded, dissolved: p.dissolved,
       capital: p.capitalId, culture: p.cultureId, pop: Math.round(p.pop), techs: [...p.techs], ruler: p.ruler, pastRulers: p.pastRulers,
-      settlements: p.settlementIds, parent: p.parentPolity, popHistory: p.popHistory,
+      settlements: p.settlementIds, parent: p.parentPolity, popHistory: p.popHistory, hub: p.hubId, tariff: p.tariff,
+      agreements: [...p.agreements.keys()], shortages: [...p.deficit].map((d, g) => (d ? GOOD_NAMES[g] : '')).filter(Boolean),
     })),
-    cultures: world.cultures.map((c) => ({ id: c.id, name: c.name, adjective: c.adjective, race: c.raceId, parent: c.parentId, founded: c.founded, extinct: c.extinct, values: c.values, language: c.language })),
+    cultures: world.cultures.map((c) => ({ id: c.id, name: c.name, adjective: c.adjective, race: c.raceId, parent: c.parentId, founded: c.founded, extinct: c.extinct, values: c.values, traits: c.traits, language: c.language })),
     wars: world.wars,
+    agreements: world.agreements,
+    armies: world.armies,
+    caravans: world.caravans.map((c) => ({ home: c.homeId, from: c.fromId, to: c.toId, good: GOOD_NAMES[c.good], qty: Math.round(c.qty), returning: c.returning })),
     history: world.history,
     stats: world.stats,
   };
