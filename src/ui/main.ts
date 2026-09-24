@@ -471,7 +471,16 @@ for (const el of [overlayBody, ttDetail]) {
   });
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeOverlay();
+  if (e.key !== 'Escape') return;
+  if (overlay) return closeOverlay();
+  // Esc with nothing open clears the map selection and its nation highlight.
+  view.selectedSettlement = -1;
+  view.selectedPolity = -1;
+  view.selectedTile = -1;
+  selectedCulture = -1;
+  renderer.invalidate();
+  drawMap();
+  renderPanel(true);
 });
 
 const sLink = (id: number) => {

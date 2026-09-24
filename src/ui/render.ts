@@ -11,7 +11,7 @@ const ROAD_STYLE = [
 ];
 export const CARAVAN_COLOR: Record<string, string> = { merchant: '#e8b923', family: '#b57be0', nomad: '#d99152', convoy: '#3fbf7f' };
 
-export type MapLayer = 'terrain' | 'political' | 'culture' | 'race' | 'resource';
+export type MapLayer = 'terrain' | 'political' | 'nations' | 'culture' | 'race' | 'resource';
 
 export interface ViewState {
   layer: MapLayer;
@@ -32,6 +32,12 @@ export interface ViewState {
   selectedSettlement: number;
   selectedPolity: number;
   selectedTile: number;
+}
+
+interface NationShapes {
+  /** Nation owning each land tile, -1 if none. */
+  polityAt: Int32Array;
+  info: Map<number, { tiles: number; sx: number; sy: number; edges: number[] }>;
 }
 
 const colorCache = new Map<string, [number, number, number]>();
@@ -71,6 +77,11 @@ export class MapRenderer {
   private base: HTMLCanvasElement;
   private overlay: HTMLCanvasElement;
   private overlayKey = '';
+  /** Darkening mask over everything outside the selected nation. */
+  private focus: HTMLCanvasElement;
+  private focusKey = '';
+  private shapes: NationShapes | null = null;
+  private shapesKey = '';
 
   constructor(private world: World) {
     const { width, height } = world.map;
@@ -80,6 +91,9 @@ export class MapRenderer {
     this.overlay = document.createElement('canvas');
     this.overlay.width = width;
     this.overlay.height = height;
+    this.focus = document.createElement('canvas');
+    this.focus.width = width;
+    this.focus.height = height;
     this.paintBase();
   }
 
@@ -125,7 +139,7 @@ export class MapRenderer {
   private paintOverlay(view: ViewState): void {
     const world = this.world;
     const map = world.map;
-    const key = `${view.layer}:${view.resource}:${world.year}:${view.selectedPolity}`;
+    const key = `${view.layer}:${view.resource}:${world.monthIndex}:${world.settlements.length}`;
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     const ctx = this.overlay.getContext('2d')!;
@@ -152,7 +166,7 @@ export class MapRenderer {
         if (o < 0) continue;
         const s = world.settlements[o];
         let color: string;
-        if (view.layer === 'political') color = world.polities[s.polityId].color;
+        if (view.layer === 'political' || view.layer === 'nations') color = world.polities[s.polityId].color;
         else if (view.layer === 'culture') color = world.cultures[s.cultureId].color;
         else color = world.majorityRace(s).color;
         const [r, g, b] = toRgb(color);
@@ -161,18 +175,36 @@ export class MapRenderer {
           const oj = map.owner[j];
           if (oj < 0) return -1;
           const sj = world.settlements[oj];
-          return view.layer === 'political' ? sj.polityId : view.layer === 'culture' ? sj.cultureId : world.majorityRaceId(sj) === world.majorityRaceId(s) ? -2 : -3;
+          return view.layer === 'political' || view.layer === 'nations' ? sj.polityId : view.layer === 'culture' ? sj.cultureId : world.majorityRaceId(sj) === world.majorityRaceId(s) ? -2 : -3;
         };
         const mine = group(i);
         const x = i % w;
         const edge =
           (x + 1 < w && group(i + 1) !== mine) || (x > 0 && group(i - 1) !== mine) ||
           (i + w < map.size && group(i + w) !== mine) || (i - w >= 0 && group(i - w) !== mine);
-        const dim = view.selectedPolity >= 0 && view.layer === 'political' && s.polityId !== view.selectedPolity;
+        const water = map.elevation[i] < 0;
+        if (view.layer === 'nations') {
+          // Map-style: solid fills, near-black borders, pale sea margins.
+          d[i * 4] = edge ? r * 0.35 : r;
+          d[i * 4 + 1] = edge ? g * 0.35 : g;
+          d[i * 4 + 2] = edge ? b * 0.35 : b;
+          d[i * 4 + 3] = water ? 60 : edge ? 255 : 205;
+          continue;
+        }
         d[i * 4] = edge ? r * 0.55 : r;
         d[i * 4 + 1] = edge ? g * 0.55 : g;
         d[i * 4 + 2] = edge ? b * 0.55 : b;
-        d[i * 4 + 3] = edge ? 230 : dim ? 40 : map.elevation[i] < 0 ? 70 : 125;
+        d[i * 4 + 3] = edge ? 230 : water ? 70 : 125;
+      }
+      if (view.layer === 'nations') {
+        // Unclaimed wilds washed pale so the nations read clearly.
+        for (let i = 0; i < map.size; i++) {
+          if (map.owner[i] >= 0 || map.elevation[i] < 0) continue;
+          d[i * 4] = 236;
+          d[i * 4 + 1] = 232;
+          d[i * 4 + 2] = 222;
+          d[i * 4 + 3] = 120;
+        }
       }
     }
     ctx.putImageData(img, 0, 0);
@@ -180,6 +212,63 @@ export class MapRenderer {
 
   invalidate(): void {
     this.overlayKey = '';
+    this.focusKey = '';
+  }
+
+  /** Tile counts, centres and outline segments of every nation, rebuilt when borders may have moved. */
+  private nationShapes(): NationShapes {
+    const world = this.world;
+    const map = world.map;
+    const key = `${world.monthIndex}:${world.settlements.length}`;
+    if (this.shapes && key === this.shapesKey) return this.shapes;
+    this.shapesKey = key;
+    const w = map.width;
+    const polityAt = new Int32Array(map.size).fill(-1);
+    for (let i = 0; i < map.size; i++) {
+      const o = map.owner[i];
+      if (o >= 0 && map.elevation[i] >= 0) polityAt[i] = world.settlements[o].polityId;
+    }
+    const info = new Map<number, { tiles: number; sx: number; sy: number; edges: number[] }>();
+    for (let i = 0; i < map.size; i++) {
+      const p = polityAt[i];
+      if (p < 0) continue;
+      let n = info.get(p);
+      if (!n) {
+        n = { tiles: 0, sx: 0, sy: 0, edges: [] };
+        info.set(p, n);
+      }
+      const x = i % w;
+      const y = (i / w) | 0;
+      n.tiles++;
+      n.sx += x + 0.5;
+      n.sy += y + 0.5;
+      // Record each side of the tile that faces another nation, the wilds or the sea.
+      if (x + 1 >= w || polityAt[i + 1] !== p) n.edges.push(x + 1, y, x + 1, y + 1);
+      if (x - 1 < 0 || polityAt[i - 1] !== p) n.edges.push(x, y, x, y + 1);
+      if (y + 1 >= map.height || polityAt[i + w] !== p) n.edges.push(x, y + 1, x + 1, y + 1);
+      if (y - 1 < 0 || polityAt[i - w] !== p) n.edges.push(x, y, x + 1, y);
+    }
+    this.shapes = { polityAt, info };
+    return this.shapes;
+  }
+
+  private paintFocus(polity: number): void {
+    const world = this.world;
+    const map = world.map;
+    const key = `${polity}:${this.shapesKey}`;
+    if (key === this.focusKey) return;
+    this.focusKey = key;
+    const { polityAt } = this.nationShapes();
+    const ctx = this.focus.getContext('2d')!;
+    const img = ctx.createImageData(map.width, map.height);
+    for (let i = 0; i < map.size; i++) {
+      if (polityAt[i] === polity) continue;
+      img.data[i * 4] = 12;
+      img.data[i * 4 + 1] = 16;
+      img.data[i * 4 + 2] = 24;
+      img.data[i * 4 + 3] = 170;
+    }
+    ctx.putImageData(img, 0, 0);
   }
 
   draw(canvas: HTMLCanvasElement, view: ViewState, ink: { text: string; halo: string; accent: string }): void {
@@ -198,6 +287,7 @@ export class MapRenderer {
     ctx.drawImage(this.base, tx(0), ty(0), map.width * z, map.height * z);
     this.paintOverlay(view);
     ctx.drawImage(this.overlay, tx(0), ty(0), map.width * z, map.height * z);
+    const selected = view.selectedPolity >= 0 && world.polities[view.selectedPolity]?.alive ? view.selectedPolity : -1;
 
     const w = map.width;
     const cx = (t: number) => tx((t % w) + 0.5);
@@ -276,6 +366,13 @@ export class MapRenderer {
       const b = path[Math.min(k + 1, path.length - 1)];
       return [cx(a) + (cx(b) - cx(a)) * f, cy(a) + (cy(b) - cy(a)) * f];
     };
+
+    // Everything outside the selected nation sinks into shadow (roads and routes included).
+    if (selected >= 0) {
+      this.paintFocus(selected);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.focus, tx(0), ty(0), map.width * z, map.height * z);
+    }
 
     if (view.showCaravans && world.caravans.length) {
       for (const c of world.caravans) {
@@ -359,6 +456,71 @@ export class MapRenderer {
       }
     }
 
+    // Nation names written across their lands.
+    const shapes = view.layer === 'nations' || selected >= 0 ? this.nationShapes() : null;
+    const placed: [number, number, number, number][] = [];
+    const nameNation = (pid: number, forced: boolean) => {
+      const n = shapes!.info.get(pid);
+      if (!n) return;
+      const span = Math.sqrt(n.tiles) * z;
+      const size = Math.max(forced ? 14 : 11, Math.min(forced ? 34 : 30, span * 0.22));
+      const name = world.polities[pid].name.toUpperCase();
+      ctx.font = `700 ${size}px "Alegreya SC", Georgia, serif`;
+      const width = ctx.measureText(name).width;
+      if (!forced && (width > span * 3 || n.tiles < 25)) return;
+      const X = tx(n.sx / n.tiles);
+      const Y = ty(n.sy / n.tiles);
+      // Skip names that would collide with one already placed (the selected nation always shows).
+      const box: [number, number, number, number] = [X - width / 2 - 4, Y - size / 2 - 2, X + width / 2 + 4, Y + size / 2 + 2];
+      if (!forced && placed.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) return;
+      placed.push(box);
+      ctx.globalAlpha = !forced && selected >= 0 ? 0.35 : 1;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = Math.max(3, size * 0.22);
+      ctx.strokeStyle = ink.halo;
+      ctx.strokeText(name, X, Y);
+      ctx.fillStyle = forced ? ink.text : 'rgba(20, 22, 28, 0.82)';
+      ctx.fillText(name, X, Y);
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 1;
+    };
+    if (view.layer === 'nations' && shapes) {
+      const order = [...shapes.info.entries()].sort((a, b) => b[1].tiles - a[1].tiles).map(([pid]) => pid);
+      if (selected >= 0 && shapes.info.has(selected)) {
+        // Reserve the selected nation's spot first so others make way for it.
+        const n = shapes.info.get(selected)!;
+        const size = Math.max(14, Math.min(34, Math.sqrt(n.tiles) * z * 0.22));
+        ctx.font = `700 ${size}px "Alegreya SC", Georgia, serif`;
+        const width = ctx.measureText(world.polities[selected].name.toUpperCase()).width;
+        const X = tx(n.sx / n.tiles);
+        const Y = ty(n.sy / n.tiles);
+        placed.push([X - width / 2 - 4, Y - size / 2 - 2, X + width / 2 + 4, Y + size / 2 + 2]);
+      }
+      for (const pid of order) if (pid !== selected) nameNation(pid, false);
+    }
+    if (selected >= 0 && shapes) {
+      // A bright double outline around the selected nation's borders.
+      const edges = shapes.info.get(selected)?.edges ?? [];
+      ctx.beginPath();
+      for (let k = 0; k < edges.length; k += 4) {
+        ctx.moveTo(tx(edges[k]), ty(edges[k + 1]));
+        ctx.lineTo(tx(edges[k + 2]), ty(edges[k + 3]));
+      }
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = Math.max(3, Math.min(6, z * 0.6));
+      ctx.stroke();
+      ctx.strokeStyle = world.polities[selected].color;
+      ctx.lineWidth = Math.max(1.5, Math.min(3, z * 0.3));
+      ctx.stroke();
+      ctx.strokeStyle = ink.accent;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // Settlements, largest last so they sit on top.
     const list = world.settlements.filter((s) => s.alive || (view.showRuins && s.peakPop > 800));
     list.sort((a, b) => a.pop - b.pop);
@@ -368,6 +530,8 @@ export class MapRenderer {
       const X = tx(s.x + 0.5);
       const Y = ty(s.y + 0.5);
       if (X < -20 || Y < -20 || X > cw + 20 || Y > ch + 20) continue;
+      const foreign = selected >= 0 && (!s.alive || s.polityId !== selected);
+      ctx.globalAlpha = foreign ? 0.35 : 1;
       const isCapital = s.alive && world.polities[s.polityId].capitalId === s.id;
       const r = s.alive ? Math.max(2, Math.min(9, Math.log10(Math.max(10, s.pop)) * 1.6 - 1.5)) * Math.max(0.7, Math.min(1.6, z / 5)) : 2.5;
       ctx.beginPath();
@@ -384,7 +548,10 @@ export class MapRenderer {
       ctx.lineWidth = s.id === view.selectedSettlement ? 3 : 1.5;
       ctx.strokeStyle = s.id === view.selectedSettlement ? ink.accent : s.alive ? world.polities[s.polityId].color : '#5a534c';
       ctx.stroke();
-      const labelled = view.showLabels && (s.id === view.selectedSettlement || (s.alive && (isCapital ? z >= 2.5 || s.pop > 3000 : z >= 7 || (z >= 4 && s.pop > 2500))));
+      // In the Nations layer the map names nations, so only capitals (or close zoom) get town names;
+      // with a nation selected, only its own towns are named.
+      const busy = view.layer === 'nations' ? (isCapital ? z >= 5 : z >= 9) : isCapital ? z >= 2.5 || s.pop > 3000 : z >= 7 || (z >= 4 && s.pop > 2500);
+      const labelled = view.showLabels && (s.id === view.selectedSettlement || (s.alive && !foreign && busy));
       if (labelled) {
         const text = s.alive ? s.name : `${s.name} (ruins)`;
         ctx.lineWidth = 3;
@@ -394,6 +561,9 @@ export class MapRenderer {
         ctx.fillText(text, X + r + 4, Y);
       }
     }
+    ctx.globalAlpha = 1;
+
+    if (selected >= 0 && shapes) nameNation(selected, true);
 
     if (view.selectedTile >= 0 && view.selectedSettlement < 0) {
       ctx.strokeStyle = ink.accent;
