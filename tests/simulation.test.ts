@@ -5,6 +5,8 @@ import { DEFAULT_RACES } from '../src/engine/data/races';
 import { TECH_BY_ID } from '../src/engine/data/techs';
 import { Rng } from '../src/engine/rng';
 import { World } from '../src/engine/world';
+import { friendly } from '../src/engine/systems/diplomacy';
+import { settlementValue } from '../src/engine/systems/warAims';
 import { generateMap } from '../src/engine/worldgen';
 
 const small = (over = {}) => defaultConfig({ seed: 42, width: 120, height: 80, ...over });
@@ -137,6 +139,66 @@ describe('trade, armies and cultures', () => {
   it('develops survival traits from the environment', () => {
     expect(w.cultures.some((c) => c.traits.length > 0)).toBe(true);
     for (const c of w.cultures) expect(c.traits.length).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('politics, nobility and cohesion', () => {
+  const w = new World(small({ seed: 3 }));
+  w.run(400);
+  const alive = [...w.alivePolities()];
+
+  it('gives every nation past the tribal stage a ruling dynasty', () => {
+    for (const p of alive) {
+      if (p.government === 'tribe' || p.dynasty < 0) continue;
+      const h = w.nobles[p.dynasty];
+      expect(h.polityId).toBe(p.id);
+      expect(h.extinct).toBeNull();
+    }
+    expect(alive.some((p) => p.dynasty >= 0)).toBe(true);
+    expect(w.history.some((e) => e.kind === 'nobility')).toBe(true);
+  });
+
+  it('grants fiefs only to houses of the same nation', () => {
+    for (const s of w.aliveSettlements()) {
+      if (s.holder < 0) continue;
+      expect(w.nobles[s.holder].polityId).toBe(s.polityId);
+    }
+  });
+
+  it('keeps pacts and confederations consistent and never at war with a friend', () => {
+    for (const x of w.pacts.filter((x) => x.end === null)) {
+      expect(w.polities[x.a].pacts.has(x.id)).toBe(true);
+      expect(w.polities[x.b].pacts.has(x.id)).toBe(true);
+    }
+    for (const c of w.confederations.filter((c) => c.dissolved === null)) {
+      expect(c.members.length).toBeGreaterThanOrEqual(2);
+      for (const m of c.members) expect(w.polities[m].confederation).toBe(c.id);
+    }
+    for (const war of w.wars.filter((x) => x.end === null)) {
+      expect(friendly(w, war.attacker, war.defender)).toBe(false);
+    }
+    for (const p of alive) if (p.overlord >= 0) expect(p.overlord).not.toBe(p.id);
+  });
+
+  it('tracks loyalty, claims and connection to the capital', () => {
+    for (const s of w.aliveSettlements()) {
+      expect(s.loyalty).toBeGreaterThanOrEqual(0);
+      expect(s.loyalty).toBeLessThanOrEqual(1);
+      expect(s.claims[s.polityId]).toBeUndefined();
+      if (w.polities[s.polityId].capitalId === s.id) expect(s.connected).toBe(true);
+    }
+    expect([...w.aliveSettlements()].some((s) => Object.keys(s.claims).length > 0)).toBe(true);
+  });
+
+  it('values a claimed town more than it would otherwise', () => {
+    const s = [...w.aliveSettlements()].find((x) => Object.keys(x.claims).length > 0)!;
+    const claimant = w.polities[+Object.keys(s.claims)[0]];
+    const withClaim = settlementValue(w, claimant, s).value;
+    const saved = s.claims;
+    s.claims = {};
+    const without = settlementValue(w, claimant, s).value;
+    s.claims = saved;
+    expect(withClaim).toBeGreaterThan(without);
   });
 });
 

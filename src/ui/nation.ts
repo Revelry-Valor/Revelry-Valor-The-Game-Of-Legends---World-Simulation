@@ -8,6 +8,8 @@ import { levy } from '../engine/systems/military';
 import { POLICY_LABEL, accessPolicy } from '../engine/systems/access';
 import { ROAD_NAMES } from '../engine/systems/roads';
 import { usesCoin } from '../engine/systems/trade';
+import { greatHouses } from '../engine/systems/nobility';
+import { claimStrength } from '../engine/systems/warAims';
 import { compact, lineChart } from './chart';
 
 export interface UiHelpers {
@@ -64,6 +66,16 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
   const goods = Array.from({ length: GOOD_COUNT }, (_, g) => g).filter((g) => p.produced[g] > 0.5 || p.needed[g] > 0.5);
   const shortages = goods.filter((g) => p.deficit[g]);
   const r = p.ruler;
+  const dynasty = p.dynasty >= 0 ? world.nobles[p.dynasty] : null;
+  const nobles = p.alive ? greatHouses(world, p).sort((a, b) => b.prestige - a.prestige) : [];
+  const loyalty = towns.reduce((n, s) => n + s.loyalty * s.pop, 0) / Math.max(1, p.pop);
+  const cutOff = towns.filter((s) => !s.connected);
+  const pacts = [...p.pacts].map((pid) => world.pacts[pid]);
+  const conf = p.confederation >= 0 ? world.confederations[p.confederation] : null;
+  const vassals = world.polities.filter((v) => v.alive && v.overlord === id);
+  const tributaries = world.polities.filter((v) => v.alive && v.tributeTo === id);
+  const claims = [...world.aliveSettlements()].filter((s) => s.polityId !== id && claimStrength(world, id, s) > 0).sort((a, b) => b.pop - a.pop);
+  const houseOf = (hid: number) => (hid >= 0 ? world.nobles[hid] : null);
 
   return `
   <header class="dossier-head">
@@ -76,6 +88,7 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
       <div><dt>Population</dt><dd>${fmt(p.pop)}</dd></div>
       <div><dt>Settlements</dt><dd>${towns.length}</dd></div>
       <div><dt>Stability</dt><dd>${Math.round(p.stability * 100)}%</dd></div>
+      <div><dt>Loyalty</dt><dd>${Math.round(loyalty * 100)}%</dd></div>
       <div><dt>Treasury</dt><dd>${compact(p.treasury)}</dd></div>
       <div><dt>Army strength</dt><dd>${compact(p.military)}</dd></div>
       <div><dt>Techs known</dt><dd>${known} / ${TECHS.length}</dd></div>
@@ -134,7 +147,7 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
         <div><dt>In the field</dt><dd>${fmt(armies.reduce((s, a) => s + a.size, 0))}</dd></div>
       </dl>
       ${meter('War weariness', Math.min(1, p.warExhaustion))}
-      ${wars.length ? `<ul class="plain">${wars.map((w) => `<li><span class="chip crit">war</span> ${esc(w.name)} vs ${pLink(w.attacker === id ? w.defender : w.attacker)} <span class="muted small">since ${w.start}, ${w.battles} battles</span></li>`).join('')}</ul>` : '<p class="muted small">At peace.</p>'}
+      ${wars.length ? `<ul class="plain">${wars.map((w) => `<li><span class="chip crit">war</span>${w.parent !== undefined ? ' <span class="chip warn">ally</span>' : ''} ${esc(w.name)} vs ${pLink(w.attacker === id ? w.defender : w.attacker)} <span class="muted small">since ${w.start}, ${w.battles} battles${w.cause ? ` — over ${esc(w.cause)}` : ''}${w.goal !== undefined ? `; the prize: ${esc(world.settlements[w.goal].name)}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted small">At peace.</p>'}
       ${armies.length ? `<h4>Armies</h4><ul class="plain">${armies.map((a) => {
         const target = a.targetSettlement >= 0 ? world.settlements[a.targetSettlement] : null;
         return `<li><b>${esc(a.name)}</b> <span class="muted small">${fmt(a.size)} soldiers, ${a.victories} victories — ${a.siege > 0 && target ? `besieging ${esc(target.name)}` : target ? `marching on ${esc(target.name)}` : 'hunting the enemy'}</span></li>`;
@@ -162,17 +175,37 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
       }).join('')}</ul>
     </section>
 
+    <section class="card span2">
+      <h3>Court &amp; nobility</h3>
+      <p><b>${esc(r.title)} ${esc(r.name)}</b>${dynasty ? ` of <b>${esc(dynasty.name)}</b>` : ''} <span class="muted small">age ${world.year - r.born}, since ${r.since}</span><br>${r.traits.map((t) => `<span class="chip">${t}</span>`).join(' ')}</p>
+      ${dynasty ? `<p class="muted small">${esc(dynasty.name)} has ruled since ${dynasty.founded}.</p>` : '<p class="muted small">No ruling dynasty: power passes by custom among the elders.</p>'}
+      <h4>Great houses</h4>
+      ${nobles.length ? `<div class="table-wrap"><table><thead><tr><th>House</th><th>Seat</th><th class="num">Fiefs</th><th class="num">Prestige</th><th>Loyalty</th></tr></thead><tbody>${nobles.map((hh) => {
+        const tone = hh.loyalty < 0.3 ? 'crit' : hh.loyalty < 0.5 ? 'warn' : 'ok';
+        const plotting = hh.loyalty <= 0.3 && hh.ambition >= 0.45;
+        return `<tr><td><b>${esc(hh.name)}</b><br><span class="muted small">Lord ${esc(hh.head)}${hh.ambition > 0.7 ? ', ambitious' : ''}</span></td><td>${sLink(hh.seatId)}</td><td class="num">${hh.fiefs + 1}</td><td class="num">${hh.prestige.toFixed(1)}</td><td><span class="chip ${tone}">${Math.round(hh.loyalty * 100)}%</span>${plotting ? ' <span class="chip crit">plotting</span>' : ''}</td></tr>`;
+      }).join('')}</tbody></table></div>` : '<p class="muted small">No great houses yet; the crown holds every town directly.</p>'}
+      ${p.pastRulers.length ? `<h4>Earlier rulers</h4><ol class="plain small rulers">${p.pastRulers.slice().reverse().slice(0, 12).map((x) => `<li>${esc(x.title)} ${esc(x.name)}${x.houseId !== undefined && world.nobles[x.houseId] ? ` of ${esc(world.nobles[x.houseId].name)}` : ''} (${x.since}–${x.until}) — ${esc(x.fate ?? '')}</li>`).join('')}</ol>` : ''}
+    </section>
+
     <section class="card">
-      <h3>Rulers</h3>
-      <p><b>${esc(r.title)} ${esc(r.name)}</b> <span class="muted small">age ${world.year - r.born}, since ${r.since}</span><br>${r.traits.map((t) => `<span class="chip">${t}</span>`).join(' ')}</p>
-      ${p.pastRulers.length ? `<ol class="plain small rulers">${p.pastRulers.slice().reverse().slice(0, 12).map((x) => `<li>${esc(x.title)} ${esc(x.name)} (${x.since}–${x.until}) — ${esc(x.fate ?? '')}</li>`).join('')}</ol>` : ''}
+      <h3>Diplomacy</h3>
+      ${p.overlord >= 0 ? `<p><span class="chip warn">vassal</span> of ${pLink(p.overlord)} <span class="muted small">— loyalty to its overlord ${Math.round(p.vassalLoyalty * 100)}%</span></p>` : ''}
+      ${conf ? `<p><span class="chip ok">confederation</span> <b>${esc(conf.name)}</b> <span class="muted small">since ${conf.founded}, led by</span> ${pLink(conf.leader)}<br><span class="small">Members: ${conf.members.map((m) => pLink(m)).join(', ')}</span></p>` : ''}
+      ${pacts.length ? `<ul class="plain">${pacts.map((x) => `<li><span class="chip ${x.type === 'alliance' ? 'ok' : ''}">${x.type}</span> ${pLink(x.a === id ? x.b : x.a)}<br><span class="muted small">${esc(x.name)}, since ${x.start}</span></li>`).join('')}</ul>` : ''}
+      ${vassals.length ? `<p class="small">Vassals: ${vassals.map((v) => `${pLink(v.id)} <span class="muted">(${Math.round(v.vassalLoyalty * 100)}% loyal)</span>`).join(', ')}</p>` : ''}
+      ${p.tributeTo >= 0 ? `<p class="small">Pays ${compact(p.tributeAmount)} a year in war tribute to ${pLink(p.tributeTo)} until ${p.tributeUntil}.</p>` : ''}
+      ${tributaries.length ? `<p class="small">Receives tribute from ${tributaries.map((v) => pLink(v.id)).join(', ')}.</p>` : ''}
+      ${!p.pacts.size && !conf && p.overlord < 0 && !vassals.length ? '<p class="muted small">No marriages, alliances or overlords: it stands alone.</p>' : ''}
+      ${claims.length ? `<h4>Claims</h4><p class="small">Towns it once held and still calls its own: ${claims.slice(0, 8).map((s) => `${sLink(s.id)} <span class="muted">(${esc(world.polities[s.polityId].name)})</span>`).join(', ')}${claims.length > 8 ? ` and ${claims.length - 8} more` : ''}.</p>` : ''}
+      ${cutOff.length ? `<h4>Cut off</h4><p class="small">${cutOff.map((s) => `${sLink(s.id)} <span class="muted">(${s.cutOff} yrs, ${Math.round(s.loyalty * 100)}% loyal)</span>`).join(', ')} cannot be reached from the capital.</p>` : ''}
     </section>
 
     <section class="card span2">
       <h3>Settlements</h3>
       <div class="table-wrap"><table>
-        <thead><tr><th>Settlement</th><th>Size</th><th class="num">People</th><th class="num">Wealth</th><th class="num">Stability</th><th>Culture</th></tr></thead>
-        <tbody>${towns.slice(0, 40).map((s) => `<tr><td>${sLink(s.id)}${s.id === p.capitalId ? ' <span class="chip">capital</span>' : ''}${s.id === p.hubId && s.id !== p.capitalId ? ' <span class="chip">hub</span>' : ''}</td><td class="small">${settlementTier(s.pop)}</td><td class="num">${compact(s.pop)}</td><td class="num">${compact(s.wealth)}</td><td class="num">${Math.round(s.stability * 100)}%</td><td class="small">${esc(world.cultures[s.cultureId].name)}</td></tr>`).join('')}</tbody>
+        <thead><tr><th>Settlement</th><th>Size</th><th class="num">People</th><th class="num">Wealth</th><th class="num">Stability</th><th class="num">Loyalty</th><th>Held by</th><th>Culture</th></tr></thead>
+        <tbody>${towns.slice(0, 40).map((s) => `<tr><td>${sLink(s.id)}${s.id === p.capitalId ? ' <span class="chip">capital</span>' : ''}${s.id === p.hubId && s.id !== p.capitalId ? ' <span class="chip">hub</span>' : ''}</td><td class="small">${settlementTier(s.pop)}</td><td class="num">${compact(s.pop)}</td><td class="num">${compact(s.wealth)}</td><td class="num">${Math.round(s.stability * 100)}%</td><td class="num">${Math.round(s.loyalty * 100)}%${s.connected ? '' : ' <span class="chip crit">cut off</span>'}</td><td class="small">${houseOf(s.holder) ? esc(houseOf(s.holder)!.name) : 'the crown'}</td><td class="small">${esc(world.cultures[s.cultureId].name)}</td></tr>`).join('')}</tbody>
       </table></div>
       ${towns.length > 40 ? `<p class="muted small">…and ${towns.length - 40} more.</p>` : ''}
       <p class="muted small">Total wealth ${compact(wealth)}.</p>

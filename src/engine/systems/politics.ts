@@ -6,6 +6,10 @@ import { controlRange } from './migration';
 import { updatePolicies } from './access';
 import { endAllDeals, runAgreements } from './agreements';
 import { raiseArmies } from './military';
+import { runCohesion } from './cohesion';
+import { callToArms, endPact, friendly, marriageInheritance, peaceTerms, runDiplomacy, sameConfederation } from './diplomacy';
+import { crisisSecession, runNobility, succession } from './nobility';
+import { bestGoal, claimStrength } from './warAims';
 
 const GOV_STABILITY: Record<Government, number> = {
   tribe: 0.1, chiefdom: 0.03, 'city-state': 0.06, kingdom: 0.04, empire: -0.02, republic: 0.03, theocracy: 0.07,
@@ -19,10 +23,13 @@ export function runPolitics(world: World): void {
   updateStability(world);
   updateGovernments(world);
   updateRulers(world);
+  runNobility(world);
   updateRelations(world);
   const pairs = contactPairs(world);
   updatePolicies(world, pairs);
   runAgreements(world, pairs);
+  runDiplomacy(world, pairs);
+  runCohesion(world);
   declareWars(world);
   raiseArmies(world);
   resolveWars(world);
@@ -144,6 +151,9 @@ function dissolve(world: World, p: Polity, text: string): void {
     world.polities[partner].agreements.delete(p.id);
   }
   p.agreements.clear();
+  for (const id of [...p.pacts]) endPact(world, world.pacts[id], `the ${p.name} ceased to exist`, false);
+  p.confederation = -1;
+  p.tributeTo = -1;
   world.hubsDirty = true;
   world.log('polity', p.pop > 5000 || p.settlementIds.length > 3 ? 3 : p.pop > 800 ? 2 : 1, text, { polities: [p.id] });
 }
@@ -169,6 +179,7 @@ function updateStability(world: World): void {
     target -= Math.min(0.3, Math.max(0, p.settlementIds.length - 10) * 0.006 + Math.max(0, p.pop - 100000) / 1e6);
     for (const t of p.ruler.traits) target += TRAIT_STABILITY[t] ?? 0;
     target += Math.min(0.08, s.greatWorks.length * 0.03);
+    target += (s.loyalty - 0.6) * 0.2;
     s.stability = Math.max(0, Math.min(1, s.stability + (target - s.stability) * 0.15 + rng.normal() * 0.015));
     const a = acc.get(p.id) ?? [0, 0];
     a[0] += s.stability * s.pop;
@@ -226,15 +237,19 @@ function updateRulers(world: World): void {
     r.until = world.year;
     r.fate = fate;
     p.pastRulers.push(r);
+    // A marriage alliance may pass the crown to the allied dynasty, uniting the two realms.
+    if (!termEnd && p.government !== 'republic' && rng.chance(0.3) && marriageInheritance(world, p)) continue;
     const next = world.newRuler(p);
+    p.ruler = next;
+    const house = succession(world, p, next);
     const sameName = p.pastRulers.filter((x) => x.name === next.name || x.name.startsWith(next.name + ' ')).length;
     if (sameName > 0) next.name += ROMAN[Math.min(ROMAN.length - 1, sameName + 1)];
-    p.ruler = next;
     const big = p.pop > 20000;
-    world.log('ruler', big ? 2 : 1, `${r.title} ${r.name} of the ${p.name} ${fate}${termEnd ? '' : ` after ${world.year - r.since} years`}; ${next.title} ${next.name} (${next.traits.join(', ')}) ${p.government === 'republic' ? 'was elected' : 'took power'}.`, { polities: [p.id] });
+    world.log('ruler', big ? 2 : 1, `${r.title} ${r.name} of the ${p.name} ${fate}${termEnd ? '' : ` after ${world.year - r.since} years`}; ${next.title} ${next.name}${house} (${next.traits.join(', ')}) ${p.government === 'republic' ? 'was elected' : 'took power'}.`, { polities: [p.id] });
     if (!termEnd && p.stability < 0.45 && p.settlementIds.length >= 2 && rng.chance(0.35)) {
       for (const id of p.settlementIds) world.settlements[id].stability -= 0.15;
       world.log('rebellion', 2, `A succession crisis shook the ${p.name} as rival claimants contested the throne of ${next.name}.`, { polities: [p.id] });
+      if (rng.chance(0.3)) crisisSecession(world, p);
     }
   }
 }
@@ -253,6 +268,14 @@ export function contactPairs(world: World): [number, number][] {
 }
 
 function updateRelations(world: World): void {
+  // Lost towns still claimed by their former rulers poison relations with whoever holds them.
+  const grievance = new Map<number, number>();
+  for (const s of world.aliveSettlements()) {
+    for (const k in s.claims) {
+      const key = pairKey(s.polityId, +k);
+      grievance.set(key, (grievance.get(key) ?? 0) + claimStrength(world, +k, s));
+    }
+  }
   for (const [a, b] of contactPairs(world)) {
     const A = world.polities[a];
     const B = world.polities[b];
@@ -269,6 +292,13 @@ function updateRelations(world: World): void {
     // Great powers that share a border become rivals.
     if (border > 0 && A.pop > 30000 && B.pop > 30000) target -= 0.2;
     if (A.agreements.has(b)) target += 0.12;
+    for (const id of A.pacts) {
+      const pact = world.pacts[id];
+      if (pact.a === b || pact.b === b) target += pact.type === 'marriage' ? 0.2 : 0.25;
+    }
+    if (sameConfederation(world, a, b)) target += 0.3;
+    if (A.overlord === b || B.overlord === a) target += 0.15;
+    target -= Math.min(0.35, (grievance.get(pairKey(a, b)) ?? 0) * 0.12);
     if (world.atWar(a, b)) target = -0.8;
     const cur = A.relations.get(b) ?? 0;
     const next = Math.max(-1, Math.min(1, cur + (target - cur) * 0.08 + world.rng.normal() * 0.03));
@@ -281,29 +311,38 @@ function declareWars(world: World): void {
   const rng = world.rng;
   for (const [a, b] of contactPairs(world)) {
     const rel = world.polities[a].relations.get(b) ?? 0;
-    if (rel > -0.12 || world.atWar(a, b)) continue;
+    if (rel > 0 || world.atWar(a, b) || friendly(world, a, b)) continue;
     for (const [x, y] of [[a, b], [b, a]]) {
       const A = world.polities[x];
       const B = world.polities[y];
       if ((A.truces.get(y) ?? -1) > world.year || A.wars.size >= 2 || A.warExhaustion > 0.3) continue;
       const ratio = A.military / Math.max(1, B.military);
       if (ratio < 0.8) continue;
+      // What is there to fight for? Claims, kin, resources, borders, trade.
+      const goal = bestGoal(world, A, B);
+      if (!goal) continue;
+      const grievance = Math.max(0, -rel - 0.1) + (goal.val.claim ? 0.06 : 0);
+      if (grievance <= 0) continue;
       let aggression = world.cultures[A.cultureId].values.militarism;
       for (const t of A.ruler.traits) aggression += TRAIT_AGGRESSION[t] ?? 0;
-      const p = (-rel - 0.1) * Math.max(0, aggression) * 0.12 * Math.min(2, ratio);
+      const motive = Math.max(0.3, Math.min(1.8, goal.val.value / 40));
+      const p = grievance * Math.max(0, aggression) * 0.12 * Math.min(2, ratio) * motive;
       if (!rng.chance(p)) continue;
       const border = world.borders.get(pairKey(x, y)) ?? 0;
       const sameCulture = A.cultureId === B.cultureId;
-      const cause = sameCulture ? rng.pick(['a blood feud between their ruling houses', 'a disputed claim of kinship and tribute', 'rival claims to the same ancestral lands'])
+      const cause = goal.val.reason && rng.chance(0.8) ? goal.val.reason
+        : sameCulture ? rng.pick(['a blood feud between their ruling houses', 'a disputed claim of kinship and tribute', 'rival claims to the same ancestral lands'])
         : border > 0 ? rng.pick(['disputed borderlands', 'raids along the frontier', 'hunger for fertile land'])
         : rng.pick(['a bitter trade rivalry', 'an insult to their envoys', 'fear of a rising power']);
-      startWar(world, A, B, cause);
+      const war = startWar(world, A, B, cause, undefined, goal.settlement.id);
+      war.cause = cause;
       break;
     }
   }
 }
 
-export function startWar(world: World, A: Polity, B: Polity, cause: string): War {
+/** Declare war. `parent` marks a war joined to honour an alliance; allies are called only to a new war. */
+export function startWar(world: World, A: Polity, B: Polity, cause: string, parent?: number, goal?: number): War {
   const rng = world.rng;
   const nameOptions = [
     `The ${adjectiveOf(A.baseName)}-${adjectiveOf(B.baseName)} War`,
@@ -322,13 +361,19 @@ export function startWar(world: World, A: Polity, B: Polity, cause: string): War
     attackerLosses: 0,
     defenderLosses: 0,
     conquered: [],
+    parent,
+    goal,
+    cause,
   };
   world.wars.push(war);
   endAllDeals(world, A.id, B.id, 'war broke out between them');
   A.wars.add(war.id);
   B.wars.add(war.id);
   const imp = A.pop + B.pop > 8000 && Math.min(A.pop, B.pop) > 1500 ? 3 : A.pop + B.pop > 2000 ? 2 : 1;
-  world.log('war', imp, `${war.name} began: the ${A.name} (${A.ruler.title} ${A.ruler.name}) marched on the ${B.name} over ${cause}.`, { polities: [A.id, B.id] });
+  world.log('war', imp, parent === undefined
+    ? `${war.name} began: the ${A.name} (${A.ruler.title} ${A.ruler.name}) marched on the ${B.name} over ${cause}.`
+    : `The ${A.name} entered ${world.wars[parent].name} against the ${B.name}, honouring ${cause}.`, { polities: [A.id, B.id] });
+  if (parent === undefined) callToArms(world, war);
   return war;
 }
 
@@ -347,6 +392,40 @@ function endWar(world: World, war: War, outcome: string): void {
   B.relations.set(A.id, -0.25);
   for (const army of world.armies) if (army.warId === war.id) army.alive = false;
   world.armies = world.armies.filter((a) => a.alive);
+  // Allies who joined this war make peace with it.
+  for (const w of world.wars) if (w.parent === war.id && w.end === null) endWar(world, w, `peace was made in ${war.name}`);
+}
+
+/** Move a settlement from one nation to another; the old owner keeps a claim on it. */
+export function transferSettlement(world: World, s: Settlement, from: Polity, to: Polity, loyalty: number): void {
+  if (from.id === to.id) return;
+  const reclaimed = claimStrength(world, to.id, s) > 0;
+  s.claims[from.id] = world.year;
+  delete s.claims[to.id];
+  s.polityId = to.id;
+  s.heldSince = world.year;
+  s.holder = -1;
+  s.cutOff = 0;
+  s.connected = true;
+  s.loyalty = Math.min(1, loyalty + (reclaimed ? 0.3 : 0) + (s.cultureId === to.cultureId ? 0.15 : 0));
+  from.settlementIds = from.settlementIds.filter((id) => id !== s.id);
+  if (!to.settlementIds.includes(s.id)) to.settlementIds.push(s.id);
+  from.pop -= s.pop;
+  to.pop += s.pop;
+  world.territoryDirty = true;
+  world.hubsDirty = true;
+}
+
+/** Fold a whole nation into another, peacefully. */
+export function absorb(world: World, into: Polity, p: Polity, text: string): void {
+  for (const id of [...p.settlementIds]) transferSettlement(world, world.settlements[id], p, into, 0.7);
+  for (const id of into.settlementIds) delete world.settlements[id].claims[p.id];
+  p.settlementIds = [];
+  for (const v of world.polities) if (v.alive && v.overlord === p.id) v.overlord = into.id;
+  dissolve(world, p, text);
+  const e = world.history[world.history.length - 1];
+  e.kind = 'union';
+  e.polities = [p.id, into.id];
 }
 
 export function spreadLosses(world: World, p: Polity, n: number): void {
@@ -360,18 +439,13 @@ export function spreadLosses(world: World, p: Polity, n: number): void {
 /** Transfer a conquered settlement to the victor. */
 export function captureSettlement(world: World, war: War, att: Polity, def: Polity, target: Settlement, by: string): void {
   const wasCapital = def.capitalId === target.id;
-  target.polityId = att.id;
-  target.stability = 0.25;
+  const reclaimed = claimStrength(world, att.id, target) > 0;
+  transferSettlement(world, target, def, att, 0.2);
+  target.stability = reclaimed ? 0.45 : 0.25;
   att.treasury += target.wealth * 0.4;
   target.wealth *= 0.5;
   war.conquered.push(target.id);
-  def.settlementIds = def.settlementIds.filter((id) => id !== target.id);
-  att.settlementIds.push(target.id);
-  def.pop -= target.pop;
-  att.pop += target.pop;
-  world.territoryDirty = true;
-  world.hubsDirty = true;
-  world.log('conquest', (wasCapital && def.pop > 3000) || target.pop > 5000 ? 3 : wasCapital || target.pop > 800 ? 2 : 1, `${by.charAt(0).toUpperCase() + by.slice(1)} of the ${att.name} stormed ${target.name}${wasCapital ? `, capital of the ${def.name}` : ` and took it from the ${def.name}`}.`, { polities: [att.id, def.id], settlements: [target.id] });
+  world.log('conquest', (wasCapital && def.pop > 3000) || target.pop > 5000 ? 3 : wasCapital || target.pop > 800 ? 2 : 1, `${by.charAt(0).toUpperCase() + by.slice(1)} of the ${att.name} stormed ${target.name}${wasCapital ? `, capital of the ${def.name}` : reclaimed ? `, winning it back from the ${def.name}` : ` and took it from the ${def.name}`}.`, { polities: [att.id, def.id], settlements: [target.id] });
   if (wasCapital) def.warExhaustion += 0.25;
   if (def.settlementIds.length === 0) {
     endWar(world, war, `the ${att.name} conquered the ${def.name}`);
@@ -398,9 +472,27 @@ function resolveWars(world: World): void {
       const lost = war.conquered.filter((id) => world.settlements[id].alive && world.settlements[id].polityId === B.id).length;
       const place = world.settlements[rng.chance(0.5) ? A.capitalId : B.capitalId];
       let outcome: string;
-      if (gained > lost) outcome = `the ${A.name} won ${gained} settlement${gained > 1 ? 's' : ''}`;
-      else if (lost > gained) outcome = `the ${B.name} turned the tide and took ${lost} settlement${lost > 1 ? 's' : ''}`;
-      else outcome = 'neither side gained ground';
+      let winner: Polity | null = null;
+      let loser: Polity | null = null;
+      if (gained > lost) {
+        outcome = `the ${A.name} won ${gained} settlement${gained > 1 ? 's' : ''}`;
+        [winner, loser] = [A, B];
+      } else if (lost > gained) {
+        outcome = `the ${B.name} turned the tide and took ${lost} settlement${lost > 1 ? 's' : ''}`;
+        [winner, loser] = [B, A];
+      } else {
+        outcome = 'neither side gained ground';
+        if (A.warExhaustion + 0.15 < B.warExhaustion) [winner, loser] = [A, B];
+        else if (B.warExhaustion + 0.15 < A.warExhaustion) [winner, loser] = [B, A];
+      }
+      // A victorious attacker may have the town it fought for ceded at the peace table.
+      const goal = war.goal !== undefined ? world.settlements[war.goal] : null;
+      if (winner === A && goal?.alive && goal.polityId === B.id && goal.id !== B.capitalId && rng.chance(0.5)) {
+        transferSettlement(world, goal, B, A, 0.3);
+        war.conquered.push(goal.id);
+        outcome += `, and ${goal.name} was ceded to it`;
+      }
+      if (war.parent === undefined) outcome += peaceTerms(world, war, winner, loser);
       endWar(world, war, outcome);
       A.warExhaustion *= 0.5;
       B.warExhaustion *= 0.5;
@@ -414,24 +506,21 @@ function rebellions(world: World): void {
   for (const s of [...world.aliveSettlements()]) {
     const p = world.polities[s.polityId];
     if (!p.alive || p.capitalId === s.id || p.settlementIds.length < 2) continue;
-    if (s.stability >= 0.22 || !rng.chance((0.22 - s.stability) * 0.6)) continue;
+    if (s.stability >= 0.22 || s.loyalty >= 0.45 || !rng.chance((0.22 - s.stability) * 0.6 * (1 + (0.45 - s.loyalty) * 2))) continue;
     const rebels = [s];
     for (const li of s.links) {
       const l = world.links[li];
       const o = world.settlements[l.a === s.id ? l.b : l.a];
-      if (o.alive && o.polityId === p.id && o.id !== p.capitalId && o.stability < 0.35 && o.cultureId === s.cultureId) rebels.push(o);
+      if (o.alive && o.polityId === p.id && o.id !== p.capitalId && o.stability < 0.35 && o.loyalty < 0.5 && o.cultureId === s.cultureId) rebels.push(o);
     }
     const np = world.createPolity(s.cultureId, s, p.id, p.techs);
+    np.settlementIds = [];
     for (const r of rebels) {
-      r.polityId = np.id;
+      transferSettlement(world, r, p, np, 0.8);
       r.stability = 0.6;
     }
-    np.settlementIds = rebels.map((r) => r.id);
-    p.settlementIds = p.settlementIds.filter((id) => !rebels.includes(world.settlements[id]));
     np.relations.set(p.id, -0.5);
     p.relations.set(np.id, -0.5);
-    world.territoryDirty = true;
-    world.hubsDirty = true;
     const imp = rebels.length > 2 || s.pop > 5000 ? 3 : s.pop > 800 ? 2 : 1;
     world.log('rebellion', imp, `${s.name}${rebels.length > 1 ? ` and ${rebels.length - 1} other settlement${rebels.length > 2 ? 's' : ''}` : ''} rose against the ${p.name}, proclaiming the ${np.name}.`, { polities: [np.id, p.id], settlements: rebels.map((r) => r.id) });
     const mil = world.cultures[p.cultureId].values.militarism;
@@ -456,15 +545,6 @@ function unions(world: World): void {
     if (!best) continue;
     const chance = 0.02 + (best.government !== 'tribe' ? 0.02 : 0) + (best.cultureId === p.cultureId ? 0.02 : 0);
     if (!rng.chance(chance)) continue;
-    for (const id of p.settlementIds) {
-      world.settlements[id].polityId = best.id;
-      best.settlementIds.push(id);
-    }
-    best.pop += p.pop;
-    p.settlementIds = [];
-    world.territoryDirty = true;
-    dissolve(world, p, `The ${p.name} swore allegiance to the ${best.name}, joining it peacefully.`);
-    world.history[world.history.length - 1].kind = 'union';
-    world.history[world.history.length - 1].polities = [p.id, best.id];
+    absorb(world, best, p, `The ${p.name} swore allegiance to the ${best.name}, joining it peacefully.`);
   }
 }

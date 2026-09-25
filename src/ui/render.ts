@@ -1,6 +1,7 @@
 import { BIOMES, Biome, Relief } from '../engine/data/biomes';
 import { Res } from '../engine/data/economy';
 import type { World } from '../engine/world';
+import { friendly } from '../engine/systems/diplomacy';
 
 const ROAD_STYLE = [
   { color: '', width: 0, min: 0 },
@@ -252,10 +253,19 @@ export class MapRenderer {
     return this.shapes;
   }
 
+  /** Nations bound to `polity` by marriage, alliance, confederation or vassalage. */
+  private bondedTo(polity: number): Set<number> {
+    const world = this.world;
+    const out = new Set<number>();
+    for (const q of world.alivePolities()) if (q.id !== polity && friendly(world, polity, q.id)) out.add(q.id);
+    return out;
+  }
+
   private paintFocus(polity: number): void {
     const world = this.world;
     const map = world.map;
-    const key = `${polity}:${this.shapesKey}`;
+    const bonded = this.bondedTo(polity);
+    const key = `${polity}:${this.shapesKey}:${[...bonded].join(',')}`;
     if (key === this.focusKey) return;
     this.focusKey = key;
     const { polityAt } = this.nationShapes();
@@ -266,7 +276,8 @@ export class MapRenderer {
       img.data[i * 4] = 12;
       img.data[i * 4 + 1] = 16;
       img.data[i * 4 + 2] = 24;
-      img.data[i * 4 + 3] = 170;
+      // Allies, kin by marriage, confederates and vassals stay half-lit.
+      img.data[i * 4 + 3] = polityAt[i] >= 0 && bonded.has(polityAt[i]) ? 80 : 170;
     }
     ctx.putImageData(img, 0, 0);
   }
@@ -519,7 +530,34 @@ export class MapRenderer {
       ctx.setLineDash([4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Dashed borders around the nations bound to it.
+      for (const b of this.bondedTo(selected)) {
+        const be = shapes.info.get(b)?.edges ?? [];
+        if (!be.length) continue;
+        ctx.beginPath();
+        for (let k = 0; k < be.length; k += 4) {
+          ctx.moveTo(tx(be[k]), ty(be[k + 1]));
+          ctx.lineTo(tx(be[k + 2]), ty(be[k + 3]));
+        }
+        ctx.strokeStyle = world.polities[b].color;
+        ctx.lineWidth = Math.max(1.5, Math.min(3, z * 0.3));
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
+
+    // A red ring marks towns cut off from their capital.
+    ctx.strokeStyle = 'rgba(220, 60, 50, 0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 2]);
+    for (const s of world.settlements) {
+      if (!s.alive || s.connected || (selected >= 0 && s.polityId !== selected)) continue;
+      ctx.beginPath();
+      ctx.arc(tx(s.x + 0.5), ty(s.y + 0.5), Math.max(6, z * 0.9), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
 
     // Settlements, largest last so they sit on top.
     const list = world.settlements.filter((s) => s.alive || (view.showRuins && s.peakPop > 800));

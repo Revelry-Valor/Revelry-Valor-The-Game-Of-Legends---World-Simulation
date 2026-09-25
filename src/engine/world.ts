@@ -17,8 +17,8 @@ import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
 import { buildHubLinks, buildTradeLinks, runTrade, runTribute } from './systems/trade';
 import type {
-  Army, Caravan, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
-  Settlement, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
+  Army, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
+  NobleHouse, Pact, Settlement, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
 } from './types';
 import { VALUE_KEYS } from './types';
 import { generateMap } from './worldgen';
@@ -49,6 +49,9 @@ export class World {
   hubLinks: TradeLink[] = [];
   caravans: Caravan[] = [];
   houses: TradingHouse[] = [];
+  nobles: NobleHouse[] = [];
+  pacts: Pact[] = [];
+  confederations: Confederation[] = [];
   /** Routes travelled by free traders and convoys, keyed by settlement pair. */
   routes = new Map<number, TradeRoute>();
   /** Recent battles and sieges, for drawing on the map. */
@@ -270,6 +273,13 @@ export class World {
       tributeIn: 0,
       tradeByKind: { internal: 0, caravan: 0, convoy: 0 },
       transit: 0,
+      loyalty: 0.8,
+      holder: -1,
+      claims: {},
+      connected: true,
+      cutOff: 0,
+      surrounded: 0,
+      heldSince: this.year,
       lastPrice: Float64Array.from(GOOD_BASE_PRICE),
       coastal: map.coastal[tile] === 1,
       river: map.river[tile] > 0,
@@ -326,6 +336,14 @@ export class World {
       hubId: capital.id,
       agreements: new Map(),
       policy: new Map(),
+      dynasty: -1,
+      pacts: new Set(),
+      confederation: -1,
+      overlord: -1,
+      vassalLoyalty: 0.6,
+      tributeTo: -1,
+      tributeAmount: 0,
+      tributeUntil: 0,
       embargoes: new Set(),
       produced: new Float64Array(GOOD_COUNT),
       needed: new Float64Array(GOOD_COUNT),

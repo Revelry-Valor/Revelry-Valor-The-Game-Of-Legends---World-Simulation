@@ -115,10 +115,11 @@ export function chronicleMarkdown(world: World, minImportance = 2): string {
     out.push(`### ${p.name}`);
     out.push(`${p.alive ? 'Founded' : 'Existed from'} year ${p.founded}${p.dissolved !== null ? ` to ${p.dissolved}` : ''}. ${world.cultures[p.cultureId].adjective} ${p.government}; peak population ${fmt(peak)}. ${p.alive ? `Now in the ${polityEra(p)}, capital ${world.settlements[p.capitalId].name}.` : ''}`);
     if (p.parentPolity >= 0) out.push(`Broke away from the ${world.polities[p.parentPolity].name}.`);
+    if (p.dynasty >= 0) out.push(`${p.alive ? 'Ruled by' : 'Last ruled by'} ${world.nobles[p.dynasty].name}.${p.overlord >= 0 && p.alive ? ` A vassal of the ${world.polities[p.overlord].name}.` : ''}`);
     const rulers = [...p.pastRulers, ...(p.alive ? [p.ruler] : [])];
     if (rulers.length) {
       out.push('', 'Rulers:');
-      for (const r of rulers) out.push(`- ${r.title} ${r.name} (${r.since}–${r.until ?? 'present'}; ${r.traits.join(', ')})${r.fate ? ` — ${r.fate}` : ''}`);
+      for (const r of rulers) out.push(`- ${r.title} ${r.name}${r.houseId !== undefined && world.nobles[r.houseId] ? ` of ${world.nobles[r.houseId].name}` : ''} (${r.since}–${r.until ?? 'present'}; ${r.traits.join(', ')})${r.fate ? ` — ${r.fate}` : ''}`);
     }
     out.push('');
   }
@@ -131,12 +132,27 @@ export function chronicleMarkdown(world: World, minImportance = 2): string {
 
   out.push('', '## Wars', '');
   for (const w of world.wars) {
-    out.push(`- **${w.name}** (${w.start}–${w.end ?? 'ongoing'}): ${world.polities[w.attacker].name} vs ${world.polities[w.defender].name}; ${w.battles} battles, ~${fmt(w.attackerLosses + w.defenderLosses)} dead${w.outcome ? `; ${w.outcome}` : ''}.`);
+    out.push(`- **${w.name}** (${w.start}–${w.end ?? 'ongoing'}): ${world.polities[w.attacker].name} vs ${world.polities[w.defender].name}${w.cause ? `, over ${w.cause}` : ''}; ${w.battles} battles, ~${fmt(w.attackerLosses + w.defenderLosses)} dead${w.outcome ? `; ${w.outcome}` : ''}.`);
   }
 
   if (world.agreements.length) {
     out.push('', '## Trade agreements', '');
     for (const d of world.agreements) out.push(`- **${d.name}** (${d.type}; ${d.start}–${d.end ?? 'in force'}): ${world.polities[d.a].name} and ${world.polities[d.b].name}${d.goods.length ? `, for ${d.goods.join(', ').toLowerCase()}` : ''}${d.endReason ? `; ended because ${d.endReason}` : ''}.`);
+  }
+
+  if (world.pacts.length || world.confederations.length) {
+    out.push('', '## Marriages, alliances and confederations', '');
+    for (const c of world.confederations) out.push(`- **${c.name}** (confederation; ${c.founded}–${c.dissolved ?? 'present'}): ${c.members.map((m) => world.polities[m].name).join(', ') || 'no members left'}.`);
+    for (const x of world.pacts.filter((x) => x.end === null || world.polities[x.a].pop + world.polities[x.b].pop > 5000)) out.push(`- **${x.name}** (${x.type}; ${x.start}–${x.end ?? 'in force'}): ${world.polities[x.a].name} and ${world.polities[x.b].name}${x.endReason ? `; ended because ${x.endReason}` : ''}.`);
+  }
+
+  const houses = world.nobles.filter((h) => h.prestige > 4 || world.polities.some((p) => p.dynasty === h.id && p.alive));
+  if (houses.length) {
+    out.push('', '## Noble houses', '');
+    for (const h of houses.sort((a, b) => b.prestige - a.prestige).slice(0, 60)) {
+      const ruling = world.polities.find((p) => p.alive && p.dynasty === h.id);
+      out.push(`- **${h.name}** of ${world.settlements[h.seatId].name} (${h.founded}–${h.extinct ?? 'present'})${ruling ? `, ruling house of the ${ruling.name}` : `, sworn to the ${world.polities[h.polityId].name}`}; head: ${h.head}.`);
+    }
   }
 
   out.push('', '## Notable places', '');
@@ -156,13 +172,14 @@ export function worldSnapshot(world: World): unknown {
       id: s.id, name: s.name, x: s.x, y: s.y, alive: s.alive, founded: s.founded, abandoned: s.abandoned,
       pop: Math.round(s.pop), peakPop: Math.round(s.peakPop), races: Object.fromEntries(Object.entries(s.races).map(([k, v]) => [k, Math.round(v)])),
       polity: s.polityId, culture: s.cultureId, wealth: Math.round(s.wealth), stability: +s.stability.toFixed(2), greatWorks: s.greatWorks,
+      loyalty: +s.loyalty.toFixed(2), holder: s.holder, claims: s.claims, connected: s.connected,
       biome: BIOMES[world.map.biome[s.tile]].name, coastal: s.coastal, river: s.river,
     })),
     polities: world.polities.map((p) => ({
       id: p.id, name: p.name, government: p.government, alive: p.alive, founded: p.founded, dissolved: p.dissolved,
       capital: p.capitalId, culture: p.cultureId, pop: Math.round(p.pop), techs: [...p.techs], ruler: p.ruler, pastRulers: p.pastRulers,
       settlements: p.settlementIds, parent: p.parentPolity, popHistory: p.popHistory, hub: p.hubId, tariff: p.tariff,
-      agreements: [...p.agreements.keys()], shortages: [...p.deficit].map((d, g) => (d ? GOOD_NAMES[g] : '')).filter(Boolean),
+      agreements: [...p.agreements.keys()], dynasty: p.dynasty, overlord: p.overlord, confederation: p.confederation, pacts: [...p.pacts], shortages: [...p.deficit].map((d, g) => (d ? GOOD_NAMES[g] : '')).filter(Boolean),
     })),
     cultures: world.cultures.map((c) => ({ id: c.id, name: c.name, adjective: c.adjective, race: c.raceId, parent: c.parentId, founded: c.founded, extinct: c.extinct, values: c.values, traits: c.traits, language: c.language })),
     wars: world.wars,
@@ -170,6 +187,9 @@ export function worldSnapshot(world: World): unknown {
     armies: world.armies,
     caravans: world.caravans.map((c) => ({ kind: c.kind, name: c.name, home: c.homeId, from: c.fromId, to: c.toId, size: c.size, cargo: c.cargo.map((x) => ({ good: GOOD_NAMES[x.good], qty: Math.round(x.qty) })), returning: c.returning })),
     houses: world.houses,
+    nobles: world.nobles,
+    pacts: world.pacts,
+    confederations: world.confederations,
     routes: [...world.routes.values()].map((r) => ({ a: r.a, b: r.b, kind: r.kind, volume: Math.round(r.volume) })),
     history: world.history,
     stats: world.stats,

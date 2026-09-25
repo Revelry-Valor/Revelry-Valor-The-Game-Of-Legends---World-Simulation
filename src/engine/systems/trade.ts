@@ -150,6 +150,8 @@ export function runTrade(world: World): void {
     if (!A.alive || !B.alive) continue;
     link.kind = linkKind(A, B);
     if (link.kind === 'closed') continue;
+    // A town cut off from its capital cannot trade with the rest of the nation across enemy lines.
+    if (A.connected !== B.connected) continue;
     const pa = world.polities[A.polityId];
     const ca = world.cultures[A.cultureId];
     const cb = world.cultures[B.cultureId];
@@ -226,6 +228,7 @@ export function runTribute(world: World): void {
     for (const id of p.settlementIds) {
       if (id === capital.id) continue;
       const s = world.settlements[id];
+      if (!s.connected) continue;
       const d = Math.hypot(s.x - capital.x, s.y - capital.y);
       const reach = Math.max(0, 1 - d / (25 + p.effects.roads * 10 + p.effects.seaTravel * 5));
       if (reach <= 0) continue;

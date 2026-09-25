@@ -3,6 +3,7 @@ import { tileCost } from '../pathfinding';
 import type { Army, Polity, Settlement, War } from '../types';
 import type { World } from '../world';
 import { captureSettlement, killPop, spreadLosses } from './politics';
+import { settlementValue } from './warAims';
 
 /** Terrain cost an army marches in a year; it covers a twelfth of it each month. */
 const MARCH = 22;
@@ -119,7 +120,9 @@ function chooseTarget(world: World, army: Army): number {
   for (const id of enemy.settlementIds) {
     const s = world.settlements[id];
     if (!s.alive) continue;
-    let d = dist(world, army.tile, s.tile) + Math.sqrt(s.pop) * 0.05;
+    // Near, weakly held towns first, but worth a longer march for a prize: a lost town to win
+    // back, kinsfolk, needed resources, a trade road, a way through to cut-off lands, the war's goal.
+    let d = dist(world, army.tile, s.tile) + Math.sqrt(s.pop) * 0.05 - settlementValue(world, p, s).value * 0.3 - (war.goal === s.id ? 8 : 0);
     if (s.landmass !== world.map.landmass[army.tile]) {
       if (p.effects.seaTravel < 1) continue;
       d += 8;

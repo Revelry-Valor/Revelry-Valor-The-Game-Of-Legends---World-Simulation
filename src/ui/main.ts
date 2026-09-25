@@ -12,6 +12,7 @@ import { lineChart, compact } from './chart';
 import { renderMarket } from './market';
 import { mountNationCharts, renderNation } from './nation';
 import { ROAD_NAMES } from '../engine/systems/roads';
+import { pactsBetween, sameConfederation } from '../engine/systems/diplomacy';
 import { CARAVAN_COLOR, MapRenderer, type MapLayer, type ViewState } from './render';
 import { mountTechTree, techDetail } from './techtree';
 import { TRAITS, TRAIT_BY_ID } from '../engine/data/traits';
@@ -540,7 +541,12 @@ function renderSettlement(id: number): string {
       <div><dt>Terrain</dt><dd>${BIOMES[world.map.biome[s.tile]].name}${s.coastal ? ', coast' : ''}${s.river ? ', river' : ''}</dd></div>
       <div><dt>Location</dt><dd>${s.x}, ${s.y}</dd></div>
     </dl>
-    ${s.alive ? `<section><h3>Condition</h3>${meter('Food', Math.min(1, s.foodRatio), 'good')}${meter('Stability', s.stability, 'good')}${s.plague > 0 ? `<p class="chip crit">Plague · ${pct(s.plague)} severity</p>` : ''}</section>` : ''}
+    ${s.alive ? `<section><h3>Condition</h3>${meter('Food', Math.min(1, s.foodRatio), 'good')}${meter('Stability', s.stability, 'good')}${meter('Loyalty', s.loyalty, 'good')}${s.plague > 0 ? `<p class="chip crit">Plague · ${pct(s.plague)} severity</p>` : ''}
+      <p class="small"><span class="k">Held by</span> ${s.holder >= 0 && world.nobles[s.holder] ? `${esc(world.nobles[s.holder].name)}${world.nobles[s.holder].seatId === s.id ? ' (its seat)' : ''}` : 'the crown'} · <span class="k">Since</span> year ${s.heldSince}</p>
+      ${!s.connected ? `<p class="small"><span class="chip crit">cut off</span> No road to the capital for ${s.cutOff} year${s.cutOff === 1 ? '' : 's'}${s.loyalty < 0.35 ? '; its people are thinking of changing sides' : '; it holds out'}.</p>` : ''}
+      ${s.surrounded > 0.4 ? `<p class="small"><span class="chip warn">surrounded</span> ${pct(s.surrounded)} of the land around it is held by hostile powers.</p>` : ''}
+      ${Object.keys(s.claims).length ? `<p class="small"><span class="k">Claimed by</span> ${Object.entries(s.claims).map(([q, y]) => `${pLink(+q)} <span class="muted">(lost it in ${y})</span>`).join(', ')}</p>` : ''}
+    </section>` : ''}
     ${races.length ? `<section><h3>Peoples</h3>${races.map(([r, n]) => meter(esc(world.raceById.get(r)?.plural ?? r), n / Math.max(1, s.pop))).join('')}</section>` : ''}
     ${s.alive ? `<section><h3>Economy</h3>
       <p><span class="k">Work</span> ${labor.map(([k, l]) => `${SECTOR_NAMES[k]} ${pct(l / totalLabor)}`).join(' · ') || '—'}</p>
@@ -557,6 +563,15 @@ function renderSettlement(id: number): string {
     </section>` : ''}
     ${s.greatWorks.length ? `<section><h3>Great works</h3><p>${s.greatWorks.map(esc).join(' · ')}</p></section>` : ''}
     <section><h3>Local history</h3>${eventList(events, 15)}</section>`;
+}
+
+/** Chips naming the ties between two nations: marriage, alliance, confederation, vassalage. */
+function bondChips(a: number, b: number): string {
+  const out = pactsBetween(world, a, b).map((x) => `<span class="chip ok">${x.type === 'marriage' ? 'married' : 'allied'}</span>`);
+  if (sameConfederation(world, a, b)) out.push('<span class="chip ok">confederates</span>');
+  if (world.polities[a].overlord === b) out.push('<span class="chip warn">our overlord</span>');
+  if (world.polities[b].overlord === a) out.push('<span class="chip warn">our vassal</span>');
+  return out.length ? ' ' + out.join(' ') : '';
 }
 
 function renderPolity(id: number): string {
@@ -584,10 +599,10 @@ function renderPolity(id: number): string {
       <div><dt>Researching</dt><dd>${researching ? esc(researching) : '—'}</dd></div>
     </dl>
     ${p.alive ? `<section>${meter('Stability', p.stability, 'good')}${meter('War weariness', Math.min(1, p.warExhaustion))}</section>` : ''}
-    <section><h3>Ruler</h3><p><b>${esc(r.title)} ${esc(r.name)}</b> <span class="muted">— ${esc(world.raceById.get(r.raceId)?.name ?? r.raceId)}, age ${world.year - r.born}, reigning since ${r.since}</span></p><p>${r.traits.map((t) => `<span class="chip">${t}</span>`).join(' ')}</p>
+    <section><h3>Ruler</h3><p><b>${esc(r.title)} ${esc(r.name)}</b>${p.dynasty >= 0 ? ` of ${esc(world.nobles[p.dynasty].name)}` : ''} <span class="muted">— ${esc(world.raceById.get(r.raceId)?.name ?? r.raceId)}, age ${world.year - r.born}, reigning since ${r.since}</span></p><p>${r.traits.map((t) => `<span class="chip">${t}</span>`).join(' ')}</p>
     ${p.pastRulers.length ? `<details><summary>${p.pastRulers.length} earlier ruler${p.pastRulers.length > 1 ? 's' : ''}</summary><ul class="plain small">${p.pastRulers.slice().reverse().map((x) => `<li>${esc(x.title)} ${esc(x.name)} (${x.since}–${x.until}) — ${esc(x.fate ?? '')}</li>`).join('')}</ul></details>` : ''}</section>
-    ${wars.length ? `<section><h3>At war</h3><ul class="plain">${wars.map((w) => `<li><span class="chip crit">war</span> ${esc(w.name)} vs ${pLink(w.attacker === id ? w.defender : w.attacker)} <span class="muted">since ${w.start}</span></li>`).join('')}</ul></section>` : ''}
-    ${rel.length ? `<section><h3>Neighbours</h3><ul class="plain">${rel.slice(0, 6).map(([q, v]) => `<li>${pLink(q)} <span class="chip ${v < -0.3 ? 'crit' : v < 0 ? 'warn' : 'ok'}">${v < -0.3 ? 'hostile' : v < 0 ? 'wary' : v < 0.35 ? 'cordial' : 'friendly'}</span></li>`).join('')}</ul></section>` : ''}
+    ${wars.length ? `<section><h3>At war</h3><ul class="plain">${wars.map((w) => `<li><span class="chip crit">war</span> ${esc(w.name)} vs ${pLink(w.attacker === id ? w.defender : w.attacker)} <span class="muted">since ${w.start}${w.cause ? ` — over ${esc(w.cause)}` : ''}</span></li>`).join('')}</ul></section>` : ''}
+    ${rel.length ? `<section><h3>Neighbours</h3><ul class="plain">${rel.slice(0, 6).map(([q, v]) => `<li>${pLink(q)} <span class="chip ${v < -0.3 ? 'crit' : v < 0 ? 'warn' : 'ok'}">${v < -0.3 ? 'hostile' : v < 0 ? 'wary' : v < 0.35 ? 'cordial' : 'friendly'}</span>${bondChips(id, q)}</li>`).join('')}</ul></section>` : ''}
     <section><h3>Knowledge</h3>${byEra.size ? [...byEra].sort((a, b) => a[0] - b[0]).map(([e, names]) => `<p><span class="k">${ERA_NAMES[e]}</span> ${names.join(', ')}</p>`).join('') : '<p class="muted">Nothing beyond the old ways yet.</p>'}</section>
     <section id="polity-chart"></section>
     <section><h3>Chronicle</h3>${eventList(events, 15)}</section>`;
@@ -688,7 +703,7 @@ function renderPeoples(): string {
     </table></div></section>`;
 }
 
-const KINDS: EventKind[] = ['war', 'conquest', 'peace', 'rebellion', 'union', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'army', 'agreement', 'caravan', 'house', 'road'];
+const KINDS: EventKind[] = ['war', 'conquest', 'peace', 'rebellion', 'union', 'nobility', 'diplomacy', 'defection', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'army', 'agreement', 'caravan', 'house', 'road'];
 
 function renderChronicleShell(): string {
   return `

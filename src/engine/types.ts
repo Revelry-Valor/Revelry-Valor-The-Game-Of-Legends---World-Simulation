@@ -318,6 +318,20 @@ export interface Settlement {
   transit: number;
   /** Prices a year ago, for market trends. */
   lastPrice: Float64Array;
+  /** Loyalty to the nation that holds it, 0..1. Low loyalty breeds revolt and defection. */
+  loyalty: number;
+  /** Noble house holding it as a fief (-1: held directly by the crown). */
+  holder: number;
+  /** Nations with a claim on it (they held it once), by the year they lost it. */
+  claims: Record<number, number>;
+  /** Linked to its capital through friendly land or sea. */
+  connected: boolean;
+  /** Years it has been cut off from its capital. */
+  cutOff: number;
+  /** Share of its surroundings held by hostile powers, 0..1. */
+  surrounded: number;
+  /** Year it came under its current nation. */
+  heldSince: number;
   coastal: boolean;
   river: boolean;
   landmass: number;
@@ -360,6 +374,8 @@ export interface Ruler {
   until: number | null;
   traits: string[];
   fate?: string;
+  /** Noble house the ruler belongs to. */
+  houseId?: number;
 }
 
 export interface Polity {
@@ -410,6 +426,61 @@ export interface Polity {
   /** Share of a foreign caravan's sales taken at the border. */
   tariff: number;
   tariffIncome: number;
+  /** Ruling dynasty (noble house id), -1 before there is a nobility. */
+  dynasty: number;
+  /** Marriage ties and alliances (pact ids). */
+  pacts: Set<number>;
+  confederation: number;
+  /** Overlord nation if this is a vassal, else -1. */
+  overlord: number;
+  /** How content a vassal is with its overlord, 0..1. */
+  vassalLoyalty: number;
+  /** War tribute owed: to whom, how much a year, and until when. */
+  tributeTo: number;
+  tributeAmount: number;
+  tributeUntil: number;
+}
+
+export interface NobleHouse {
+  id: number;
+  name: string;
+  polityId: number;
+  /** Settlement the house rules from. */
+  seatId: number;
+  prestige: number;
+  loyalty: number;
+  /** How hungry for power its head is, 0..1. */
+  ambition: number;
+  head: string;
+  founded: number;
+  extinct: number | null;
+  /** Settlements held last year. */
+  fiefs: number;
+}
+
+/** Marriage ties between ruling houses and defensive alliances. */
+export interface Pact {
+  id: number;
+  type: 'marriage' | 'alliance';
+  name: string;
+  a: number;
+  b: number;
+  start: number;
+  end: number | null;
+  endReason?: string;
+  /** Ruling houses joined by a marriage. */
+  houseA?: number;
+  houseB?: number;
+}
+
+/** Nations that stay independent but stand together under one banner. */
+export interface Confederation {
+  id: number;
+  name: string;
+  members: number[];
+  leader: number;
+  founded: number;
+  dissolved: number | null;
 }
 
 export interface War {
@@ -424,6 +495,11 @@ export interface War {
   attackerLosses: number;
   defenderLosses: number;
   conquered: number[];
+  /** Set when this war was joined to honour an alliance. */
+  parent?: number;
+  /** Settlement the war is chiefly fought over, and why. */
+  goal?: number;
+  cause?: string;
 }
 
 export type EventKind =
@@ -452,7 +528,10 @@ export type EventKind =
   | 'army'
   | 'caravan'
   | 'road'
-  | 'house';
+  | 'house'
+  | 'nobility'
+  | 'diplomacy'
+  | 'defection';
 
 export interface HistoryEvent {
   year: number;

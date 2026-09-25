@@ -1,5 +1,6 @@
 import type { AccessPolicy, Polity, TradeAgreement } from '../types';
 import type { World } from '../world';
+import { friendly } from './diplomacy';
 
 export const POLICY_LABEL: Record<AccessPolicy, string> = {
   open: 'Open market',
@@ -24,6 +25,8 @@ export function accessPolicy(world: World, host: Polity, guest: Polity): AccessP
   if (host.id === guest.id) return 'open';
   if (world.atWar(host.id, guest.id)) return 'closed';
   if (dealsBetween(world, host.id, guest.id, 'market').length) return 'open';
+  // Allies, kin by marriage, confederates and vassals trade freely with one another.
+  if (friendly(world, host.id, guest.id)) return 'open';
   const base = host.policy.get(guest.id) ?? 'tolled';
   if (base === 'closed' && transitGranted(world, host.id, guest.id)) return 'transit';
   return base;
