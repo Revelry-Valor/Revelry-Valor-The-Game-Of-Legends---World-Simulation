@@ -49,7 +49,7 @@ function markConnected(world: World, p: Polity): void {
   for (let qi = 0; qi < queue.length && reached.size < want.size; qi++) {
     const t = queue[qi];
     const o = owner[t];
-    if (o >= 0 && want.has(o)) reached.add(o);
+    if (o >= 0 && want.has(o) && world.settlements[o].occupiedBy < 0) reached.add(o);
     const x = t % w;
     const y = (t - x) / w;
     for (let d = 0; d < 8; d++) {
@@ -148,7 +148,7 @@ export function runCohesion(world: World): void {
   // Breakaways of stranded towns.
   const done = new Set<number>();
   for (const s of [...world.aliveSettlements()]) {
-    if (done.has(s.id) || s.connected || s.cutOff < BREAKAWAY_YEARS || s.loyalty >= 0.35) continue;
+    if (done.has(s.id) || s.connected || s.occupiedBy >= 0 || s.cutOff < BREAKAWAY_YEARS || s.loyalty >= 0.35) continue;
     const p = world.polities[s.polityId];
     if (!p.alive || s.id === p.capitalId || !rng.chance(0.25 + (0.35 - s.loyalty))) continue;
     // The pocket: this town and its stranded, disloyal neighbours of the same nation.
@@ -156,7 +156,7 @@ export function runCohesion(world: World): void {
     for (const li of s.links) {
       const l = world.links[li];
       const o = world.settlements[l.a === s.id ? l.b : l.a];
-      if (o.alive && o.polityId === p.id && !o.connected && o.id !== p.capitalId && o.loyalty < 0.45 && !done.has(o.id)) pocket.push(o);
+      if (o.alive && o.polityId === p.id && o.occupiedBy < 0 && !o.connected && o.id !== p.capitalId && o.loyalty < 0.45 && !done.has(o.id)) pocket.push(o);
     }
     for (const o of pocket) done.add(o.id);
     const names = pocket.map((o) => o.name).join(', ');

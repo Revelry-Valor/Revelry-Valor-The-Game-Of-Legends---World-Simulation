@@ -202,6 +202,40 @@ describe('politics, nobility and cohesion', () => {
   });
 });
 
+describe('seasons, settlers and occupation', () => {
+  const w = new World(small({ seed: 5 }));
+  w.run(250);
+
+  it('brings in the harvest in autumn and eats it through the year', () => {
+    const farms = [...w.aliveSettlements()].filter((s) => s.labor[1] > s.labor[0]);
+    expect(farms.length).toBeGreaterThan(0);
+    const food = () => farms.reduce((n, s) => n + s.stock[0], 0);
+    for (let m = 0; m < 6; m++) w.stepMonth();
+    const summer = food();
+    for (let m = 6; m < 10; m++) w.stepMonth();
+    expect(food()).toBeGreaterThan(summer);
+    while (w.month !== 0) w.stepMonth();
+    for (const s of w.aliveSettlements()) expect(s.foodSchedule.reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
+  });
+
+  it('sends settlers on the road and founds settlements where they arrive', () => {
+    expect(w.history.some((e) => e.kind === 'founding' && e.text.includes('on the road'))).toBe(true);
+    for (const p of w.settlers) {
+      expect(p.path.length).toBeGreaterThan(1);
+      expect(p.step).toBeLessThan(p.path.length);
+      expect(p.people).toBeGreaterThan(0);
+    }
+  });
+
+  it('occupies towns only in wartime and only hands them over at the peace', () => {
+    for (const s of w.aliveSettlements()) {
+      if (s.occupiedBy < 0) continue;
+      expect(s.occupiedBy).not.toBe(s.polityId);
+      expect(w.atWar(s.occupiedBy, s.polityId)).toBe(true);
+    }
+  });
+});
+
 describe('real time', () => {
   it('advances month by month and reaches the same year as whole-year steps', () => {
     const a = new World(small());

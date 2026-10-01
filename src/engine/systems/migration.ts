@@ -1,4 +1,5 @@
-import type { Settlement } from '../types';
+import { TRAVEL_SEASON } from '../calendar';
+import type { SettlerParty, Settlement } from '../types';
 import type { World } from '../world';
 import { siteScore } from './sites';
 
@@ -128,6 +129,8 @@ function colonize(world: World, s: Settlement): void {
       }
     }
     if (blocked) continue;
+    // Nor where another column of settlers is already headed.
+    if (world.settlers.some((p) => Math.hypot((p.targetTile % map.width) - x, Math.floor(p.targetTile / map.width) - y) < spacing)) continue;
     const owner = map.owner[t];
     if (owner >= 0 && world.settlements[owner].polityId !== s.polityId) continue;
     let score = siteScore(map, race, t, culture.traitEffects.habitat);
@@ -141,31 +144,110 @@ function colonize(world: World, s: Settlement): void {
   }
   if (best < 0 || bestScore < 0.5) return;
 
+  // Plot the trek; settlers who cannot find a way stay home.
+  const pf = world.pathfinder;
+  pf.run(s.tile, 400, fx.seaTravel, (tile) => tile === best);
+  const path = pf.pathTo(best);
+  if (path.length < 2) return;
+
   const colonists = Math.max(25, s.pop * rng.range(0.1, 0.18));
   const races: Record<string, number> = {};
   for (const r in s.races) races[r] = (s.races[r] / s.pop) * colonists;
   for (const r in s.races) s.races[r] -= races[r];
   s.pop -= colonists;
   s.lastColonized = world.year;
-
   // Colonies stay under the parent polity if they are within its reach; otherwise they strike out alone.
   const capital = world.settlements[pol.capitalId];
-  const reach = controlRange(world, pol.id);
   const d = Math.hypot((best % map.width) - capital.x, Math.floor(best / map.width) - capital.y);
-  const joins = d <= reach || rng.chance(0.25);
-  const ns = world.createSettlement(best, s.polityId, s.cultureId, races, s.id);
-  ns.stock.set(ns.stock.map((_, g) => s.stock[g] * 0.1));
-  ns.wealth = colonists * 0.3;
-  if (joins) {
+  const joins = d <= controlRange(world, pol.id) || rng.chance(0.25);
+  world.settlers.push({
+    id: world.nextSettlerId++, fromId: s.id, polityId: pol.id, cultureId: s.cultureId, races, people: colonists,
+    targetTile: best, joins, path, step: 0, prevStep: 0, started: world.monthIndex,
+  });
+}
+
+/** Pace of a column of settlers with their families, herds and carts, in terrain cost per month. */
+const SETTLER_PACE = 3.2;
+
+/**
+ * Every month: columns of settlers trek towards the land they chose, resting through winter,
+ * and found their settlement on arrival. Some fall to hardship on the way.
+ */
+export function settlersMonth(world: World): void {
+  const winter = world.season === 'winter';
+  const keep: SettlerParty[] = [];
+  for (const p of world.settlers) {
+    p.prevStep = p.step;
+    if (!winter) {
+      const pol = world.polities[p.polityId];
+      let budget = SETTLER_PACE * TRAVEL_SEASON[world.season] * (1 + (pol?.effects.roads ?? 0) * 0.2);
+      while (budget > 0 && p.step < p.path.length - 1) {
+        p.step++;
+        const c = world.map.moveCost[p.path[p.step]];
+        budget -= Number.isFinite(c) && world.map.elevation[p.path[p.step]] >= 0 ? c : 0.6;
+      }
+    }
+    const loss = p.people * (winter ? 0.012 : 0.006);
+    p.people -= loss;
+    for (const r in p.races) p.races[r] *= p.people / (p.people + loss);
+    if (p.step >= p.path.length - 1) found(world, p);
+    else if (world.monthIndex - p.started > 36) settleNearest(world, p, 'gave up the trek');
+    else keep.push(p);
+  }
+  world.settlers = keep;
+}
+
+function found(world: World, p: SettlerParty): void {
+  const map = world.map;
+  const tile = p.targetTile;
+  const x = tile % map.width;
+  const y = Math.floor(tile / map.width);
+  const spacing = world.cfg.settlementSpacing;
+  const from = world.settlements[p.fromId];
+  const pol = world.polities[p.polityId];
+  const owner = map.owner[tile];
+  const taken = owner >= 0 && world.settlements[owner].alive && world.settlements[owner].polityId !== p.polityId;
+  const crowded = [...world.aliveSettlements()].some((o) => Math.hypot(o.x - x, o.y - y) < spacing);
+  if (!pol.alive || taken || crowded || map.settlementAt[tile] >= 0) {
+    settleNearest(world, p, 'found the land taken');
+    return;
+  }
+  const ns = world.createSettlement(tile, p.polityId, p.cultureId, p.races, p.fromId);
+  if (from.alive) ns.stock.set(ns.stock.map((v, g) => v + from.stock[g] * 0.05));
+  ns.wealth = p.people * 0.3;
+  const trek = Math.max(1, world.monthIndex - p.started);
+  if (p.joins) {
     pol.settlementIds.push(ns.id);
-    world.log('founding', 1, `Settlers from ${s.name} founded ${ns.name}.`, { settlements: [ns.id, s.id], polities: [pol.id] });
+    world.log('founding', 1, `Settlers from ${from.name} founded ${ns.name} after ${trek} month${trek > 1 ? 's' : ''} on the road.`, { settlements: [ns.id, from.id], polities: [pol.id] });
   } else {
-    const np = world.createPolity(s.cultureId, ns, pol.id, pol.techs);
+    const np = world.createPolity(p.cultureId, ns, pol.id, pol.techs);
     ns.polityId = np.id;
     np.relations.set(pol.id, 0.4);
     pol.relations.set(np.id, 0.4);
-    world.log('founding', 2, `Pioneers from ${s.name} crossed into the wilds and founded ${ns.name}, free of ${pol.name}.`, { settlements: [ns.id, s.id], polities: [np.id, pol.id] });
+    world.log('founding', 2, `Pioneers from ${from.name} crossed into the wilds and founded ${ns.name}, free of the ${pol.name}.`, { settlements: [ns.id, from.id], polities: [np.id, pol.id] });
   }
+}
+
+/** Settlers who cannot found their own place join the nearest town of their people. */
+function settleNearest(world: World, p: SettlerParty, why: string): void {
+  const map = world.map;
+  const tile = p.path[p.step] ?? p.targetTile;
+  const x = tile % map.width;
+  const y = Math.floor(tile / map.width);
+  let best: Settlement | null = null;
+  let bd = Infinity;
+  for (const s of world.aliveSettlements()) {
+    if (s.polityId !== p.polityId && s.cultureId !== p.cultureId) continue;
+    const d = Math.hypot(s.x - x, s.y - y);
+    if (d < bd) {
+      bd = d;
+      best = s;
+    }
+  }
+  if (!best) return;
+  for (const r in p.races) best.races[r] = (best.races[r] ?? 0) + p.races[r];
+  best.pop += p.people;
+  if (p.people > 300) world.log('migration', 1, `Settlers from ${world.settlements[p.fromId].name} ${why} and made their home in ${best.name} instead.`, { settlements: [best.id, p.fromId] });
 }
 
 /** Distance (tiles) over which a polity can govern effectively. */

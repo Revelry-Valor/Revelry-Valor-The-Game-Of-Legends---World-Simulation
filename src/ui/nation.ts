@@ -69,7 +69,9 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
   const dynasty = p.dynasty >= 0 ? world.nobles[p.dynasty] : null;
   const nobles = p.alive ? greatHouses(world, p).sort((a, b) => b.prestige - a.prestige) : [];
   const loyalty = towns.reduce((n, s) => n + s.loyalty * s.pop, 0) / Math.max(1, p.pop);
-  const cutOff = towns.filter((s) => !s.connected);
+  const cutOff = towns.filter((s) => !s.connected && s.occupiedBy < 0);
+  const occupiedHere = towns.filter((s) => s.occupiedBy >= 0);
+  const occupying = [...world.aliveSettlements()].filter((s) => s.occupiedBy === id);
   const pacts = [...p.pacts].map((pid) => world.pacts[pid]);
   const conf = p.confederation >= 0 ? world.confederations[p.confederation] : null;
   const vassals = world.polities.filter((v) => v.alive && v.overlord === id);
@@ -147,6 +149,8 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
         <div><dt>In the field</dt><dd>${fmt(armies.reduce((s, a) => s + a.size, 0))}</dd></div>
       </dl>
       ${meter('War weariness', Math.min(1, p.warExhaustion))}
+      ${occupiedHere.length ? `<p class="small"><span class="chip crit">occupied</span> ${occupiedHere.map((s) => `${sLink(s.id)} <span class="muted">(by ${esc(world.polities[s.occupiedBy].name)})</span>`).join(', ')}</p>` : ''}
+      ${occupying.length ? `<p class="small"><span class="chip warn">our garrisons</span> ${occupying.map((s) => `${sLink(s.id)} <span class="muted">(${esc(world.polities[s.polityId].name)})</span>`).join(', ')}</p>` : ''}
       ${wars.length ? `<ul class="plain">${wars.map((w) => `<li><span class="chip crit">war</span>${w.parent !== undefined ? ' <span class="chip warn">ally</span>' : ''} ${esc(w.name)} vs ${pLink(w.attacker === id ? w.defender : w.attacker)} <span class="muted small">since ${w.start}, ${w.battles} battles${w.cause ? ` — over ${esc(w.cause)}` : ''}${w.goal !== undefined ? `; the prize: ${esc(world.settlements[w.goal].name)}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted small">At peace.</p>'}
       ${armies.length ? `<h4>Armies</h4><ul class="plain">${armies.map((a) => {
         const target = a.targetSettlement >= 0 ? world.settlements[a.targetSettlement] : null;
@@ -205,7 +209,7 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
       <h3>Settlements</h3>
       <div class="table-wrap"><table>
         <thead><tr><th>Settlement</th><th>Size</th><th class="num">People</th><th class="num">Wealth</th><th class="num">Stability</th><th class="num">Loyalty</th><th>Held by</th><th>Culture</th></tr></thead>
-        <tbody>${towns.slice(0, 40).map((s) => `<tr><td>${sLink(s.id)}${s.id === p.capitalId ? ' <span class="chip">capital</span>' : ''}${s.id === p.hubId && s.id !== p.capitalId ? ' <span class="chip">hub</span>' : ''}</td><td class="small">${settlementTier(s.pop)}</td><td class="num">${compact(s.pop)}</td><td class="num">${compact(s.wealth)}</td><td class="num">${Math.round(s.stability * 100)}%</td><td class="num">${Math.round(s.loyalty * 100)}%${s.connected ? '' : ' <span class="chip crit">cut off</span>'}</td><td class="small">${houseOf(s.holder) ? esc(houseOf(s.holder)!.name) : 'the crown'}</td><td class="small">${esc(world.cultures[s.cultureId].name)}</td></tr>`).join('')}</tbody>
+        <tbody>${towns.slice(0, 40).map((s) => `<tr><td>${sLink(s.id)}${s.id === p.capitalId ? ' <span class="chip">capital</span>' : ''}${s.id === p.hubId && s.id !== p.capitalId ? ' <span class="chip">hub</span>' : ''}</td><td class="small">${settlementTier(s.pop)}</td><td class="num">${compact(s.pop)}</td><td class="num">${compact(s.wealth)}</td><td class="num">${Math.round(s.stability * 100)}%</td><td class="num">${Math.round(s.loyalty * 100)}%${s.occupiedBy >= 0 ? ' <span class="chip crit">occupied</span>' : s.connected ? '' : ' <span class="chip crit">cut off</span>'}</td><td class="small">${houseOf(s.holder) ? esc(houseOf(s.holder)!.name) : 'the crown'}</td><td class="small">${esc(world.cultures[s.cultureId].name)}</td></tr>`).join('')}</tbody>
       </table></div>
       ${towns.length > 40 ? `<p class="muted small">…and ${towns.length - 40} more.</p>` : ''}
       <p class="muted small">Total wealth ${compact(wealth)}.</p>

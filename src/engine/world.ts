@@ -1,3 +1,4 @@
+import { SPRING_MUSTER, seasonOf, type Season } from './calendar';
 import { GOOD_BASE_PRICE, GOOD_COUNT, Good, RES_COUNT, SECTOR_COUNT } from './data/economy';
 import { MAX_EFFECTS, TECH_BY_ID, baseEffects, type TechEffects } from './data/techs';
 import { combineTraits } from './data/traits';
@@ -6,10 +7,10 @@ import { Pathfinder } from './pathfinding';
 import { Rng } from './rng';
 import { caravansMonth, planCaravans } from './systems/caravans';
 import { runCulture } from './systems/culture';
-import { runConsumption, runProduction } from './systems/economy';
+import { runConsumption, runMonthlyFood, runProduction } from './systems/economy';
 import { runEvents } from './systems/events';
-import { runMigration } from './systems/migration';
-import { militaryMonth } from './systems/military';
+import { runMigration, settlersMonth } from './systems/migration';
+import { militaryMonth, raiseArmies } from './systems/military';
 import { updateRoads } from './systems/roads';
 import { runPolitics } from './systems/politics';
 import { placePeoples } from './systems/setup';
@@ -18,7 +19,7 @@ import { updateTerritory } from './systems/territory';
 import { buildHubLinks, buildTradeLinks, runTrade, runTribute } from './systems/trade';
 import type {
   Army, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
-  NobleHouse, Pact, Settlement, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
+  NobleHouse, Pact, Settlement, SettlerParty, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
 } from './types';
 import { VALUE_KEYS } from './types';
 import { generateMap } from './worldgen';
@@ -61,6 +62,8 @@ export class World {
   coinTrade = 0;
   barterTrade = 0;
   armies: Army[] = [];
+  settlers: SettlerParty[] = [];
+  nextSettlerId = 0;
   agreements: TradeAgreement[] = [];
   nextCaravanId = 0;
   nextArmyId = 0;
@@ -93,6 +96,8 @@ export class World {
     this.pathfinder = new Pathfinder(this.map);
     placePeoples(this);
     updateTerritory(this);
+    // The first year's work: food to come in over the year ahead.
+    runProduction(this);
     this.recordStats();
   }
 
@@ -103,8 +108,19 @@ export class World {
     return this.year * 12 + this.month;
   }
 
-  /** Advance one month: armies march and fight, caravans travel and trade. At year's end the yearly systems run. */
+  get season(): Season {
+    return seasonOf(this.month);
+  }
+
+  /**
+   * Advance one month: the season's food comes in and people eat, are born and die; settlers
+   * travel to their new homes; armies muster in spring, march, fight and besiege; caravans
+   * travel and trade. At year's end the yearly systems run.
+   */
   stepMonth(): void {
+    runMonthlyFood(this);
+    if (this.month === SPRING_MUSTER) raiseArmies(this);
+    settlersMonth(this);
     militaryMonth(this);
     caravansMonth(this);
     this.month++;
@@ -289,11 +305,20 @@ export class World {
       immunity: 0,
       drift: 0,
       lastColonized: this.year,
+      foodSchedule: new Float64Array(12),
+      foodEaten: 0,
+      foodNeeded: 0,
+      hungryMonths: 0,
+      lastHungry: 0,
+      occupiedBy: -1,
+      occupiedSince: 0,
       greatWorks: [],
       peakPop: pop,
     };
     s.stock[Good.Food] = pop * 0.6;
     s.stock[Good.Timber] = pop * 0.2;
+    // Founded mid-year: the settlers live off the land and what they carried until the year's end.
+    for (let m = this.month; m < 12 && this.monthIndex > 0; m++) s.foodSchedule[m] = (pop * 0.9) / 12;
     this.settlements.push(s);
     map.settlementAt[tile] = s.id;
     this.territoryDirty = true;

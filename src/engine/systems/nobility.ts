@@ -152,12 +152,12 @@ export function runNobility(world: World): void {
         usurp(world, p, h);
         break;
       }
-      if (share > 0.08 && fiefs.length >= 1 && rng.chance(0.03 * h.ambition * (1 - h.loyalty))) {
+      if (share > 0.1 && fiefs.length >= 1 && p.stability < 0.55 && rng.chance(0.01 * h.ambition * (1 - h.loyalty))) {
         secede(world, p, h, fiefs);
         continue;
       }
       const rival = hostileNeighbour(world, p, h);
-      if (rival && rng.chance(0.04 * (1 - h.loyalty))) defect(world, p, h, fiefs, rival);
+      if (rival && rng.chance(0.02 * (1 - h.loyalty))) defect(world, p, h, fiefs, rival);
     }
 
     // Lesser houses die out now and then.

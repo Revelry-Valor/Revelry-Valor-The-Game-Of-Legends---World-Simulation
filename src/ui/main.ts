@@ -1,5 +1,6 @@
 import './styles.css';
 import { chronicleMarkdown, describeValues, fmt, polityEra, settlementTier, worldSnapshot } from '../engine/chronicle';
+import { MONTHS, seasonOf } from '../engine/calendar';
 import { MAP_SIZES, defaultConfig } from '../engine/config';
 import { BIOMES } from '../engine/data/biomes';
 import { GOOD_NAMES, RES_COUNT, RES_NAMES, Res, SECTOR_NAMES } from '../engine/data/economy';
@@ -19,7 +20,6 @@ import { TRAITS, TRAIT_BY_ID } from '../engine/data/traits';
 
 type Tab = 'inspect' | 'market' | 'realms' | 'peoples' | 'chronicle' | 'charts' | 'setup';
 
-const MONTHS = ['Deepwinter', 'Thawing', 'Seedtime', 'Rainmoon', 'Bloomtide', 'Highsun', 'Midsummer', 'Harvest', 'Leaffall', 'Mistmoon', 'Frostfall', 'Longnight'];
 const CARAVAN_KIND: Record<string, string> = { merchant: 'Merchant caravan', family: 'Trading family', nomad: 'Nomad caravan tribe', convoy: 'State convoy' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -51,7 +51,8 @@ let tab: Tab = (store.get('tab') as Tab) || 'inspect';
 let playing = false;
 let speed = 10;
 /** Real time: the world advances month by month and armies and caravans glide between positions. */
-let realTime = false;
+/** Real time (month by month, with everything moving) is the default; the year buttons still skip ahead. */
+let realTime = true;
 let monthAcc = 0;
 let pendingYears = 0;
 let yearAcc = 0;
@@ -210,7 +211,7 @@ function pick(e: PointerEvent): void {
 function refreshTopbar(): void {
   const st = world.stats[world.stats.length - 1];
   $('world-name').textContent = cfg.name;
-  $('year').textContent = realTime || world.month > 0 ? `Year ${world.year}, ${MONTHS[world.month]}` : `Year ${world.year}`;
+  $('year').textContent = realTime || world.month > 0 ? `Year ${world.year} · ${MONTHS[world.month]} · ${seasonOf(world.month)}` : `Year ${world.year}`;
   let era = 0;
   for (const p of world.alivePolities()) for (const t of p.techs) era = Math.max(era, TECH_BY_ID.get(t)?.era ?? 0);
   $('era').textContent = ERA_NAMES[era];
@@ -542,6 +543,8 @@ function renderSettlement(id: number): string {
       <div><dt>Location</dt><dd>${s.x}, ${s.y}</dd></div>
     </dl>
     ${s.alive ? `<section><h3>Condition</h3>${meter('Food', Math.min(1, s.foodRatio), 'good')}${meter('Stability', s.stability, 'good')}${meter('Loyalty', s.loyalty, 'good')}${s.plague > 0 ? `<p class="chip crit">Plague · ${pct(s.plague)} severity</p>` : ''}
+      ${s.occupiedBy >= 0 ? `<p class="small"><span class="chip crit">occupied</span> Held by ${pLink(s.occupiedBy)} since ${MONTHS[s.occupiedSince % 12]} of year ${Math.floor(s.occupiedSince / 12)}; the peace will decide who keeps it.</p>` : ''}
+      <p class="small"><span class="k">Stores</span> ${foodStores(s)}</p>
       <p class="small"><span class="k">Held by</span> ${s.holder >= 0 && world.nobles[s.holder] ? `${esc(world.nobles[s.holder].name)}${world.nobles[s.holder].seatId === s.id ? ' (its seat)' : ''}` : 'the crown'} · <span class="k">Since</span> year ${s.heldSince}</p>
       ${!s.connected ? `<p class="small"><span class="chip crit">cut off</span> No road to the capital for ${s.cutOff} year${s.cutOff === 1 ? '' : 's'}${s.loyalty < 0.35 ? '; its people are thinking of changing sides' : '; it holds out'}.</p>` : ''}
       ${s.surrounded > 0.4 ? `<p class="small"><span class="chip warn">surrounded</span> ${pct(s.surrounded)} of the land around it is held by hostile powers.</p>` : ''}
@@ -563,6 +566,15 @@ function renderSettlement(id: number): string {
     </section>` : ''}
     ${s.greatWorks.length ? `<section><h3>Great works</h3><p>${s.greatWorks.map(esc).join(' · ')}</p></section>` : ''}
     <section><h3>Local history</h3>${eventList(events, 15)}</section>`;
+}
+
+/** Food in the stores, how many months it lasts, and what the rest of the year will bring. */
+function foodStores(s: { stock: Float64Array; foodSchedule: Float64Array; pop: number; lastHungry: number }): string {
+  const monthly = Math.max(1, s.pop) / 12;
+  let coming = 0;
+  for (let m = world.month; m < 12; m++) coming += s.foodSchedule[m];
+  const months = s.stock[0] / monthly;
+  return `${compact(s.stock[0])} food (${months >= 24 ? 'two years and more' : `${months.toFixed(1)} months`})${coming > 1 ? ` · ${compact(coming)} still to come this year` : ''}${s.lastHungry ? ` · ${s.lastHungry} lean month${s.lastHungry > 1 ? 's' : ''} last year` : ''}`;
 }
 
 /** Chips naming the ties between two nations: marriage, alliance, confederation, vassalage. */
@@ -954,6 +966,8 @@ function frame(now: number): void {
 }
 
 new ResizeObserver(resizeCanvas).observe(canvas);
+$('realtime').setAttribute('aria-pressed', String(realTime));
+speedLabel();
 fitView();
 resizeCanvas();
 refreshTopbar();

@@ -5,11 +5,10 @@ import { pairKey, type World } from '../world';
 import { controlRange } from './migration';
 import { updatePolicies } from './access';
 import { endAllDeals, runAgreements } from './agreements';
-import { raiseArmies } from './military';
 import { runCohesion } from './cohesion';
 import { callToArms, endPact, friendly, marriageInheritance, peaceTerms, runDiplomacy, sameConfederation } from './diplomacy';
 import { crisisSecession, runNobility, succession } from './nobility';
-import { bestGoal, claimStrength } from './warAims';
+import { bestGoal, claimStrength, settlementValue } from './warAims';
 
 const GOV_STABILITY: Record<Government, number> = {
   tribe: 0.1, chiefdom: 0.03, 'city-state': 0.06, kingdom: 0.04, empire: -0.02, republic: 0.03, theocracy: 0.07,
@@ -31,7 +30,6 @@ export function runPolitics(world: World): void {
   runDiplomacy(world, pairs);
   runCohesion(world);
   declareWars(world);
-  raiseArmies(world);
   resolveWars(world);
   rebellions(world);
   unions(world);
@@ -392,6 +390,15 @@ function endWar(world: World, war: War, outcome: string): void {
   B.relations.set(A.id, -0.25);
   for (const army of world.armies) if (army.warId === war.id) army.alive = false;
   world.armies = world.armies.filter((a) => a.alive);
+  // Whatever the peace did not hand over goes back to its owner; a town whose owner is gone stays with its occupier.
+  for (const s of world.aliveSettlements()) {
+    const pair = (s.occupiedBy === A.id && s.polityId === B.id) || (s.occupiedBy === B.id && s.polityId === A.id);
+    if (!pair) continue;
+    const owner = world.polities[s.polityId];
+    const occupier = world.polities[s.occupiedBy];
+    if (!owner.alive && occupier.alive) transferSettlement(world, s, owner, occupier, 0.2);
+    else s.occupiedBy = -1;
+  }
   // Allies who joined this war make peace with it.
   for (const w of world.wars) if (w.parent === war.id && w.end === null) endWar(world, w, `peace was made in ${war.name}`);
 }
@@ -405,6 +412,7 @@ export function transferSettlement(world: World, s: Settlement, from: Polity, to
   s.polityId = to.id;
   s.heldSince = world.year;
   s.holder = -1;
+  s.occupiedBy = -1;
   s.cutOff = 0;
   s.connected = true;
   s.loyalty = Math.min(1, loyalty + (reclaimed ? 0.3 : 0) + (s.cultureId === to.cultureId ? 0.15 : 0));
@@ -437,20 +445,64 @@ export function spreadLosses(world: World, p: Polity, n: number): void {
 }
 
 /** Transfer a conquered settlement to the victor. */
+/** Who holds a settlement right now: its occupier in wartime, otherwise its owner. */
+export function controllerOf(s: Settlement): number {
+  return s.occupiedBy >= 0 ? s.occupiedBy : s.polityId;
+}
+
+/**
+ * An army has stormed a town. Its own nation's town is liberated; an enemy town is occupied:
+ * looted and garrisoned, but it changes hands only if the peace hands it over. A nation whose
+ * every town is occupied surrenders.
+ */
 export function captureSettlement(world: World, war: War, att: Polity, def: Polity, target: Settlement, by: string): void {
-  const wasCapital = def.capitalId === target.id;
-  const reclaimed = claimStrength(world, att.id, target) > 0;
-  transferSettlement(world, target, def, att, 0.2);
-  target.stability = reclaimed ? 0.45 : 0.25;
+  const By = by.charAt(0).toUpperCase() + by.slice(1);
+  if (target.polityId === att.id) {
+    target.occupiedBy = -1;
+    target.stability = Math.max(target.stability, 0.4);
+    world.log('conquest', target.pop > 3000 ? 2 : 1, `${By} of the ${att.name} drove the ${def.name} out of ${target.name}.`, { polities: [att.id, def.id], settlements: [target.id] });
+    return;
+  }
+  const owner = world.polities[target.polityId];
+  const wasCapital = owner.capitalId === target.id;
+  target.occupiedBy = att.id;
+  target.occupiedSince = world.monthIndex;
+  target.connected = false;
+  target.stability = Math.min(target.stability, 0.3);
   att.treasury += target.wealth * 0.4;
   target.wealth *= 0.5;
-  war.conquered.push(target.id);
-  world.log('conquest', (wasCapital && def.pop > 3000) || target.pop > 5000 ? 3 : wasCapital || target.pop > 800 ? 2 : 1, `${by.charAt(0).toUpperCase() + by.slice(1)} of the ${att.name} stormed ${target.name}${wasCapital ? `, capital of the ${def.name}` : reclaimed ? `, winning it back from the ${def.name}` : ` and took it from the ${def.name}`}.`, { polities: [att.id, def.id], settlements: [target.id] });
-  if (wasCapital) def.warExhaustion += 0.25;
-  if (def.settlementIds.length === 0) {
+  world.log('conquest', (wasCapital && owner.pop > 3000) || target.pop > 5000 ? 3 : wasCapital || target.pop > 800 ? 2 : 1, `${By} of the ${att.name} stormed and occupied ${target.name}${wasCapital ? `, capital of the ${owner.name}` : `, a town of the ${owner.name}`}.`, { polities: [att.id, owner.id], settlements: [target.id] });
+  if (wasCapital) owner.warExhaustion += 0.25;
+  owner.warExhaustion += 0.03;
+  // Total defeat: nothing left unoccupied.
+  if (owner.id === def.id && def.settlementIds.every((id) => world.settlements[id].occupiedBy === att.id)) {
+    const towns = def.settlementIds.map((id) => world.settlements[id]);
+    for (const s of towns) transferSettlement(world, s, def, att, 0.2);
     endWar(world, war, `the ${att.name} conquered the ${def.name}`);
     dissolve(world, def, `The ${def.name} fell to the ${att.name}.`);
   }
+}
+
+/**
+ * At the peace, the victor keeps some of the towns it occupies: the one it went to war for,
+ * towns it had a claim to, and the most valuable others up to what its victory can justify.
+ * Everything else is handed back. Returns the names of the towns ceded.
+ */
+function settleOccupations(world: World, war: War, winner: Polity | null, loser: Polity | null): string[] {
+  if (!winner || !loser) return [];
+  const held = loser.settlementIds.map((id) => world.settlements[id]).filter((s) => s.alive && s.occupiedBy === winner.id && s.id !== loser.capitalId);
+  const share = held.length / Math.max(1, loser.settlementIds.length);
+  const limit = 1 + Math.floor(share * 4 + Math.max(0, loser.warExhaustion - winner.warExhaustion) * 3);
+  const ranked = held
+    .map((s) => ({ s, v: settlementValue(world, winner, s).value + (s.id === war.goal ? 100 : 0) + claimStrength(world, winner.id, s) * 50 }))
+    .sort((a, b) => b.v - a.v)
+    .slice(0, limit);
+  for (const { s } of ranked) {
+    transferSettlement(world, s, loser, winner, 0.2);
+    s.stability = Math.min(s.stability, 0.35);
+    war.conquered.push(s.id);
+  }
+  return ranked.map(({ s }) => s.name);
 }
 
 /** Collapsed belligerents end their wars; exhausted ones make peace. The fighting itself is in military.ts. */
@@ -466,32 +518,24 @@ function resolveWars(world: World): void {
     }
     const years = world.year - war.start;
     const fighting = world.armies.some((a) => a.warId === war.id && a.path.length > 0);
-    const pPeace = 0.02 + (A.warExhaustion + B.warExhaustion) * 0.3 + years * 0.006 + (fighting || years < 2 ? 0 : 0.12);
+    const occupiedBy = (by: Polity, of: Polity) => of.settlementIds.filter((id) => world.settlements[id].occupiedBy === by.id).length;
+    const gained = occupiedBy(A, B);
+    const lost = occupiedBy(B, A);
+    // A nation with its towns under enemy occupation is pressed to make peace.
+    const pressure = gained / Math.max(1, B.settlementIds.length) + lost / Math.max(1, A.settlementIds.length);
+    const pPeace = 0.02 + (A.warExhaustion + B.warExhaustion) * 0.3 + years * 0.006 + pressure * 0.25 + (fighting || years < 2 ? 0 : 0.12);
     if (rng.chance(pPeace)) {
-      const gained = war.conquered.filter((id) => world.settlements[id].alive && world.settlements[id].polityId === A.id).length;
-      const lost = war.conquered.filter((id) => world.settlements[id].alive && world.settlements[id].polityId === B.id).length;
       const place = world.settlements[rng.chance(0.5) ? A.capitalId : B.capitalId];
       let outcome: string;
       let winner: Polity | null = null;
       let loser: Polity | null = null;
-      if (gained > lost) {
-        outcome = `the ${A.name} won ${gained} settlement${gained > 1 ? 's' : ''}`;
-        [winner, loser] = [A, B];
-      } else if (lost > gained) {
-        outcome = `the ${B.name} turned the tide and took ${lost} settlement${lost > 1 ? 's' : ''}`;
-        [winner, loser] = [B, A];
-      } else {
-        outcome = 'neither side gained ground';
-        if (A.warExhaustion + 0.15 < B.warExhaustion) [winner, loser] = [A, B];
-        else if (B.warExhaustion + 0.15 < A.warExhaustion) [winner, loser] = [B, A];
-      }
-      // A victorious attacker may have the town it fought for ceded at the peace table.
-      const goal = war.goal !== undefined ? world.settlements[war.goal] : null;
-      if (winner === A && goal?.alive && goal.polityId === B.id && goal.id !== B.capitalId && rng.chance(0.5)) {
-        transferSettlement(world, goal, B, A, 0.3);
-        war.conquered.push(goal.id);
-        outcome += `, and ${goal.name} was ceded to it`;
-      }
+      if (gained > lost || (gained === lost && A.warExhaustion + 0.15 < B.warExhaustion)) [winner, loser] = [A, B];
+      else if (lost > gained || (gained === lost && B.warExhaustion + 0.15 < A.warExhaustion)) [winner, loser] = [B, A];
+      const ceded = settleOccupations(world, war, winner, loser);
+      if (winner && ceded.length) outcome = `the ${loser!.name} ceded ${ceded.join(', ')} to the ${winner.name}`;
+      else if (winner) outcome = `the ${winner.name} had the better of it, but no lands changed hands`;
+      else outcome = 'neither side gained ground';
+      if (gained + lost > ceded.length) outcome += '; the other occupied towns were handed back';
       if (war.parent === undefined) outcome += peaceTerms(world, war, winner, loser);
       endWar(world, war, outcome);
       A.warExhaustion *= 0.5;
@@ -506,12 +550,15 @@ function rebellions(world: World): void {
   for (const s of [...world.aliveSettlements()]) {
     const p = world.polities[s.polityId];
     if (!p.alive || p.capitalId === s.id || p.settlementIds.length < 2) continue;
-    if (s.stability >= 0.22 || s.loyalty >= 0.45 || !rng.chance((0.22 - s.stability) * 0.6 * (1 + (0.45 - s.loyalty) * 2))) continue;
+    // Only deep, lasting discontent turns to open revolt: misery and disloyalty together.
+    if (s.occupiedBy >= 0 || world.year - s.heldSince < 5) continue;
+    const misery = 0.18 - Math.max(0, s.stability);
+    if (misery <= 0 || s.loyalty >= 0.35 || !rng.chance(misery * 0.25 * (1 + (0.35 - s.loyalty) * 2))) continue;
     const rebels = [s];
     for (const li of s.links) {
       const l = world.links[li];
       const o = world.settlements[l.a === s.id ? l.b : l.a];
-      if (o.alive && o.polityId === p.id && o.id !== p.capitalId && o.stability < 0.35 && o.loyalty < 0.5 && o.cultureId === s.cultureId) rebels.push(o);
+      if (rebels.length < 4 && o.alive && o.polityId === p.id && o.id !== p.capitalId && o.occupiedBy < 0 && o.stability < 0.3 && o.loyalty < 0.45 && o.cultureId === s.cultureId) rebels.push(o);
     }
     const np = world.createPolity(s.cultureId, s, p.id, p.techs);
     np.settlementIds = [];

@@ -385,6 +385,33 @@ export class MapRenderer {
       ctx.drawImage(this.focus, tx(0), ty(0), map.width * z, map.height * z);
     }
 
+    // Columns of settlers: a white figure with a faint trail to the land they mean to settle.
+    for (const p of world.settlers) {
+      const to = Math.min(p.step, p.path.length - 1);
+      const [X, Y] = along(p.path, Math.min(p.prevStep, to), to);
+      if (selected >= 0 && p.polityId !== selected) ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.moveTo(X, Y);
+      for (let k = to + 1; k < p.path.length; k++) ctx.lineTo(cx(p.path[k]), cy(p.path[k]));
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const r = Math.max(2.5, Math.min(5, 1.5 + Math.sqrt(p.people) * 0.15)) * Math.max(0.8, Math.min(1.5, z / 5));
+      ctx.beginPath();
+      ctx.moveTo(X, Y - r * 1.3);
+      ctx.lineTo(X + r, Y + r);
+      ctx.lineTo(X - r, Y + r);
+      ctx.closePath();
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = world.polities[p.polityId]?.color ?? '#333';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
     if (view.showCaravans && world.caravans.length) {
       for (const c of world.caravans) {
         const to = Math.min(c.step, c.path.length - 1);
@@ -558,6 +585,20 @@ export class MapRenderer {
       ctx.stroke();
     }
     ctx.setLineDash([]);
+
+    // Occupied towns: a thick ring in the occupier's colour.
+    for (const s of world.settlements) {
+      if (!s.alive || s.occupiedBy < 0) continue;
+      if (selected >= 0 && s.polityId !== selected && s.occupiedBy !== selected) continue;
+      ctx.beginPath();
+      ctx.arc(tx(s.x + 0.5), ty(s.y + 0.5), Math.max(7, z * 1.1), 0, Math.PI * 2);
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.strokeStyle = world.polities[s.occupiedBy].color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
 
     // Settlements, largest last so they sit on top.
     const list = world.settlements.filter((s) => s.alive || (view.showRuins && s.peakPop > 800));

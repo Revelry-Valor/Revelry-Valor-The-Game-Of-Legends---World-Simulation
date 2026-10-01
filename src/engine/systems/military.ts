@@ -2,7 +2,8 @@ import { BIOMES, Relief } from '../data/biomes';
 import { tileCost } from '../pathfinding';
 import type { Army, Polity, Settlement, War } from '../types';
 import type { World } from '../world';
-import { captureSettlement, killPop, spreadLosses } from './politics';
+import { TRAVEL_SEASON } from '../calendar';
+import { captureSettlement, controllerOf, killPop, spreadLosses } from './politics';
 import { settlementValue } from './warAims';
 
 /** Terrain cost an army marches in a year; it covers a twelfth of it each month. */
@@ -117,12 +118,14 @@ function chooseTarget(world: World, army: Army): number {
   if (best >= 0) return world.armies.find((a) => a.id === best)!.tile;
   let target: Settlement | null = null;
   let ts = Infinity;
-  for (const id of enemy.settlementIds) {
+  // Enemy towns it does not yet hold, and its own towns the enemy occupies.
+  for (const id of [...enemy.settlementIds, ...p.settlementIds]) {
     const s = world.settlements[id];
-    if (!s.alive) continue;
+    if (!s.alive || controllerOf(s) !== enemy.id) continue;
+    const liberate = s.polityId === p.id ? 15 : 0;
     // Near, weakly held towns first, but worth a longer march for a prize: a lost town to win
     // back, kinsfolk, needed resources, a trade road, a way through to cut-off lands, the war's goal.
-    let d = dist(world, army.tile, s.tile) + Math.sqrt(s.pop) * 0.05 - settlementValue(world, p, s).value * 0.3 - (war.goal === s.id ? 8 : 0);
+    let d = dist(world, army.tile, s.tile) + Math.sqrt(s.pop) * 0.05 - (liberate || settlementValue(world, p, s).value * 0.3) - (war.goal === s.id ? 8 : 0);
     if (s.landmass !== world.map.landmass[army.tile]) {
       if (p.effects.seaTravel < 1) continue;
       d += 8;
@@ -145,7 +148,8 @@ function march(world: World, army: Army): void {
   }
   const biome = BIOMES[world.map.biome[army.tile]].key;
   const harsh = biome === 'desert' || biome === 'tundra' || biome === 'ice' || biome === 'mountain' || biome === 'wetland' ? 0.05 : 0;
-  const loss = army.size * (0.02 + harsh) / 12;
+  const winter = world.season === 'winter' ? 0.03 : 0;
+  const loss = army.size * (0.02 + harsh + winter) / 12;
   army.size -= loss;
   spreadLosses(world, p, loss);
   if (army.size < 20) {
@@ -154,7 +158,7 @@ function march(world: World, army: Army): void {
     return;
   }
   const target = world.settlements[army.targetSettlement];
-  const targetGone = army.targetSettlement >= 0 && (!target?.alive || target.polityId === p.id);
+  const targetGone = army.targetSettlement >= 0 && (!target?.alive || controllerOf(target) === p.id || !world.atWar(p.id, controllerOf(target)));
   const armyGone = army.targetArmy >= 0 && !world.armies.some((a) => a.id === army.targetArmy && a.alive);
   // Chasing an army means re-plotting as it moves; otherwise re-plan every few months.
   if (army.path.length === 0 || targetGone || armyGone || (army.targetArmy >= 0 && world.month % 2 === 0) || world.monthIndex % 6 === 0) {
@@ -169,7 +173,7 @@ function march(world: World, army: Army): void {
     army.step = 0;
   }
   if (army.siege > 0 && army.targetSettlement >= 0 && dist(world, army.tile, world.settlements[army.targetSettlement].tile) <= 1) return;
-  let budget = (MARCH * (1 + p.effects.roads * 0.2)) / 12;
+  let budget = (MARCH * (1 + p.effects.roads * 0.2) * TRAVEL_SEASON[world.season]) / 12;
   while (budget > 0 && army.step < army.path.length - 1) {
     const next = army.path[army.step + 1];
     const c = tileCost(world.map, next, p.effects.seaTravel);
@@ -247,19 +251,21 @@ function engage(world: World, army: Army): void {
   // Siege: the army camps before the walls; every third month it tries to storm them.
   if (army.targetSettlement < 0) return;
   const target = world.settlements[army.targetSettlement];
-  if (!target.alive || target.polityId === p.id || dist(world, army.tile, target.tile) > 1) return;
-  const def = world.polities[target.polityId];
+  if (!target.alive || controllerOf(target) === p.id || dist(world, army.tile, target.tile) > 1) return;
+  const def = world.polities[controllerOf(target)];
   if (!world.atWar(p.id, def.id)) return;
   army.siege++;
   target.stability -= 0.01;
   target.stock[0] *= 0.93; // the besiegers eat the harvest and cut the supply roads
   if (army.siege === 1 && target.pop > 1500) world.log('battle', 2, `The ${army.name} of the ${p.name} laid siege to ${target.name}.`, { polities: [p.id, def.id], settlements: [target.id] });
-  if (army.siege % 6 !== 0) return;
+  // No assaults in the depths of winter; the siege goes on.
+  if (army.siege % 6 !== 0 || world.season === 'winter') return;
   const relief = world.map.relief[target.tile];
   const terrain = relief === Relief.Mountains ? 1.5 : relief === Relief.Hills ? 1.25 : 1;
   const walls = 1 + def.effects.defense + world.cultures[target.cultureId].traitEffects.defense;
   const hunger = Math.max(0.7, 1 - army.siege * 0.02); // starving defenders fight worse
-  const garrison = target.pop * 0.1 * walls * terrain * soldierQuality(world, def) * hunger + 1;
+  // An occupier's garrison is thin, and the townsfolk rise to help their own side.
+  const garrison = target.pop * 0.1 * walls * terrain * soldierQuality(world, def) * hunger * (target.occupiedBy >= 0 ? 0.35 : 1) + 1;
   const force = army.size * soldierQuality(world, p) * rng.range(0.7, 1.3);
   const ratio = force / garrison;
   const stormed = ratio > 1.3 && rng.chance((ratio * ratio) / (2 + ratio * ratio));

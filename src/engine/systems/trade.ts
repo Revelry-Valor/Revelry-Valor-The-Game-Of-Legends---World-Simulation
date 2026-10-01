@@ -228,7 +228,7 @@ export function runTribute(world: World): void {
     for (const id of p.settlementIds) {
       if (id === capital.id) continue;
       const s = world.settlements[id];
-      if (!s.connected) continue;
+      if (!s.connected || s.occupiedBy >= 0) continue;
       const d = Math.hypot(s.x - capital.x, s.y - capital.y);
       const reach = Math.max(0, 1 - d / (25 + p.effects.roads * 10 + p.effects.seaTravel * 5));
       if (reach <= 0) continue;

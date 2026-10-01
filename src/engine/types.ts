@@ -190,6 +190,26 @@ export interface Caravan {
   started: number;
 }
 
+/** A column of settlers on its way to found a new settlement. */
+export interface SettlerParty {
+  id: number;
+  /** Settlement they set out from. */
+  fromId: number;
+  polityId: number;
+  cultureId: number;
+  races: Record<string, number>;
+  people: number;
+  /** Tile they mean to settle. */
+  targetTile: number;
+  /** Whether the new settlement stays under the home nation. */
+  joins: boolean;
+  path: number[];
+  step: number;
+  prevStep: number;
+  /** Month they set out. */
+  started: number;
+}
+
 /** A merchant family whose caravans grow with its fortune. */
 export interface TradingHouse {
   id: number;
@@ -341,6 +361,18 @@ export interface Settlement {
   /** Cultural divergence from the parent culture; a new culture splits off above 1. */
   drift: number;
   lastColonized: number;
+  /** Food still to come in this year, by month: the harvest in autumn, game and fish all year. */
+  foodSchedule: Float64Array;
+  /** Food eaten and needed so far this year (the year's food ratio is their quotient). */
+  foodEaten: number;
+  foodNeeded: number;
+  /** Months this year when the stores ran short, and how many last year. */
+  hungryMonths: number;
+  lastHungry: number;
+  /** Enemy nation occupying it in wartime (-1 if none); it changes hands only at the peace. */
+  occupiedBy: number;
+  /** Month the occupation began. */
+  occupiedSince: number;
   greatWorks: string[];
   peakPop: number;
 }

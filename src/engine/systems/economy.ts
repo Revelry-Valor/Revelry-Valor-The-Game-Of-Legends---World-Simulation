@@ -2,6 +2,7 @@ import {
   CRAFT_SECTORS, EXTRACTION_SECTORS, GOOD_BASE_PRICE, GOOD_COUNT, GOOD_DECAY, Good, SECTOR_COUNT,
   type Recipe,
 } from '../data/economy';
+import { FOOD_SEASON } from '../calendar';
 import type { Settlement } from '../types';
 import type { World } from '../world';
 
@@ -95,7 +96,7 @@ function produce(world: World, s: Settlement): void {
   // 1) Subsistence: secure food first.
   const need = foodNeed(world, s);
   const chunk = Math.max(0.5, workers / 48);
-  const foodTarget = need * 1.1 - s.stock[Good.Food] * 0.3;
+  const foodTarget = need * 1.2 - s.stock[Good.Food] * 0.3;
   let assigned = 0;
   let food = 0;
   while (food < foodTarget && assigned + chunk <= workers) {
@@ -137,7 +138,11 @@ function produce(world: World, s: Settlement): void {
     const o = out(k);
     if (o <= 0) continue;
     const g = EXTRACTION_SECTORS[k].output;
-    s.stock[g] += o;
+    if (g === Good.Food) {
+      // Food comes in over the coming year: grain at harvest, game, herds and fish all year round.
+      const season = FOOD_SEASON[EXTRACTION_SECTORS[k].key] ?? FOOD_SEASON.default;
+      for (let m = 0; m < 12; m++) s.foodSchedule[m] += o * season[m];
+    } else s.stock[g] += o;
     s.produced[g] += o;
     value += o * s.price[g];
   }
@@ -163,9 +168,60 @@ function produce(world: World, s: Settlement): void {
   s.wealth += value * 0.04 + idle * 0.08;
 }
 
+/** Share of a year's stored food lost to rot and vermin with no storage at all. */
+const FOOD_ROT = 0.2;
+
 /**
- * Eating, spoilage, fuel, building homes, births and deaths, and the prices
- * that result from what is left in the stores.
+ * Every month: the season's food comes in, people eat from the stores, food spoils,
+ * and people are born and die. Stores run low in the lean months before harvest.
+ */
+export function runMonthlyFood(world: World): void {
+  const m = world.month;
+  for (const s of world.aliveSettlements()) {
+    const pol = world.polities[s.polityId];
+    const fx = pol.effects;
+    const culture = world.cultures[s.cultureId];
+    s.stock[Good.Food] += s.foodSchedule[m];
+    s.foodSchedule[m] = 0;
+    const need = foodNeed(world, s) / 12;
+    const eat = Math.min(s.stock[Good.Food], need);
+    s.stock[Good.Food] -= eat;
+    s.consumed[Good.Food] += eat;
+    s.foodEaten += eat;
+    s.foodNeeded += need;
+    const fed = need > 0 ? eat / need : 1;
+    if (fed < 0.9) s.hungryMonths++;
+    const saltCover = Math.min(1, s.stock[Good.Salt] / (s.pop * 0.01 + 1));
+    const storage = Math.min(0.8, fx.storage + 0.35 * saltCover);
+    s.stock[Good.Food] *= 1 - (1 - Math.pow(1 - FOOD_ROT, 1 / 12)) * (1 - storage);
+
+    // Births and deaths, a twelfth of a year's worth.
+    const room = 1 - s.pop / Math.max(1, s.housing);
+    const crowd = room > 0 ? Math.min(1, room * 3) : Math.max(-0.6, room * 2);
+    const adapt = culture.traitEffects;
+    const famine = fed < 0.98 ? (1 - fed) * 0.3 * (1 - Math.min(0.8, adapt.famineResist)) : 0;
+    const plague = s.plague * 0.22 * (1 - Math.min(0.8, fx.sanitation)) * (1 - Math.min(0.8, adapt.plagueResist));
+    let pop = 0;
+    for (const r in s.races) {
+      const rd = world.raceById.get(r);
+      const g = rd ? rd.growth : 0.02;
+      const rate = crowd >= 0 ? g * fed * crowd : crowd * 0.1;
+      const hardy = 1 - (rd?.hardiness ?? 0);
+      const n = Math.max(0, s.races[r] * (1 + (rate - (famine + plague) * hardy) / 12));
+      if (n < 0.5) delete s.races[r];
+      else {
+        s.races[r] = n;
+        pop += n;
+      }
+    }
+    s.pop = pop;
+    s.peakPop = Math.max(s.peakPop, pop);
+  }
+}
+
+/**
+ * Once a year: the year's food balance, fuel, building homes, wear, taxes, and the prices
+ * that result from what is left in the stores and what the coming year will bring.
  */
 export function runConsumption(world: World): void {
   for (const s of world.aliveSettlements()) consume(world, s);
@@ -176,12 +232,11 @@ function consume(world: World, s: Settlement): void {
   const fx = pol.effects;
   const culture = world.cultures[s.cultureId];
 
-  // Food
-  const need = foodNeed(world, s);
-  const eat = Math.min(s.stock[Good.Food], need);
-  s.stock[Good.Food] -= eat;
-  s.consumed[Good.Food] += eat;
-  s.foodRatio = need > 0 ? eat / need : 1;
+  s.foodRatio = s.foodNeeded > 0 ? s.foodEaten / s.foodNeeded : 1;
+  s.foodEaten = 0;
+  s.foodNeeded = 0;
+  s.lastHungry = s.hungryMonths;
+  s.hungryMonths = 0;
 
   const take = (g: Good, amount: number): number => {
     const t = Math.min(s.stock[g], amount);
@@ -190,7 +245,7 @@ function consume(world: World, s: Settlement): void {
     return amount > 0 ? t / amount : 1;
   };
   take(Good.Timber, s.pop * 0.05);
-  const saltCover = take(Good.Salt, s.pop * 0.01);
+  take(Good.Salt, s.pop * 0.01);
   const wealthPerCap = s.wealth / Math.max(1, s.pop);
   const luxCover = take(Good.Luxuries, s.pop * 0.003 * (1 + wealthPerCap));
   s.stability += (luxCover - 0.5) * 0.01;
@@ -217,35 +272,8 @@ function consume(world: World, s: Settlement): void {
   }
   s.housing = Math.min(s.housing * 0.99, Math.max(housingMax, s.pop));
 
-  // Spoilage and wear.
-  const storage = Math.min(0.8, fx.storage + 0.35 * saltCover);
-  for (let g = 0; g < GOOD_COUNT; g++) {
-    const d = g === Good.Food ? GOOD_DECAY[g] * (1 - storage) : GOOD_DECAY[g];
-    s.stock[g] *= 1 - d;
-  }
-
-  // Population change per race.
-  const room = 1 - s.pop / Math.max(1, s.housing);
-  const crowd = room > 0 ? Math.min(1, room * 3) : Math.max(-0.6, room * 2);
-  const adapt = culture.traitEffects;
-  const famine = s.foodRatio < 0.98 ? (1 - s.foodRatio) * 0.3 * (1 - Math.min(0.8, adapt.famineResist)) : 0;
-  const plague = s.plague * 0.22 * (1 - Math.min(0.8, fx.sanitation)) * (1 - Math.min(0.8, adapt.plagueResist));
-  const feed = Math.min(1, s.foodRatio);
-  let pop = 0;
-  for (const r in s.races) {
-    const rd = world.raceById.get(r);
-    const g = rd ? rd.growth : 0.02;
-    const rate = crowd >= 0 ? g * feed * crowd : crowd * 0.1;
-    const hardy = 1 - (rd?.hardiness ?? 0);
-    const n = Math.max(0, s.races[r] * (1 + rate - (famine + plague) * hardy));
-    if (n < 0.5) delete s.races[r];
-    else {
-      s.races[r] = n;
-      pop += n;
-    }
-  }
-  s.pop = pop;
-  s.peakPop = Math.max(s.peakPop, pop);
+  // Wear (food spoils month by month).
+  for (let g = 0; g < GOOD_COUNT; g++) if (g !== Good.Food) s.stock[g] *= 1 - GOOD_DECAY[g];
 
   // Minting: once coinage is known, spare gold is struck into coin.
   if (pol.techs.has('currency')) {
@@ -258,8 +286,9 @@ function consume(world: World, s: Settlement): void {
   s.transit *= 0.5;
 
   // Wealth & taxes.
+  // Occupied towns pay their taxes to the occupier.
   const tax = s.wealth * 0.06;
-  pol.treasury += tax;
+  (s.occupiedBy >= 0 ? world.polities[s.occupiedBy] : pol).treasury += tax;
   s.wealth = (s.wealth - tax) * 0.97;
 
   updatePrices(world, s, culture.values.militarism);
@@ -290,9 +319,13 @@ export function updatePrices(world: World, s: Settlement, militarism: number): v
   t[Good.Horses] = pop * (world.polities[s.polityId].techs.has('horseback_riding') ? 0.004 : 0.001);
   t[Good.Reagents] = world.cfg.magic > 0 ? pop * 0.002 * (1 + fx.magic) : 0;
   t[Good.Luxuries] = pop * 0.004 * (1 + wealthPerCap);
+  // Food in the stores plus what the rest of the year will bring, less what must be eaten until then.
+  let coming = 0;
+  for (let m = world.month; m < 12; m++) coming += s.foodSchedule[m];
+  const foodOnHand = Math.max(0, s.stock[Good.Food] + coming - foodNeed(world, s) * ((12 - world.month) / 12));
   for (let g = 0; g < GOOD_COUNT; g++) {
     const e = Math.max(0.5, t[g] * 0.05);
-    const ratio = (t[g] + e) / (s.stock[g] + e);
+    const ratio = (t[g] + e) / ((g === Good.Food ? foodOnHand : s.stock[g]) + e);
     s.price[g] = GOOD_BASE_PRICE[g] * Math.pow(Math.min(5, Math.max(0.2, ratio)), 0.8);
   }
 }
