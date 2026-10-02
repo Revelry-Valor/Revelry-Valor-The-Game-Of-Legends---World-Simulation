@@ -67,7 +67,7 @@ export const ERA_COST = [60, 220, 650, 1600, 3600, 7000, 12000, 20000];
 
 export const TECHS: TechDef[] = [
   // Era 0 — Stone Age
-  { id: 'agriculture', name: 'Agriculture', era: 0, category: 'agriculture', prereqs: [], requires: [Res.Fertility], effects: { food: 0.2, housingMax: 2500 }, description: 'Sowing and harvesting crops; settled villages become possible.' },
+  { id: 'agriculture', name: 'Agriculture', era: 0, category: 'agriculture', prereqs: [], requires: [Res.Fertility], effects: { food: 0.2, housingMax: 2500 }, description: 'Sowing and harvesting crops: far more food from the same land, and a reason to stay in one place.' },
   { id: 'animal_husbandry', name: 'Animal Husbandry', era: 0, category: 'agriculture', prereqs: [], requires: [Res.Game], effects: { food: 0.1 }, description: 'Domesticated herds provide meat, milk and hides.' },
   { id: 'fishing', name: 'Fishing', era: 0, category: 'maritime', prereqs: [], requiresWater: true, effects: { fish: 0.4 }, description: 'Nets, weirs and dugout canoes.' },
   { id: 'pottery', name: 'Pottery', era: 0, category: 'industry', prereqs: [], effects: { storage: 0.25 }, description: 'Fired clay vessels store grain and water.' },
@@ -128,4 +128,92 @@ export const TECH_BY_ID = new Map(TECHS.map((t) => [t.id, t]));
 
 export function techCost(t: TechDef): number {
   return ERA_COST[t.era];
+}
+
+/** What people do that teaches them a technology: a trade (by sector key) or a part of life in the realm. */
+export type Practice =
+  | 'foraging' | 'farming' | 'herding' | 'fishing' | 'forestry' | 'quarrying' | 'copperMining' | 'tinMining'
+  | 'ironMining' | 'coalMining' | 'horseBreeding' | 'arcanaGathering' | 'toolmaking' | 'weaponsmithing' | 'artisans'
+  /** Townsfolk: craftsmen, merchants and officials. */
+  | 'urban'
+  /** Goods traded, at home and abroad. */
+  | 'trade'
+  /** Soldiers in the field and nations at war. */
+  | 'war'
+  /** Priests and the devout. */
+  | 'faith'
+  /** Townsfolk with time and curiosity to wonder. */
+  | 'scholars'
+  /** Governing many towns and peoples. */
+  | 'admin'
+  /** People on the coast and the water. */
+  | 'sea';
+
+/**
+ * Technology grows out of practice: the people doing the related work discover and refine it.
+ * Farmers improve farming, smiths metalworking, fishers and traders seafaring, townsfolk and
+ * traders writing and law. Each technology lists the practices that teach it.
+ */
+export const PRACTICE: Record<string, Practice[]> = {
+  agriculture: ['foraging', 'farming'],
+  animal_husbandry: ['foraging', 'herding'],
+  fishing: ['fishing', 'sea'],
+  pottery: ['foraging', 'farming', 'urban'],
+  carpentry: ['forestry', 'toolmaking'],
+  mysticism: ['faith', 'arcanaGathering'],
+  masonry: ['quarrying', 'urban'],
+  copper_working: ['quarrying', 'toolmaking', 'copperMining'],
+  sailing: ['fishing', 'sea', 'trade'],
+  the_wheel: ['trade', 'forestry', 'herding'],
+  irrigation: ['farming'],
+  writing: ['trade', 'urban', 'admin'],
+  horseback_riding: ['herding', 'horseBreeding'],
+  ancestor_worship: ['faith'],
+  bronze_working: ['copperMining', 'tinMining', 'toolmaking', 'weaponsmithing'],
+  mathematics: ['trade', 'scholars'],
+  currency: ['trade'],
+  construction: ['quarrying', 'urban'],
+  code_of_laws: ['admin', 'urban'],
+  arcane_lore: ['arcanaGathering', 'scholars'],
+  warrior_code: ['war', 'weaponsmithing'],
+  iron_working: ['ironMining', 'toolmaking', 'weaponsmithing'],
+  philosophy: ['scholars'],
+  engineering: ['urban', 'quarrying'],
+  navigation: ['sea', 'trade'],
+  crop_rotation: ['farming'],
+  enchanting: ['arcanaGathering', 'artisans'],
+  monasticism: ['faith', 'scholars'],
+  medicine: ['scholars', 'urban'],
+  steel: ['ironMining', 'coalMining', 'weaponsmithing'],
+  banking: ['trade'],
+  feudalism: ['war', 'admin'],
+  architecture: ['urban', 'quarrying'],
+  astronomy: ['scholars', 'sea'],
+  heavy_plough: ['farming'],
+  high_sorcery: ['arcanaGathering', 'scholars'],
+  printing_press: ['scholars', 'artisans'],
+  alchemy: ['scholars', 'artisans'],
+  gunpowder: ['war', 'coalMining'],
+  cartography: ['trade', 'sea'],
+  sanitation: ['urban'],
+  guilds: ['artisans', 'toolmaking', 'trade'],
+  archmagic: ['arcanaGathering', 'scholars'],
+  joint_stock: ['trade'],
+  machinery: ['toolmaking', 'artisans', 'ironMining'],
+  scientific_method: ['scholars'],
+  steam_power: ['coalMining', 'toolmaking'],
+  industrialization: ['urban', 'toolmaking', 'coalMining'],
+};
+
+/** How each practice reads in a sentence ("learned through farming and gathering"). */
+export const PRACTICE_NAMES: Record<Practice, string> = {
+  foraging: 'hunting and gathering', farming: 'farming', herding: 'herding', fishing: 'fishing', forestry: 'woodcutting',
+  quarrying: 'quarrying', copperMining: 'copper mining', tinMining: 'tin mining', ironMining: 'iron mining', coalMining: 'coal mining',
+  horseBreeding: 'horse breeding', arcanaGathering: 'gathering reagents', toolmaking: 'toolmaking', weaponsmithing: 'weaponsmithing',
+  artisans: 'crafts', urban: 'town life', trade: 'trade', war: 'war', faith: 'faith', scholars: 'learning', admin: 'governing', sea: 'life on the coast',
+};
+
+export function practiceText(id: string): string {
+  const list = (PRACTICE[id] ?? []).map((k) => PRACTICE_NAMES[k]);
+  return list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }

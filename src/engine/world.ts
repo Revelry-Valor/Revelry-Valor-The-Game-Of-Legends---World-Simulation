@@ -19,7 +19,7 @@ import { claimTile } from './systems/land';
 import { LandUse, tierIndex } from './data/settlements';
 import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
-import { assignMarkets, buildHubLinks, buildMarketLinks, buildTradeLinks, runTrade, runTribute } from './systems/trade';
+import { assignMarkets, buildHubLinks, buildMarketLinks, buildTradeLinks, runTrade, runTribute, updateExportPrices } from './systems/trade';
 import type {
   Army, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
   NobleHouse, Pact, Settlement, SettlerParty, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
@@ -157,6 +157,7 @@ export class World {
     runEvents(this);
     assignMarkets(this);
     if (this.marketsDirty) buildMarketLinks(this);
+    updateExportPrices(this);
     runProduction(this);
     runTrade(this);
     runTribute(this);
@@ -322,6 +323,7 @@ export class World {
       surrounded: 0,
       heldSince: this.year,
       lastPrice: Float64Array.from(GOOD_BASE_PRICE),
+      exportPrice: new Float64Array(GOOD_COUNT),
       coastal: map.coastal[tile] === 1,
       river: map.river[tile] > 0,
       landmass: map.landmass[tile],
@@ -369,6 +371,7 @@ export class World {
       techs: new Set(techs ?? []),
       researching: null,
       researchProgress: 0,
+      progress: new Map(),
       effects: baseEffects(),
       ruler: null as unknown as Ruler,
       pastRulers: [],

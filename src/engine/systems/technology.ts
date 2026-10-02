@@ -1,5 +1,5 @@
-import { GOOD_COUNT, RES_TO_GOOD, Res } from '../data/economy';
-import { ERA_NAMES, TECHS, TECH_BY_ID, techCost, type TechDef } from '../data/techs';
+import { GOOD_COUNT, Good, RES_TO_GOOD, Res, SECTOR_KEYS } from '../data/economy';
+import { ERA_NAMES, PRACTICE, TECHS, techCost, type Practice, type TechDef } from '../data/techs';
 import type { Polity } from '../types';
 import type { World } from '../world';
 
@@ -44,10 +44,58 @@ function diffusion(world: World, p: Polity, techId: string): number {
   return total > 0 ? known / total : 0;
 }
 
+/** Learning speed: how much a year of practice by N people moves a technology on. */
+const LEARN = 0.03;
+
+/** How many people practise each kind of work across a realm. */
+function practices(world: World, p: Polity): Map<Practice, number> {
+  const out = new Map<Practice, number>();
+  const add = (k: Practice, v: number) => out.set(k, (out.get(k) ?? 0) + v);
+  const writing = p.techs.has('writing');
+  for (const id of p.settlementIds) {
+    const s = world.settlements[id];
+    const values = world.cultures[s.cultureId].values;
+    for (let k = 0; k < SECTOR_KEYS.length; k++) if (s.labor[k] > 0) add(SECTOR_KEYS[k] as Practice, s.labor[k]);
+    add('urban', s.urbanPop);
+    add('trade', (s.tradeByKind.internal + s.tradeByKind.caravan + s.tradeByKind.convoy) / 4);
+    add('faith', s.pop * values.piety * 0.1);
+    add('scholars', s.urbanPop * values.curiosity * (writing ? 0.5 : 0.12));
+    if (s.coastal) add('sea', s.pop * 0.15 * (0.5 + values.seafaring));
+  }
+  if (p.settlementIds.length > 1) add('admin', p.pop * 0.03 * Math.log2(p.settlementIds.length));
+  let soldiers = 0;
+  for (const a of world.armies) if (a.alive && a.polityId === p.id) soldiers += a.size;
+  add('war', soldiers + (p.wars.size ? p.military * 0.2 : 0));
+  return out;
+}
+
+const METALS = new Set(['copper_working', 'bronze_working', 'iron_working', 'steel']);
+
+/** Necessity, the mother of invention: what the realm is short of makes it try harder. */
+function need(world: World, p: Polity, t: TechDef): number {
+  let hunger = 0;
+  let crowding = 0;
+  for (const id of p.settlementIds) {
+    const s = world.settlements[id];
+    hunger += s.lastHungry / 12;
+    crowding += s.crowding;
+  }
+  const n = Math.max(1, p.settlementIds.length);
+  if (t.category === 'agriculture') return 1 + Math.min(2, (hunger / n) * 4 + (p.deficit[Good.Food] ? 0.5 : 0));
+  if (t.id === 'sanitation' || t.id === 'medicine' || t.id === 'engineering') return 1 + Math.min(2, (crowding / n) * 2);
+  if (t.category === 'military') return p.wars.size > 0 ? 1.8 : 1;
+  if (t.id === 'masonry' && p.deficit[Good.Timber]) return 1.5;
+  if (METALS.has(t.id) && p.deficit[Good.Tools]) return 1.4;
+  return 1;
+}
+
 /**
- * Polities accumulate research from their population (faster with writing, curiosity,
- * wise rulers and a suitable government), choose what to study based on their surroundings,
- * and learn much faster what their neighbours and trade partners already know.
+ * Knowledge grows out of practice. Every technology a realm could take up next moves on each
+ * year according to how many of its people do the related work (farmers improving farming,
+ * smiths metalworking, fishers and traders seafaring, townsfolk writing and law), faster when
+ * the realm needs it, with curious peoples, learned institutions and wise rulers, and much faster
+ * when neighbours and trading partners already know it. Technology improves what people do and
+ * opens new work; it never decides how big a settlement can grow.
  */
 export function runTechnology(world: World): void {
   for (const p of world.alivePolities()) {
@@ -59,27 +107,31 @@ export function runTechnology(world: World): void {
     }
     const culture = world.cultures[p.cultureId];
     const race = world.raceById.get(culture.raceId) ?? world.races[0];
-    let base = 0;
-    for (const id of p.settlementIds) base += Math.pow(world.settlements[id].pop, 0.72);
     let mult = (1 + p.effects.research) * (0.55 + culture.values.curiosity * 0.9) * GOV_RESEARCH[p.government];
     for (const t of p.ruler.traits) mult += TRAIT_RESEARCH[t] ?? 0;
-    // Diminishing returns: a sprawling realm is not a hundred times as inventive as one city.
-    const points = Math.pow(base, 0.7) * 0.045 * mult * (0.5 + p.stability * 0.7);
-
-    if (!p.researching || !canResearch(world, p, TECH_BY_ID.get(p.researching)!)) {
-      p.researching = chooseResearch(world, p);
-      p.researchProgress = 0;
-    }
-    if (!p.researching) continue;
-    const tech = TECH_BY_ID.get(p.researching)!;
-    const affinity = race.research[tech.category] ?? 1;
-    p.researchProgress += points * affinity;
-    const cost = techCost(tech) * (1 - 0.65 * diffusion(world, p, tech.id));
-    if (p.researchProgress >= cost) {
+    mult *= 0.5 + p.stability * 0.7;
+    const done = practices(world, p);
+    let lead: TechDef | null = null;
+    let leadShare = -1;
+    for (const tech of TECHS) {
+      if (!canResearch(world, p, tech)) continue;
+      let amount = 0;
+      for (const k of PRACTICE[tech.id] ?? []) amount += done.get(k) ?? 0;
+      const known = diffusion(world, p, tech.id);
+      const rate = LEARN * Math.pow(amount, 0.6) * mult * (race.research[tech.category] ?? 1) * need(world, p, tech) * (1 + 2 * known);
+      const progress = (p.progress.get(tech.id) ?? 0) + rate;
+      const cost = techCost(tech) * (1 - 0.65 * known);
+      if (progress < cost) {
+        p.progress.set(tech.id, progress);
+        if (progress / cost > leadShare) {
+          leadShare = progress / cost;
+          lead = tech;
+        }
+        continue;
+      }
+      p.progress.delete(tech.id);
       p.techs.add(tech.id);
       world.recomputeEffects(p);
-      p.researching = null;
-      p.researchProgress = 0;
       const first = !world.firstTech.has(tech.id);
       if (first) {
         world.firstTech.set(tech.id, p.id);
@@ -91,27 +143,8 @@ export function runTechnology(world: World): void {
         world.log('technology', 1, `The ${p.name} learned ${tech.name}.`, { polities: [p.id] });
       }
     }
+    // For display: the technology the realm is closest to mastering.
+    p.researching = lead ? lead.id : null;
+    p.researchProgress = lead ? p.progress.get(lead.id) ?? 0 : 0;
   }
-}
-
-function chooseResearch(world: World, p: Polity): string | null {
-  const culture = world.cultures[p.cultureId];
-  const race = world.raceById.get(culture.raceId) ?? world.races[0];
-  const v = culture.values;
-  let coastal = 0;
-  for (const id of p.settlementIds) if (world.settlements[id].coastal) coastal++;
-  const coastShare = coastal / Math.max(1, p.settlementIds.length);
-  const options = TECHS.filter((t) => canResearch(world, p, t));
-  const pick = world.rng.weighted(options, (t) => {
-    let w = (race.research[t.category] ?? 1) / (1 + t.era * 0.3);
-    if (t.category === 'maritime') w *= 0.4 + coastShare * 1.5 + v.seafaring;
-    if (t.category === 'military') w *= 0.5 + v.militarism + (p.wars.size > 0 ? 0.8 : 0);
-    if (t.category === 'society') w *= 0.6 + v.mercantilism * 0.5 + v.piety * 0.3;
-    if (t.category === 'science') w *= 0.5 + v.curiosity;
-    if (t.category === 'arcane') w *= 0.4 + v.piety * 0.4 + v.curiosity * 0.4 + world.cfg.magic * 0.3;
-    if (t.category === 'agriculture') w *= 1.3;
-    w *= 1 + 2 * diffusion(world, p, t.id);
-    return w;
-  });
-  return pick ? pick.id : null;
 }

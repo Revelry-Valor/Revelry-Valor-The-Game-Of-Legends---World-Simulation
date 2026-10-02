@@ -1,6 +1,6 @@
 import { describeValues, fmt, polityEra, settlementTier } from '../engine/chronicle';
 import { GOOD_BASE_PRICE, GOOD_COUNT, GOOD_NAMES } from '../engine/data/economy';
-import { ERA_NAMES, TECHS, TECH_BY_ID, techCost } from '../engine/data/techs';
+import { ERA_NAMES, TECHS, TECH_BY_ID, practiceText, techCost } from '../engine/data/techs';
 import { TRAIT_BY_ID } from '../engine/data/traits';
 import type { HistoryEvent, Polity } from '../engine/types';
 import type { World } from '../engine/world';
@@ -60,7 +60,7 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
   const byKind: Record<string, number> = {};
   for (const c of ownCaravans) byKind[c.kind] = (byKind[c.kind] ?? 0) + 1;
   const wars = [...p.wars].map((w) => world.wars[w]);
-  const researching = p.researching ? TECH_BY_ID.get(p.researching) : null;
+  const learning = [...p.progress].map(([tid, v]) => ({ t: TECH_BY_ID.get(tid)!, share: Math.min(1, v / techCost(TECH_BY_ID.get(tid)!)) })).filter((x) => !p.techs.has(x.t.id)).sort((a, b) => b.share - a.share).slice(0, 4);
   const known = TECHS.filter((t) => p.techs.has(t.id)).length;
   const events = world.history.filter((e) => e.polities?.includes(id) && e.importance >= 2);
   const goods = Array.from({ length: GOOD_COUNT }, (_, g) => g).filter((g) => p.produced[g] > 0.5 || p.needed[g] > 0.5);
@@ -161,7 +161,7 @@ export function renderNation(world: World, id: number, h: UiHelpers): string {
     <section class="card">
       <h3>Knowledge</h3>
       <p>Era: <b>${polityEra(p)}</b></p>
-      ${researching ? `<p class="small">Researching <b>${esc(researching.name)}</b></p>${meter('Progress', Math.min(1, p.researchProgress / techCost(researching)))}` : '<p class="muted small">Nothing left to research that it can reach.</p>'}
+      ${learning.length ? `<p class="small muted">Its people are working their way towards:</p>${learning.map(({ t, share }) => `${meter(esc(t.name), share)}<p class="small muted">through ${esc(practiceText(t.id))}</p>`).join('')}` : '<p class="muted small">Nothing new within its reach.</p>'}
       <p><button type="button" data-tech-for="${id}">Open the tech tree for this nation</button></p>
       <p class="small">${ERA_NAMES.map((name, e) => {
         const n = TECHS.filter((t) => t.era === e && p.techs.has(t.id)).length;

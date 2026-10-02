@@ -65,7 +65,8 @@ function produce(world: World, s: Settlement): void {
     const sec = EXTRACTION_SECTORS[k];
     cap[k] = 0;
     yld[k] = 0;
-    val[k] = s.price[sec.output];
+    // Worth what it fetches here, or at the markets it trades with (less a margin for the risk of the road).
+    val[k] = Math.max(s.price[sec.output], s.exportPrice[sec.output] * 0.85);
     L[k] = 0;
     if (sec.requiresTech && !pol.techs.has(sec.requiresTech)) continue;
     if (sec.requiresMetallurgy !== undefined && fx.metallurgy < sec.requiresMetallurgy) continue;
@@ -98,7 +99,7 @@ function produce(world: World, s: Settlement): void {
       recipes[c] = r;
       cap[k] = limit;
       yld[k] = sec.yieldPerWorker * (1 + fx.craft) * (race.production[sec.key] ?? 1) * (trait.production[sec.key] ?? 1) * toolMult;
-      val[k] = s.price[sec.output] * (1 + r.quality * 0.15) - inputCost;
+      val[k] = Math.max(s.price[sec.output], s.exportPrice[sec.output] * 0.85) * (1 + r.quality * 0.15) - inputCost;
       break;
     }
   }

@@ -365,6 +365,8 @@ export interface Settlement {
   tradeByKind: Record<TradeKind, number>;
   /** Value of caravan goods passing through last year. */
   transit: number;
+  /** Best price its goods would fetch at the markets it trades with, after carriage. */
+  exportPrice: Float64Array;
   /** Prices a year ago, for market trends. */
   lastPrice: Float64Array;
   /** Loyalty to the nation that holds it, 0..1. Low loyalty breeds revolt and defection. */
@@ -453,6 +455,8 @@ export interface Polity {
   techs: Set<string>;
   researching: string | null;
   researchProgress: number;
+  /** Progress towards every technology it is working its way to, by tech id. */
+  progress: Map<string, number>;
   effects: TechEffects;
   ruler: Ruler;
   pastRulers: Ruler[];

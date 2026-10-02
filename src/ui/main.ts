@@ -441,7 +441,7 @@ function renderOverlay(full: boolean): void {
     const scroller = overlayBody.querySelector('.tt-scroll');
     const left = scroller?.scrollLeft ?? 0;
     overlayBody.innerHTML = `<div class="tt-legend">
-      <span><i class="sw known"></i>Known</span><span><i class="sw researching"></i>Researching</span><span><i class="sw available"></i>Can research</span>
+      <span><i class="sw known"></i>Known</span><span><i class="sw researching"></i>Being learned</span><span><i class="sw available"></i>Can research</span>
       <span><i class="sw blocked"></i>Missing a resource</span><span><i class="sw locked"></i>Locked</span>
       <span class="cats">${['agriculture', 'industry', 'military', 'maritime', 'society', 'science', 'arcane'].map((c) => `<i class="cat c-${c}"></i>${c}`).join(' ')}</span>
       <span class="muted">Select a tech to trace the path to it.</span></div><div id="tt-host"></div>`;
@@ -695,7 +695,7 @@ function renderPolity(id: number): string {
       <div><dt>Army strength</dt><dd>${compact(p.military)}</dd></div>
       <div><dt>Treasury</dt><dd>${compact(p.treasury)}</dd></div>
       <div><dt>Founded</dt><dd>Year ${p.founded}</dd></div>
-      <div><dt>Researching</dt><dd>${researching ? esc(researching) : '—'}</dd></div>
+      <div><dt>Nearly mastered</dt><dd>${researching ? esc(researching) : '—'}</dd></div>
     </dl>
     ${p.alive ? `<section>${meter('Stability', p.stability, 'good')}${meter('War weariness', Math.min(1, p.warExhaustion))}</section>` : ''}
     <section><h3>Ruler</h3><p><b>${esc(r.title)} ${esc(r.name)}</b>${p.dynasty >= 0 ? ` of ${esc(world.nobles[p.dynasty].name)}` : ''} <span class="muted">— ${esc(world.raceById.get(r.raceId)?.name ?? r.raceId)}, age ${world.year - r.born}, reigning since ${r.since}</span></p><p>${r.traits.map((t) => `<span class="chip">${t}</span>`).join(' ')}</p>

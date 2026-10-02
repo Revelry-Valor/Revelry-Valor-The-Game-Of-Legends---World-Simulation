@@ -129,6 +129,26 @@ export function assignMarkets(world: World): void {
   }
 }
 
+/**
+ * What a settlement's goods would fetch at the markets it trades with, after the cost of carrying
+ * them there. Producers look to this as well as their own market: a mining town digs ore for the
+ * smiths of the towns around it, a farming village grows grain for the city it feeds.
+ */
+export function updateExportPrices(world: World): void {
+  for (const s of world.aliveSettlements()) s.exportPrice.fill(0);
+  const links = [...world.links.filter((l) => isMarket(world.settlements[l.a]) && isMarket(world.settlements[l.b])), ...world.hubLinks, ...world.marketLinks];
+  for (const l of links) {
+    const A = world.settlements[l.a];
+    const B = world.settlements[l.b];
+    if (!A.alive || !B.alive || A.polityId !== B.polityId) continue;
+    const carry = 1 - Math.min(0.6, l.cost * 0.008);
+    for (let g = 0; g < GOOD_COUNT; g++) {
+      A.exportPrice[g] = Math.max(A.exportPrice[g], B.price[g] * carry);
+      B.exportPrice[g] = Math.max(B.exportPrice[g], A.price[g] * carry);
+    }
+  }
+}
+
 /** Roads from every village and hamlet to its market. */
 export function buildMarketLinks(world: World): void {
   const pf = world.pathfinder;

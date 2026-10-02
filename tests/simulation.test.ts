@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { chronicleMarkdown, worldSnapshot } from '../src/engine/chronicle';
 import { defaultConfig } from '../src/engine/config';
 import { DEFAULT_RACES } from '../src/engine/data/races';
-import { TECH_BY_ID } from '../src/engine/data/techs';
+import { PRACTICE, TECHS, TECH_BY_ID } from '../src/engine/data/techs';
 import { Rng } from '../src/engine/rng';
 import { World } from '../src/engine/world';
 import { LandUse } from '../src/engine/data/settlements';
@@ -329,6 +329,23 @@ describe('development', () => {
     }
     const crafts = [...w.aliveSettlements()].map((s) => s.labor.slice(15).reduce((a, b) => a + b, 0) / Math.max(1, s.labor.reduce((a, b) => a + b, 0) + s.idle));
     expect(Math.max(...crafts)).toBeLessThanOrEqual(0.6);
+  });
+});
+
+describe('technology', () => {
+  const w = new World(small({ seed: 4 }));
+  w.run(300);
+
+  it('learns technology through practice, never knowing a tech without its prerequisites', () => {
+    const known = [...w.alivePolities()].reduce((n, p) => n + p.techs.size, 0);
+    expect(known).toBeGreaterThan(0);
+    for (const p of w.alivePolities()) {
+      for (const [id] of p.progress) {
+        expect(p.techs.has(id)).toBe(false);
+        expect(PRACTICE[id]?.length ?? 0).toBeGreaterThan(0);
+      }
+    }
+    for (const t of TECHS) expect(PRACTICE[t.id]?.length ?? 0).toBeGreaterThan(0);
   });
 });
 
