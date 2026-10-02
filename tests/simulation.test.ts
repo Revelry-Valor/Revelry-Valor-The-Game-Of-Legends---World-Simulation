@@ -268,6 +268,34 @@ describe('land', () => {
   });
 });
 
+describe('work and trade', () => {
+  const w = new World(small({ seed: 13 }));
+  w.run(250);
+
+  it('keeps people in their trades, changing slowly when not hungry', () => {
+    const before = new Map([...w.aliveSettlements()].map((s) => [s.id, Float64Array.from(s.labor)]));
+    w.tick();
+    let checked = 0;
+    for (const s of w.aliveSettlements()) {
+      const old = before.get(s.id);
+      if (!old || s.foodRatio < 0.95 || s.lastHungry > 1) continue;
+      const total = old.reduce((a, b) => a + b, 0);
+      if (total < 50) continue;
+      let moved = 0;
+      for (let k = 0; k < old.length; k++) moved += Math.max(0, s.labor[k] - old[k]);
+      expect(moved).toBeLessThan(total * 0.35);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('rarely has a settlement both buy and sell the same good', () => {
+    const towns = [...w.aliveSettlements()];
+    const both = towns.filter((s) => s.yearSold.some((q, g) => q > 1 && s.yearBought[g] > 1));
+    expect(both.length).toBeLessThan(towns.length * 0.15);
+  });
+});
+
 describe('real time', () => {
   it('advances month by month and reaches the same year as whole-year steps', () => {
     const a = new World(small());

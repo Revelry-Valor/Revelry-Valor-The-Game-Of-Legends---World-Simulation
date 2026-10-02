@@ -181,3 +181,25 @@ export const CRAFT_SECTORS: CraftSector[] = [
 export const SECTOR_COUNT = EXTRACTION_SECTORS.length + CRAFT_SECTORS.length;
 export const SECTOR_NAMES = [...EXTRACTION_SECTORS.map((s) => s.name), ...CRAFT_SECTORS.map((s) => s.name)];
 export const SECTOR_KEYS: SectorKey[] = [...EXTRACTION_SECTORS.map((s) => s.key), ...CRAFT_SECTORS.map((s) => s.key)];
+
+/** The people who work each sector, and the kind of work it is (for showing a settlement's workforce). */
+export const JOBS: Record<SectorKey, { job: string; group: 'Food' | 'Raw materials' | 'Crafts' }> = {
+  farming: { job: 'Farmers', group: 'Food' },
+  herding: { job: 'Herders', group: 'Food' },
+  foraging: { job: 'Hunters & gatherers', group: 'Food' },
+  fishing: { job: 'Fishers', group: 'Food' },
+  forestry: { job: 'Woodcutters', group: 'Raw materials' },
+  quarrying: { job: 'Quarrymen', group: 'Raw materials' },
+  copperMining: { job: 'Miners', group: 'Raw materials' },
+  tinMining: { job: 'Miners', group: 'Raw materials' },
+  ironMining: { job: 'Miners', group: 'Raw materials' },
+  coalMining: { job: 'Miners', group: 'Raw materials' },
+  goldMining: { job: 'Miners', group: 'Raw materials' },
+  gemMining: { job: 'Miners', group: 'Raw materials' },
+  saltWorks: { job: 'Salt workers', group: 'Raw materials' },
+  horseBreeding: { job: 'Horse breeders', group: 'Raw materials' },
+  arcanaGathering: { job: 'Reagent gatherers', group: 'Raw materials' },
+  toolmaking: { job: 'Toolsmiths', group: 'Crafts' },
+  weaponsmithing: { job: 'Weaponsmiths', group: 'Crafts' },
+  artisans: { job: 'Artisans & jewellers', group: 'Crafts' },
+};

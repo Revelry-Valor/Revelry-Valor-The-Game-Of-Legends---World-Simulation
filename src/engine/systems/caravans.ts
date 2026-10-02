@@ -3,7 +3,7 @@ import { tileCost } from '../pathfinding';
 import type { Caravan, CaravanKind, Cargo, Polity, Settlement, TradingHouse } from '../types';
 import { pairKey, type World } from '../world';
 import { canTradeIn, dealsBetween, passable, tollRate } from './access';
-import { reprice, tradeRange, usesCoin } from './trade';
+import { reprice, shortfall, spare, tradeRange, usesCoin } from './trade';
 
 const MAX_CARAVANS = 360;
 /** Terrain cost a caravan covers in a year; it moves a twelfth of this each month. */
@@ -42,12 +42,13 @@ function outfit(world: World, home: Settlement, kind: CaravanKind, house?: Tradi
 }
 
 /** Load the most profitable mix of goods (up to three) that `from` can spare and `to` wants. */
-function fillCargo(from: Settlement, to: Settlement, capacity: number, routeCost: number, toll: number): { cargo: Cargo[]; profit: number } {
+function fillCargo(world: World, from: Settlement, to: Settlement, capacity: number, routeCost: number, toll: number): { cargo: Cargo[]; profit: number } {
   const options: { g: Good; margin: number; qty: number }[] = [];
   for (let g = 0 as Good; g < GOOD_COUNT; g++) {
     if (g === Good.Food && routeCost > 15) continue; // grain spoils on long roads
-    const surplus = from.stock[g] - from.target[g] * 0.8;
-    const want = to.target[g] * 1.3 - to.stock[g];
+    // Merchants buy only what a market can spare, and carry it where it is short (with a little over to sell on).
+    const surplus = spare(world, from, g);
+    const want = shortfall(world, to, g) + to.target[g] * 0.15;
     if (surplus < 1 || want < 1) continue;
     const margin = to.price[g] * (1 - toll) - from.price[g] - routeCost * 0.015 * GOOD_BASE_PRICE[g];
     if (margin > 0) options.push({ g, margin, qty: Math.min(surplus * 0.5, want * 0.5) });
@@ -99,7 +100,7 @@ function planTrip(world: World, from: Settlement, owner: Polity, capacity: numbe
     const destPol = world.polities[d.polityId];
     if (!canTradeIn(world, destPol, owner)) continue;
     const toll = d.polityId === owner.id ? 0 : tollRate(world, destPol, owner, false);
-    const { cargo, profit } = fillCargo(from, d, capacity, cost, toll);
+    const { cargo, profit } = fillCargo(world, from, d, capacity, cost, toll);
     if (cargo.length && profit > 4) plans.push({ dest: d, tile, cost, cargo, profit });
   }
   plans.sort((a, b) => b.profit - a.profit);
@@ -405,10 +406,10 @@ function arrive(world: World, c: Caravan): boolean {
   // Next leg: nomads wander on to another market; everyone else heads home.
   const next = c.kind === 'nomad' && c.legs > 1 ? planTrip(world, dest, guest, c.capacity) : null;
   const buyFor = next ? next.dest : home;
-  if (barterCredit > 0) c.cargo.push(...barterGoods(dest, buyFor, barterCredit));
+  if (barterCredit > 0) c.cargo.push(...barterGoods(world, dest, buyFor, barterCredit));
   else if (coin && c.purse > 0) {
     // Spend the silver on goods worth more back home.
-    const { cargo } = fillCargo(dest, buyFor, Math.min(c.capacity, c.purse * 0.8), c.tripCost, 0);
+    const { cargo } = fillCargo(world, dest, buyFor, Math.min(c.capacity, c.purse * 0.8), c.tripCost, 0);
     for (const x of cargo) {
       const cost = x.qty * dest.price[x.good];
       if (cost > c.purse) continue;
@@ -426,7 +427,7 @@ function arrive(world: World, c: Caravan): boolean {
     c.path = next.path;
     c.tripCost = next.cost;
     c.legs--;
-    const extra = fillCargo(dest, next.dest, c.capacity - cargoValue(c), next.cost, 0).cargo;
+    const extra = fillCargo(world, dest, next.dest, c.capacity - cargoValue(c), next.cost, 0).cargo;
     load(dest, extra);
     c.cargo.push(...extra);
     return true;
@@ -445,12 +446,12 @@ function arrive(world: World, c: Caravan): boolean {
 }
 
 /** Goods a barter market hands over as payment: whatever it can spare that is worth most where the caravan goes next. */
-function barterGoods(market: Settlement, to: Settlement, credit: number): Cargo[] {
+function barterGoods(world: World, market: Settlement, to: Settlement, credit: number): Cargo[] {
   const options: { g: Good; ratio: number; spare: number }[] = [];
   for (let g = 0 as Good; g < GOOD_COUNT; g++) {
-    const spare = market.stock[g] - market.target[g] * 0.8;
-    if (spare < 1) continue;
-    options.push({ g, ratio: to.price[g] / market.price[g], spare });
+    const can = spare(world, market, g);
+    if (can < 1) continue;
+    options.push({ g, ratio: to.price[g] / market.price[g], spare: can });
   }
   options.sort((a, b) => b.ratio - a.ratio);
   const out: Cargo[] = [];

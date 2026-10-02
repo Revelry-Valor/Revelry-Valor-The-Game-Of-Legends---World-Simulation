@@ -46,8 +46,10 @@ export function settlementNote(world: World, s: Settlement): string {
     .sort((a, b) => b[1] - a[1])
     .map(([r, n]) => `${world.raceById.get(r)?.plural ?? r} ${Math.round((n / Math.max(1, s.pop)) * 100)}%`)
     .join(', ');
-  const exports = [...s.exported].map((q, g) => [g, q] as const).filter(([, q]) => q > 0.5).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([g]) => GOOD_NAMES[g]);
-  const imports = [...s.imported].map((q, g) => [g, q] as const).filter(([, q]) => q > 0.5).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([g]) => GOOD_NAMES[g]);
+  // Last year's own sales and purchases, leaving out goods its merchants only passed on.
+  const net = (a: Float64Array, b: Float64Array) => [...a].map((q, g) => [g, q - Math.min(q, b[g])] as const).filter(([, q]) => q > 0.5).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([g]) => GOOD_NAMES[g]);
+  const exports = net(s.yearSold, s.yearBought);
+  const imports = net(s.yearBought, s.yearSold);
   const lines = [
     `### ${s.name}${s.alive ? '' : ' (ruins)'}`,
     `${settlementTier(s.pop)} of ${fmt(s.alive ? s.pop : s.peakPop)}${s.alive ? '' : ' at its height'} — ${BIOMES[world.map.biome[s.tile]].name}${s.coastal ? ', on the coast' : ''}${s.river ? ', on a river' : ''}.`,

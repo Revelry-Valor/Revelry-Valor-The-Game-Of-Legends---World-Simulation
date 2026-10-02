@@ -320,6 +320,17 @@ export interface Settlement {
   imported: Float64Array;
   exported: Float64Array;
   labor: Float64Array;
+  /** Workers with no work this year. */
+  idle: number;
+  /** Last full year's accounts, good by good: made, used, bought and sold. */
+  yearMade: Float64Array;
+  yearUsed: Float64Array;
+  yearBought: Float64Array;
+  yearSold: Float64Array;
+  /** Food paid in tribute to the capital this year and last (or, for the capital, received). */
+  tributePaid: number;
+  yearTributePaid: number;
+  yearTributeIn: number;
   toolQuality: number;
   weaponQuality: number;
   wealth: number;

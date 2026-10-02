@@ -1,6 +1,7 @@
 import { GOOD_BASE_PRICE, GOOD_COUNT, Good } from '../data/economy';
 import type { Polity, Settlement, TradeLink } from '../types';
 import { pairKey, type World } from '../world';
+import { foodNeed } from './economy';
 
 const MAX_PARTNERS = 6;
 const TRADE_GOODS = Array.from({ length: GOOD_COUNT }, (_, g) => g as Good);
@@ -175,9 +176,10 @@ export function runTrade(world: World): void {
         src = B;
         dst = A;
       } else continue;
-      const surplus = Math.max(0, src.stock[g] - src.target[g] * 0.6);
-      const want = Math.max(0, dst.target[g] * 1.3 - dst.stock[g]);
-      let q = Math.min(surplus, want) * 0.5;
+      // A settlement sells only what it can spare and buys only what it is short of.
+      const surplus = spare(world, src, g);
+      const want = shortfall(world, dst, g);
+      let q = Math.min(surplus, want) * 0.7;
       q = Math.min(q, capacity / GOOD_BASE_PRICE[g]);
       if (q < 0.05) continue;
       const margin = dst.price[g] - src.price[g] * (1 + transport);
@@ -235,13 +237,34 @@ export function runTribute(world: World): void {
       const q = Math.min(s.stock[Good.Food] * 0.3, s.produced[Good.Food] * rate * s.stability);
       if (q <= 0) continue;
       s.stock[Good.Food] -= q;
-      s.exported[Good.Food] += q;
+      s.tributePaid += q;
       capital.stock[Good.Food] += q * reach;
-      capital.imported[Good.Food] += q * reach;
       capital.tributeIn += q * reach;
     }
     reprice(capital, Good.Food);
   }
+}
+
+/** Food in hand plus what the rest of the year will bring, less what must be eaten until then. */
+function foodOnHand(world: World, s: Settlement): number {
+  let coming = 0;
+  for (let m = world.month; m < 12; m++) coming += s.foodSchedule[m];
+  return s.stock[Good.Food] + coming - foodNeed(world, s) * ((12 - world.month) / 12);
+}
+
+/**
+ * What a settlement can part with: only what it has beyond its own needs and a safety reserve
+ * (for food, beyond feeding itself until next year plus three months in store).
+ */
+export function spare(world: World, s: Settlement, g: Good): number {
+  if (g === Good.Food) return Math.max(0, Math.min(s.stock[g] * 0.8, foodOnHand(world, s) - foodNeed(world, s) * 0.3));
+  return Math.max(0, s.stock[g] - s.target[g] * 1.1);
+}
+
+/** What a settlement is short of and will buy (for food, enough to keep three months in store). */
+export function shortfall(world: World, s: Settlement, g: Good): number {
+  if (g === Good.Food) return Math.max(0, foodNeed(world, s) * 0.3 - foodOnHand(world, s));
+  return Math.max(0, s.target[g] * 0.9 - s.stock[g]);
 }
 
 export function reprice(s: Settlement, g: Good): void {

@@ -151,17 +151,13 @@ export class MapRenderer {
     const d = img.data;
     const w = map.width;
     if (view.layer === 'land') {
-      // What each settlement uses the tiles of its ring for, with each settlement's land outlined.
+      // What every worked tile is used for.
       for (let i = 0; i < map.size; i++) {
-        const o = map.owner[i];
-        if (o < 0) continue;
+        if (map.owner[i] < 0) continue;
         const [r, g, b] = LAND_USE_COLORS[map.landUse[i]];
-        const x = i % w;
-        const edge = (x + 1 < w && map.owner[i + 1] !== o) || (x > 0 && map.owner[i - 1] !== o) || (i + w < map.size && map.owner[i + w] !== o) || (i - w >= 0 && map.owner[i - w] !== o);
-        const k = edge ? 0.6 : 1;
-        d[i * 4] = r * k;
-        d[i * 4 + 1] = g * k;
-        d[i * 4 + 2] = b * k;
+        d[i * 4] = r;
+        d[i * 4 + 1] = g;
+        d[i * 4 + 2] = b;
         d[i * 4 + 3] = map.landUse[i] === 0 ? 60 : 215;
       }
     } else if (view.layer === 'resource') {

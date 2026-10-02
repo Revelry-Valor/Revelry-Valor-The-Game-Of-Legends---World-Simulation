@@ -15,6 +15,9 @@ const cap = new Float64Array(SECTOR_COUNT);
 const yld = new Float64Array(SECTOR_COUNT);
 const val = new Float64Array(SECTOR_COUNT);
 const L = new Float64Array(SECTOR_COUNT);
+const wanted = new Float64Array(SECTOR_COUNT);
+const gap = new Float64Array(SECTOR_COUNT);
+const IS_FOOD = Array.from({ length: SECTOR_COUNT }, (_, k) => FOOD_SECTORS.includes(k));
 const recipes: (Recipe | null)[] = new Array(CRAFT_SECTORS.length).fill(null);
 
 const out = (k: number) => (cap[k] > 0 ? cap[k] * (1 - Math.exp((-L[k] * yld[k]) / cap[k])) : 0);
@@ -44,6 +47,14 @@ function produce(world: World, s: Settlement): void {
   const workers = s.pop * (WORK_FRACTION + 0.2 * Math.max(0, 1 - s.foodRatio));
   const toolCover = Math.min(1, s.stock[Good.Tools] / (workers * 0.08 + 1));
   const toolMult = 1 + 0.12 * toolCover * (1 + s.toolQuality * 0.6);
+  // Close last year's accounts before starting the new year's.
+  s.yearMade.set(s.produced);
+  s.yearUsed.set(s.consumed);
+  s.yearBought.set(s.imported);
+  s.yearSold.set(s.exported);
+  s.yearTributePaid = s.tributePaid;
+  s.yearTributeIn = s.tributeIn;
+  s.tributePaid = 0;
   s.produced.fill(0);
   s.consumed.fill(0);
   s.imported.fill(0);
@@ -91,9 +102,10 @@ function produce(world: World, s: Settlement): void {
     }
   }
 
+  // What people would ideally work at this year: (1) enough food, then (2) what the market pays best.
   // 1) Subsistence: secure food first.
   const need = foodNeed(world, s);
-  const chunk = Math.max(0.5, workers / 48);
+  const chunk = Math.max(0.5, workers / 96);
   const foodTarget = need * 1.2 - s.stock[Good.Food] * 0.3;
   let assigned = 0;
   let food = 0;
@@ -128,9 +140,13 @@ function produce(world: World, s: Settlement): void {
     L[best] += chunk;
     assigned += chunk;
   }
-  const idle = workers - assigned;
+  void assigned;
+  // 3) But people keep to their trades: the workforce moves towards that only as fast as need drives it.
+  const hungry = s.foodRatio < 0.95 || s.lastHungry > 1;
+  const idle = keepToTrades(s, workers, hungry);
+  s.idle = idle;
 
-  // 3) Produce.
+  // 4) Produce.
   let value = 0;
   for (let k = 0; k < EXT; k++) {
     const o = out(k);
@@ -166,6 +182,51 @@ function produce(world: World, s: Settlement): void {
   // How hard each sector's land is worked: the land system gives more tiles to the ones that are crowded.
   for (let k = 0; k < EXT; k++) s.sectorPressure[k] = cap[k] > 0 ? (L[k] * yld[k]) / cap[k] : yld[k] > 0 ? -1 : 0;
   s.wealth += value * 0.04 + idle * 0.08;
+}
+
+/**
+ * Move last year's workforce towards what is wanted this year. Workers leave a trade slowly
+ * when it pays less (a glut lowers the price, and traders come for the cheap goods, before
+ * anyone gives up their craft), quickly only when there is no work in it at all or hunger drives
+ * them to the fields. Free hands, the young among them, join the trades most wanted; the crafts
+ * grow only as fast as masters can train apprentices. Whoever finds no place is idle.
+ */
+function keepToTrades(s: Settlement, workers: number, hungry: boolean): number {
+  wanted.set(L);
+  let prev = 0;
+  let want = 0;
+  for (let k = 0; k < SECTOR_COUNT; k++) {
+    prev += s.labor[k];
+    want += wanted[k];
+  }
+  // A new settlement takes up its work as it finds it.
+  if (prev <= 0) return Math.max(0, workers - want);
+  // The same people as last year, less those who died or grew old; their places go to the young.
+  const keep = Math.min(1, workers / prev) * 0.97;
+  let free = workers;
+  for (let k = 0; k < SECTOR_COUNT; k++) {
+    L[k] = s.labor[k] * keep;
+    free -= L[k];
+  }
+  for (let k = 0; k < SECTOR_COUNT; k++) {
+    if (wanted[k] >= L[k]) continue;
+    const rate = cap[k] <= 0 ? 0.35 : hungry && !IS_FOOD[k] ? 0.15 : 0.04;
+    const leave = Math.min(L[k] - wanted[k], L[k] * rate);
+    L[k] -= leave;
+    free += leave;
+  }
+  let gaps = 0;
+  for (let k = 0; k < SECTOR_COUNT; k++) {
+    const limit = k >= EXT ? Math.max(2, L[k] * 0.12 + workers * 0.01) : IS_FOOD[k] && hungry ? workers * 0.3 : workers * 0.08;
+    gap[k] = Math.max(0, Math.min(wanted[k] - L[k], limit));
+    gaps += gap[k];
+  }
+  if (gaps > 0 && free > 0) {
+    const f = Math.min(1, free / gaps);
+    for (let k = 0; k < SECTOR_COUNT; k++) L[k] += gap[k] * f;
+    free -= gaps * f;
+  }
+  return Math.max(0, free);
 }
 
 /** Share of a year's stored food lost to rot and vermin with no storage at all. */

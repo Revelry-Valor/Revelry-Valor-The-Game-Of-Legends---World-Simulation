@@ -5,7 +5,7 @@ import { LAND_USE_COLORS, LAND_USE_NAMES } from '../engine/data/settlements';
 import { ringRadius } from '../engine/systems/land';
 import { MAP_SIZES, defaultConfig } from '../engine/config';
 import { BIOMES } from '../engine/data/biomes';
-import { GOOD_NAMES, RES_COUNT, RES_NAMES, Res, SECTOR_NAMES } from '../engine/data/economy';
+import { GOOD_NAMES, JOBS, RES_COUNT, RES_NAMES, Res, SECTOR_KEYS } from '../engine/data/economy';
 import { DEFAULT_RACES } from '../engine/data/races';
 import { ERA_NAMES, TECHS, TECH_BY_ID } from '../engine/data/techs';
 import type { EventKind, HistoryEvent, RaceDef, WorldConfig } from '../engine/types';
@@ -523,9 +523,6 @@ function renderSettlement(id: number): string {
   const s = world.settlements[id];
   const p = world.polities[s.polityId];
   const races = Object.entries(s.races).filter(([, n]) => n >= 1).sort((a, b) => b[1] - a[1]);
-  const top = (arr: Float64Array) => [...arr].map((q, g) => [g, q] as const).filter(([, q]) => q > 0.5).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  const labor = [...s.labor].map((l, k) => [k, l] as const).filter(([, l]) => l > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const totalLabor = labor.reduce((a, [, l]) => a + l, 0) || 1;
   const events = world.history.filter((e) => e.settlements?.includes(id));
   const allLinks = [...s.links.map((li) => world.links[li]), ...world.hubLinks.filter((l) => l.a === id || l.b === id)];
   const partners = allLinks.map((l) => ({ o: l.a === id ? l.b : l.a, v: l.volume, sea: l.sea, kind: l.kind, hub: !!l.hub })).filter((x) => world.settlements[x.o].alive && x.kind === 'internal').sort((a, b) => b.v - a.v);
@@ -557,9 +554,8 @@ function renderSettlement(id: number): string {
     ${s.alive ? landSection(s) : ''}
     ${races.length ? `<section><h3>Peoples</h3>${races.map(([r, n]) => meter(esc(world.raceById.get(r)?.plural ?? r), n / Math.max(1, s.pop))).join('')}</section>` : ''}
     ${s.alive ? `<section><h3>Economy</h3>
-      <p><span class="k">Work</span> ${labor.map(([k, l]) => `${SECTOR_NAMES[k]} ${pct(l / totalLabor)}`).join(' · ') || '—'}</p>
-      <p><span class="k">Exports</span> ${top(s.exported).map(([g]) => GOOD_NAMES[g]).join(', ') || '—'}</p>
-      <p><span class="k">Imports</span> ${top(s.imported).map(([g]) => GOOD_NAMES[g]).join(', ') || '—'}</p>
+      ${workSection(s)}
+      ${accountsSection(s)}
       <p><span class="k">Tools</span> ${['stone', 'copper', 'bronze', 'iron', 'steel'][Math.round(s.toolQuality)]} · <span class="k">Arms</span> ${['stone', 'copper', 'bronze', 'iron', 'steel'][Math.round(s.weaponQuality)]}</p>
     </section>
     <section><h3>Trade</h3>
@@ -573,6 +569,55 @@ function renderSettlement(id: number): string {
     <section><h3>Local history</h3>${eventList(events, 15)}</section>`;
 }
 
+/** Everyone of working age, by trade: food, raw materials, crafts, and those without work. */
+function workSection(s: { labor: Float64Array; idle: number }): string {
+  const groups = new Map<string, Map<string, number>>();
+  let total = s.idle;
+  for (let k = 0; k < SECTOR_KEYS.length; k++) {
+    const n = s.labor[k];
+    total += n;
+    if (n < 0.5) continue;
+    const { job, group } = JOBS[SECTOR_KEYS[k]];
+    const g = groups.get(group) ?? new Map<string, number>();
+    g.set(job, (g.get(job) ?? 0) + n);
+    groups.set(group, g);
+  }
+  const rows = ['Food', 'Raw materials', 'Crafts'].filter((g) => groups.has(g)).map((g) => {
+    const jobs = [...groups.get(g)!].sort((a, b) => b[1] - a[1]);
+    return `<p class="small"><span class="k">${g}</span> ${jobs.map(([j, n]) => `${j} <b>${fmt(n)}</b>`).join(' · ')}</p>`;
+  });
+  return `<h4 class="mini-h">Work · ${fmt(total)} of working age</h4>${rows.join('')}${s.idle >= 0.5 ? `<p class="small"><span class="k">Without work</span> <b>${fmt(s.idle)}</b> (${pct(s.idle / Math.max(1, total))})</p>` : ''}`;
+}
+
+/** Last year's accounts, good by good: what the settlement made, used, bought and sold, and what merely passed through. */
+function accountsSection(s: { yearMade: Float64Array; yearUsed: Float64Array; yearBought: Float64Array; yearSold: Float64Array; yearTributePaid: number; yearTributeIn: number }): string {
+  const rows: string[] = [];
+  const sells: string[] = [];
+  const buys: string[] = [];
+  const passes: string[] = [];
+  for (let g = 0; g < GOOD_NAMES.length; g++) {
+    const made = s.yearMade[g];
+    const used = s.yearUsed[g];
+    const bought = s.yearBought[g];
+    const sold = s.yearSold[g];
+    if (made < 0.5 && used < 0.5 && bought < 0.5 && sold < 0.5) continue;
+    const passed = Math.min(bought, sold);
+    if (sold - passed >= 1) sells.push(GOOD_NAMES[g]);
+    if (bought - passed >= 1) buys.push(GOOD_NAMES[g]);
+    if (passed >= 1) passes.push(GOOD_NAMES[g]);
+    const n = (v: number) => (v >= 0.5 ? compact(v) : '—');
+    rows.push(`<tr><td>${GOOD_NAMES[g]}</td><td class="num">${n(made)}</td><td class="num">${n(used)}</td><td class="num">${n(bought - passed)}</td><td class="num">${n(sold - passed)}</td><td class="num">${n(passed)}</td></tr>`);
+  }
+  if (!rows.length) return '';
+  return `<p class="small"><span class="k">Sells</span> ${sells.join(', ') || '—'}</p>
+    <p class="small"><span class="k">Buys</span> ${buys.join(', ') || '—'}</p>
+    ${passes.length ? `<p class="small"><span class="k">Passes on</span> ${passes.join(', ')} <span class="muted">(bought and sold on by its merchants)</span></p>` : ''}
+    ${s.yearTributePaid >= 1 ? `<p class="small"><span class="k">Tribute</span> ${compact(s.yearTributePaid)} food sent to the capital</p>` : s.yearTributeIn >= 1 ? `<p class="small"><span class="k">Tribute</span> ${compact(s.yearTributeIn)} food received from the realm</p>` : ''}
+    <details><summary>Last year's accounts</summary><div class="table-wrap"><table>
+      <thead><tr><th>Good</th><th class="num">Made</th><th class="num">Used</th><th class="num">Bought</th><th class="num">Sold</th><th class="num">Passed on</th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table></div></details>`;
+}
+
 /** The settlement's land: the ring of tiles it works, and how much of it goes to each use. */
 function landSection(s: { territory: number[] }): string {
   const R = ringRadius(world);
@@ -581,7 +626,7 @@ function landSection(s: { territory: number[] }): string {
   const uses = [...counts].sort((a, b) => b[1] - a[1]).map(([u, n]) => `<span class="chip"><i class="swatch-dot" style="background:rgb(${LAND_USE_COLORS[u].join(',')})"></i>${LAND_USE_NAMES[u]} ${n}</span>`).join(' ');
   const full = (2 * R + 1) ** 2;
   return `<section><h3>Land</h3>
-    <p class="small">Works <b>${s.territory.length}</b> tiles in the ring of ${R} around it${s.territory.length < full * 0.6 ? ', crowded by neighbours, the sea or the mountains' : ''}.</p>
+    <p class="small">Works <b>${s.territory.length}</b> tiles of land around it${s.territory.length < full * 0.6 ? ', hemmed in by neighbours, the sea or the mountains' : ''}.</p>
     <p class="small">${uses}</p></section>`;
 }
 
