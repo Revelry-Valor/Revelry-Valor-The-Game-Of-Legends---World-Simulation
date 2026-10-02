@@ -1,6 +1,7 @@
 import { BIOMES, Biome, Relief } from '../engine/data/biomes';
 import { Res } from '../engine/data/economy';
 import type { World } from '../engine/world';
+import { LAND_USE_COLORS } from '../engine/data/settlements';
 import { friendly } from '../engine/systems/diplomacy';
 
 const ROAD_STYLE = [
@@ -12,7 +13,7 @@ const ROAD_STYLE = [
 ];
 export const CARAVAN_COLOR: Record<string, string> = { merchant: '#e8b923', family: '#b57be0', nomad: '#d99152', convoy: '#3fbf7f' };
 
-export type MapLayer = 'terrain' | 'political' | 'nations' | 'culture' | 'race' | 'resource';
+export type MapLayer = 'terrain' | 'political' | 'nations' | 'culture' | 'race' | 'resource' | 'land';
 
 export interface ViewState {
   layer: MapLayer;
@@ -149,7 +150,29 @@ export class MapRenderer {
     const img = ctx.createImageData(map.width, map.height);
     const d = img.data;
     const w = map.width;
-    if (view.layer === 'resource') {
+    if (view.layer === 'land') {
+      // What each settlement uses its tiles for, with each settlement's land outlined; common land faintly shaded.
+      for (let i = 0; i < map.size; i++) {
+        const o = map.owner[i];
+        if (o < 0) {
+          if (map.commons[i] > 0 && map.elevation[i] >= 0) {
+            d[i * 4] = 214;
+            d[i * 4 + 1] = 204;
+            d[i * 4 + 2] = 160;
+            d[i * 4 + 3] = 70;
+          }
+          continue;
+        }
+        const [r, g, b] = LAND_USE_COLORS[map.landUse[i]];
+        const x = i % w;
+        const edge = (x + 1 < w && map.owner[i + 1] !== o) || (x > 0 && map.owner[i - 1] !== o) || (i + w < map.size && map.owner[i + w] !== o) || (i - w >= 0 && map.owner[i - w] !== o);
+        const k = edge ? 0.6 : 1;
+        d[i * 4] = r * k;
+        d[i * 4 + 1] = g * k;
+        d[i * 4 + 2] = b * k;
+        d[i * 4 + 3] = map.landUse[i] === 0 ? 60 : 215;
+      }
+    } else if (view.layer === 'resource') {
       const R = map.resources[view.resource];
       let max = 0;
       for (let i = 0; i < map.size; i++) max = Math.max(max, R[i]);

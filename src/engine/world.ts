@@ -1,5 +1,5 @@
 import { SPRING_MUSTER, seasonOf, type Season } from './calendar';
-import { GOOD_BASE_PRICE, GOOD_COUNT, Good, RES_COUNT, SECTOR_COUNT } from './data/economy';
+import { EXTRACTION_SECTORS, GOOD_BASE_PRICE, GOOD_COUNT, Good, RES_COUNT, SECTOR_COUNT } from './data/economy';
 import { MAX_EFFECTS, TECH_BY_ID, baseEffects, type TechEffects } from './data/techs';
 import { combineTraits } from './data/traits';
 import { NameBook, adjectiveOf, deriveLanguage, mutateLanguage, randomColor } from './names';
@@ -14,6 +14,8 @@ import { militaryMonth, raiseArmies } from './systems/military';
 import { updateRoads } from './systems/roads';
 import { runPolitics } from './systems/politics';
 import { placePeoples } from './systems/setup';
+import { claimTile } from './systems/land';
+import { LandUse, tierIndex } from './data/settlements';
 import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
 import { buildHubLinks, buildTradeLinks, runTrade, runTribute } from './systems/trade';
@@ -139,7 +141,7 @@ export class World {
   private yearly(): void {
     this.year++;
     this.battleMarks = this.battleMarks.filter((b) => this.monthIndex - b.at < 24);
-    if (this.territoryDirty || this.year % 5 === 0) updateTerritory(this);
+    updateTerritory(this);
     updateRoads(this);
     if (this.year % 10 === 0) {
       buildTradeLinks(this, true);
@@ -285,6 +287,11 @@ export class World {
       climate: 1,
       territory: [],
       resSum: new Float64Array(RES_COUNT),
+      tier: 0,
+      sectorCap: new Float64Array(EXTRACTION_SECTORS.length),
+      sectorPressure: new Float64Array(EXTRACTION_SECTORS.length).fill(-1),
+      commonTiles: 0,
+      hemmedIn: false,
       habitat: 0,
       tributeIn: 0,
       tradeByKind: { internal: 0, caravan: 0, convoy: 0 },
@@ -321,6 +328,8 @@ export class World {
     for (let m = this.month; m < 12 && this.monthIndex > 0; m++) s.foodSchedule[m] = (pop * 0.9) / 12;
     this.settlements.push(s);
     map.settlementAt[tile] = s.id;
+    s.tier = tierIndex(pop);
+    claimTile(this, s, tile, LandUse.None);
     this.territoryDirty = true;
     this.linksDirty = true;
     return s;

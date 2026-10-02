@@ -5,6 +5,8 @@ import { DEFAULT_RACES } from '../src/engine/data/races';
 import { TECH_BY_ID } from '../src/engine/data/techs';
 import { Rng } from '../src/engine/rng';
 import { World } from '../src/engine/world';
+import { LandUse, TIERS } from '../src/engine/data/settlements';
+import { useAllowed } from '../src/engine/systems/land';
 import { friendly } from '../src/engine/systems/diplomacy';
 import { settlementValue } from '../src/engine/systems/warAims';
 import { generateMap } from '../src/engine/worldgen';
@@ -233,6 +235,34 @@ describe('seasons, settlers and occupation', () => {
       expect(s.occupiedBy).not.toBe(s.polityId);
       expect(w.atWar(s.occupiedBy, s.polityId)).toBe(true);
     }
+  });
+});
+
+describe('land', () => {
+  const w = new World(small({ seed: 9 }));
+  w.run(300);
+
+  it('gives each settlement its own land, no more than its size allows', () => {
+    const seen = new Set<number>();
+    for (const s of w.aliveSettlements()) {
+      expect(w.map.owner[s.tile]).toBe(s.id);
+      expect(s.territory.length).toBeLessThanOrEqual(TIERS[s.tier].tiles);
+      for (const t of s.territory) {
+        expect(w.map.owner[t]).toBe(s.id);
+        expect(seen.has(t)).toBe(false);
+        seen.add(t);
+      }
+    }
+    for (let t = 0; t < w.map.size; t++) if (w.map.owner[t] >= 0) expect(seen.has(t)).toBe(true);
+  });
+
+  it('puts each tile to a use the ground allows, and grows past a single tile', () => {
+    for (const s of w.aliveSettlements()) for (const t of s.territory) {
+      const u = w.map.landUse[t];
+      if (u !== LandUse.None) expect(useAllowed(w, t, u)).toBe(true);
+    }
+    expect([...w.aliveSettlements()].some((s) => s.territory.length >= 8)).toBe(true);
+    expect([...w.aliveSettlements()].some((s) => s.territory.some((t) => w.map.landUse[t] === LandUse.Fields))).toBe(true);
   });
 });
 

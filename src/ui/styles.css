@@ -1105,3 +1105,17 @@ table.market td {
   padding: 5px 4px;
   white-space: nowrap;
 }
+
+.land-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+.land-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

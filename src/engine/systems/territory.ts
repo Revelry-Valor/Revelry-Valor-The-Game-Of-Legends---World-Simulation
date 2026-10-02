@@ -1,72 +1,18 @@
-import { BIOMES, Biome } from '../data/biomes';
-import { RES_COUNT } from '../data/economy';
+import { runLand } from './land';
 import { pairKey, type World } from '../world';
 
-/** Radius (tiles) of land a settlement works, growing with its population. */
-export function territoryRadius(pop: number): number {
-  return Math.max(2, Math.min(7, 2 + Math.floor(Math.log(Math.max(1, pop) / 150) / Math.log(3))));
-}
-
 /**
- * Assign every tile to the settlement with the strongest influence over it, then
- * cache the resources each settlement can draw on and the borders between polities.
+ * Once a year: every settlement takes up or gives back land and puts it to use (see land.ts),
+ * then the borders between nations are measured from the land their settlements hold.
  */
 export function updateTerritory(world: World): void {
   const map = world.map;
   const w = map.width;
   const h = map.height;
-  map.owner.fill(-1);
-  const influence = new Float32Array(map.size);
-  const alive = [...world.aliveSettlements()].sort((a, b) => b.pop - a.pop);
-  for (const s of alive) {
-    const r = territoryRadius(s.pop);
-    const strength = Math.sqrt(s.pop);
-    const fishR = Math.min(r, 3);
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const d2 = dx * dx + dy * dy;
-        if (d2 > r * r + r * 0.5) continue;
-        const x = s.x + dx;
-        const y = s.y + dy;
-        if (x < 0 || y < 0 || x >= w || y >= h) continue;
-        const j = y * w + x;
-        const b = map.biome[j];
-        if (b === Biome.DeepOcean) continue;
-        if (map.elevation[j] < 0) {
-          if (d2 > fishR * fishR + 1) continue;
-        } else if (map.landmass[j] !== s.landmass) continue;
-        const infl = strength / (1 + d2);
-        if (map.owner[j] === -1 || infl > influence[j]) {
-          map.owner[j] = s.id;
-          influence[j] = infl;
-        }
-      }
-    }
-  }
-  for (const s of alive) {
-    map.owner[s.tile] = s.id;
-    s.territory = [];
-    s.resSum.fill(0);
-  }
-  const R = map.resources;
-  for (let j = 0; j < map.size; j++) {
-    const o = map.owner[j];
-    if (o < 0) continue;
-    const s = world.settlements[o];
-    s.territory.push(j);
-    for (let r = 0; r < RES_COUNT; r++) s.resSum[r] += R[r][j];
-  }
-  for (const s of alive) {
-    // Food from land most peoples find barren: the race's own gifts plus what its culture has learned.
-    const habitat = world.majorityRace(s).habitat ?? {};
-    const learned = world.cultures[s.cultureId].traitEffects.habitat;
-    s.habitat = 0;
-    for (const j of s.territory) {
-      const key = BIOMES[map.biome[j]].key;
-      s.habitat += (habitat[key] ?? 0) + (learned[key] ?? 0);
-    }
-    s.river = false;
-    for (const j of s.territory) if (map.river[j] > 0 && Math.abs((j % w) - s.x) <= 1 && Math.abs(Math.floor(j / w) - s.y) <= 1) s.river = true;
+  runLand(world);
+  for (const s of world.aliveSettlements()) {
+    s.river = map.river[s.tile] > 0;
+    for (const t of [s.tile - 1, s.tile + 1, s.tile - w, s.tile + w]) if (t >= 0 && t < map.size && map.river[t] > 0) s.river = true;
   }
 
   world.borders.clear();

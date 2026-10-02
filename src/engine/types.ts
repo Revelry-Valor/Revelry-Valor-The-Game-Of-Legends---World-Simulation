@@ -122,6 +122,10 @@ export interface MapData {
   owner: Int32Array;
   /** Settlement id sitting on the tile, -1 if none. */
   settlementAt: Int32Array;
+  /** What the owning settlement uses each tile for (LandUse). */
+  landUse: Uint8Array;
+  /** How many settlements share each unclaimed tile as common land (hunting, grazing, wood). */
+  commons: Uint8Array;
   /** Emergent road quality from trade traffic, 0..3. */
   road: Float32Array;
   /** Recent trade traffic (decaying). */
@@ -328,6 +332,16 @@ export interface Settlement {
   territory: number[];
   /** Sum of each natural resource over the territory. */
   resSum: Float64Array;
+  /** Size class (index into TIERS), with some slack before it drops a size. */
+  tier: number;
+  /** Production capacity of each extraction sector, from the tiles put to its use and the common land around. */
+  sectorCap: Float64Array;
+  /** How hard each extraction sector's land was worked last year (workers' output over capacity; -1 if it has no land). */
+  sectorPressure: Float64Array;
+  /** Unclaimed tiles nearby it shares as common land. */
+  commonTiles: number;
+  /** It wants more land for its size but has none it can reach. */
+  hemmedIn: boolean;
   /** Race-specific habitat food bonus summed over the territory. */
   habitat: number;
   /** Food received as tribute last year (capitals only). */

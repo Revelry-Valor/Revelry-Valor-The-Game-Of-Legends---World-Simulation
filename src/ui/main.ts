@@ -1,6 +1,7 @@
 import './styles.css';
 import { chronicleMarkdown, describeValues, fmt, polityEra, settlementTier, worldSnapshot } from '../engine/chronicle';
 import { MONTHS, seasonOf } from '../engine/calendar';
+import { LAND_USE_COLORS, LAND_USE_NAMES, TIERS } from '../engine/data/settlements';
 import { MAP_SIZES, defaultConfig } from '../engine/config';
 import { BIOMES } from '../engine/data/biomes';
 import { GOOD_NAMES, RES_COUNT, RES_NAMES, Res, SECTOR_NAMES } from '../engine/data/economy';
@@ -282,10 +283,12 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-layer]')) 
     view.layer = btn.dataset.layer as MapLayer;
     for (const b of document.querySelectorAll<HTMLButtonElement>('[data-layer]')) b.setAttribute('aria-pressed', String(b === btn));
     $('resource-pick').hidden = view.layer !== 'resource';
+    $('land-legend').hidden = view.layer !== 'land';
     renderer.invalidate();
     drawMap();
   });
 }
+$('land-legend').innerHTML = LAND_USE_NAMES.map((n, u) => (u === 0 ? '' : `<span><i class="swatch-dot" style="background:rgb(${LAND_USE_COLORS[u].join(',')})"></i>${n}</span>`)).join('') + '<span><i class="swatch-dot" style="background:rgb(214,204,160);opacity:.6"></i>Common land</span>';
 const resSel = $<HTMLSelectElement>('resource');
 resSel.innerHTML = RES_NAMES.map((n, i) => `<option value="${i}" ${i === view.resource ? 'selected' : ''}>${n}</option>`).join('');
 resSel.addEventListener('change', () => {
@@ -550,6 +553,7 @@ function renderSettlement(id: number): string {
       ${s.surrounded > 0.4 ? `<p class="small"><span class="chip warn">surrounded</span> ${pct(s.surrounded)} of the land around it is held by hostile powers.</p>` : ''}
       ${Object.keys(s.claims).length ? `<p class="small"><span class="k">Claimed by</span> ${Object.entries(s.claims).map(([q, y]) => `${pLink(+q)} <span class="muted">(lost it in ${y})</span>`).join(', ')}</p>` : ''}
     </section>` : ''}
+    ${s.alive ? landSection(s) : ''}
     ${races.length ? `<section><h3>Peoples</h3>${races.map(([r, n]) => meter(esc(world.raceById.get(r)?.plural ?? r), n / Math.max(1, s.pop))).join('')}</section>` : ''}
     ${s.alive ? `<section><h3>Economy</h3>
       <p><span class="k">Work</span> ${labor.map(([k, l]) => `${SECTOR_NAMES[k]} ${pct(l / totalLabor)}`).join(' · ') || '—'}</p>
@@ -566,6 +570,18 @@ function renderSettlement(id: number): string {
     </section>` : ''}
     ${s.greatWorks.length ? `<section><h3>Great works</h3><p>${s.greatWorks.map(esc).join(' · ')}</p></section>` : ''}
     <section><h3>Local history</h3>${eventList(events, 15)}</section>`;
+}
+
+/** The settlement's land: how many tiles it holds for its size, and what it uses them for. */
+function landSection(s: { tier: number; territory: number[]; commonTiles: number; hemmedIn: boolean }): string {
+  const tier = TIERS[s.tier];
+  const counts = new Map<number, number>();
+  for (const t of s.territory) counts.set(world.map.landUse[t], (counts.get(world.map.landUse[t]) ?? 0) + 1);
+  const uses = [...counts].sort((a, b) => b[1] - a[1]).map(([u, n]) => `<span class="chip"><i class="swatch-dot" style="background:rgb(${LAND_USE_COLORS[u].join(',')})"></i>${LAND_USE_NAMES[u]} ${n}</span>`).join(' ');
+  const short = s.hemmedIn;
+  return `<section><h3>Land</h3>
+    <p class="small">${tier.name}: <b>${s.territory.length}</b> of ${tier.tiles} tile${tier.tiles > 1 ? 's' : ''}${short ? ' <span class="chip warn">hemmed in</span>' : ''}${s.commonTiles ? ` · shares ${s.commonTiles} tiles of common land for hunting, grazing and wood` : ''}</p>
+    <p class="small">${uses}</p></section>`;
 }
 
 /** Food in the stores, how many months it lasts, and what the rest of the year will bring. */
@@ -674,7 +690,8 @@ function renderTile(t: number): string {
         <div><dt>Climate</dt><dd>${Math.round(-25 + m.temperature[t] * 55)} °C mean</dd></div>
         <div><dt>Rainfall</dt><dd>${Math.round(m.moisture[t] * 2000)} mm/yr</dd></div>
         <div><dt>River</dt><dd>${m.river[t] > 0 ? 'yes' : 'no'}</dd></div>
-        <div><dt>Worked by</dt><dd>${o >= 0 ? sLink(o) : 'no one'}</dd></div>
+        <div><dt>Worked by</dt><dd>${o >= 0 ? sLink(o) : m.commons[t] > 0 && m.elevation[t] >= 0 ? `common land of ${m.commons[t]} settlement${m.commons[t] > 1 ? 's' : ''}` : 'no one'}</dd></div>
+        ${o >= 0 ? `<div><dt>Used for</dt><dd>${LAND_USE_NAMES[m.landUse[t]]}</dd></div>` : ''}
       </dl>
       ${res.length ? res.map(([r, v]) => meter(RES_NAMES[r], Math.min(1, v))).join('') : '<p class="muted">No notable resources.</p>'}
     </section>`;

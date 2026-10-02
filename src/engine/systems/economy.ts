@@ -57,12 +57,10 @@ function produce(world: World, s: Settlement): void {
     L[k] = 0;
     if (sec.requiresTech && !pol.techs.has(sec.requiresTech)) continue;
     if (sec.requiresMetallurgy !== undefined && fx.metallurgy < sec.requiresMetallurgy) continue;
-    let c = 0;
-    for (const [r, scale] of sec.capacity) c += s.resSum[r] * scale;
+    // What the settlement's own land, put to this use, and its share of the common land can yield.
+    let c = s.sectorCap[k];
     const e = sec.effect ? fx[sec.effect] : 0;
     c *= 1 + e;
-    if (sec.key === 'foraging') c += s.habitat * 35;
-    else if (sec.key === 'farming') c += s.habitat * 200;
     if (sec.output === Good.Food) c *= sec.key === 'fishing' ? 0.5 + 0.5 * s.climate : s.climate;
     if (sec.key === 'arcanaGathering' && world.cfg.magic <= 0) c = 0;
     cap[k] = c;
@@ -165,6 +163,8 @@ function produce(world: World, s: Settlement): void {
     value += o * s.price[g];
   }
   s.labor.set(L);
+  // How hard each sector's land is worked: the land system gives more tiles to the ones that are crowded.
+  for (let k = 0; k < EXT; k++) s.sectorPressure[k] = cap[k] > 0 ? (L[k] * yld[k]) / cap[k] : yld[k] > 0 ? -1 : 0;
   s.wealth += value * 0.04 + idle * 0.08;
 }
 

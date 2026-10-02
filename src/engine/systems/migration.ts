@@ -1,6 +1,7 @@
 import { TRAVEL_SEASON } from '../calendar';
 import type { SettlerParty, Settlement } from '../types';
 import type { World } from '../world';
+import { releaseAll } from './land';
 import { siteScore } from './sites';
 
 /** How desirable a settlement looks to a would-be migrant. */
@@ -261,6 +262,7 @@ export function controlRange(world: World, polityId: number): number {
 export function abandon(world: World, s: Settlement): void {
   s.alive = false;
   s.abandoned = world.year;
+  releaseAll(world, s);
   world.map.settlementAt[s.tile] = -1;
   // Remaining folk go to the nearest linked settlement.
   const dest = s.links.map((li) => world.links[li]).map((l) => world.settlements[l.a === s.id ? l.b : l.a]).find((d) => d.alive);
