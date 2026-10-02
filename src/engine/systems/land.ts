@@ -1,6 +1,6 @@
 import { BIOMES, Biome } from '../data/biomes';
 import { EXTRACTION_SECTORS, Good, RES_COUNT, Res } from '../data/economy';
-import { LAND_USE_COUNT, LandUse, TIERS, USE_SECTORS, tierIndex } from '../data/settlements';
+import { CITY_TILE_PEOPLE, LAND_USE_COUNT, LandUse, TIERS, USE_SECTORS, tierIndex } from '../data/settlements';
 import type { Polity, Settlement } from '../types';
 import type { World } from '../world';
 
@@ -258,6 +258,44 @@ function reassignUses(world: World, s: Settlement, v: Valuer): void {
   }
 }
 
+/**
+ * The town at a settlement's heart grows onto its land as its townsfolk (craftsmen, the idle and
+ * their families) outgrow the City land they have. Its own tile is built over first; after that the
+ * town eats whatever land is least needed. City land is never farmed again. Some peoples build
+ * wide and low, others pack tight behind their walls.
+ */
+function growCity(world: World, s: Settlement, v: Valuer): void {
+  const map = world.map;
+  let city = 0;
+  for (const t of s.territory) if (map.landUse[t] === LandUse.City) city++;
+  if (TIERS[s.tier].urban) {
+    const values = world.cultures[s.cultureId].values;
+    const pack = Math.max(0.6, 1 + values.tradition * 0.5 - values.expansionism * 0.4);
+    const wanted = Math.max(1, Math.ceil(s.urbanPop / (CITY_TILE_PEOPLE * pack)));
+    let add = Math.min(wanted - city, s.crowding > 0.5 ? 2 : 1);
+    while (add > 0) {
+      let pick = map.landUse[s.tile] !== LandUse.City ? s.tile : -1;
+      if (pick < 0) {
+        let least = Infinity;
+        for (const t of s.territory) {
+          const u = map.landUse[t] as LandUse;
+          if (u === LandUse.City || isWater(world, t)) continue;
+          const val = Math.max(0, useValue(world, v, t, u)) * (1 + Math.hypot((t % map.width) - s.x, Math.floor(t / map.width) - s.y) * 0.1);
+          if (val < least) {
+            least = val;
+            pick = t;
+          }
+        }
+      }
+      if (pick < 0) break;
+      map.landUse[pick] = LandUse.City;
+      city++;
+      add--;
+    }
+  }
+  s.cityTiles = city;
+}
+
 /** Sum up what the settlement's land can yield, sector by sector. */
 function computeCapacity(world: World, s: Settlement, v: Valuer): void {
   const map = world.map;
@@ -282,6 +320,7 @@ export function runLand(world: World): void {
     updateTier(s);
     const v = valuer(world, s);
     reassignUses(world, s, v);
+    growCity(world, s, v);
     computeCapacity(world, s, v);
   }
 }

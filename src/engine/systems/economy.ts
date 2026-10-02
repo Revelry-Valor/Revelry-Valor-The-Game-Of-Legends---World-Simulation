@@ -3,6 +3,7 @@ import {
   type Recipe,
 } from '../data/economy';
 import { FOOD_SEASON } from '../calendar';
+import { TIERS } from '../data/settlements';
 import type { Settlement } from '../types';
 import type { World } from '../world';
 
@@ -125,11 +126,14 @@ function produce(world: World, s: Settlement): void {
     food += out(best) - before;
     assigned += chunk;
   }
-  // 2) Market: remaining labour goes where it earns the most.
+  // 2) Market: remaining labour goes where it earns the most. A small place cannot keep many craftsmen busy.
+  const craftRoom = workers * TIERS[s.tier].crafts;
+  let crafts = 0;
   while (assigned + chunk <= workers) {
     let best = -1;
     let bv = 0.02;
     for (let k = 0; k < SECTOR_COUNT; k++) {
+      if (k >= EXT && crafts + chunk > craftRoom) continue;
       const v = marginal(k) * val[k];
       if (v > bv) {
         bv = v;
@@ -139,12 +143,17 @@ function produce(world: World, s: Settlement): void {
     if (best < 0) break;
     L[best] += chunk;
     assigned += chunk;
+    if (best >= EXT) crafts += chunk;
   }
-  void assigned;
   // 3) But people keep to their trades: the workforce moves towards that only as fast as need drives it.
   const hungry = s.foodRatio < 0.95 || s.lastHungry > 1;
   const idle = keepToTrades(s, workers, hungry);
   s.idle = idle;
+  // Townsfolk: craftsmen and their families, and the town's own officials and merchants. (The idle crowd
+  // into the town too, but they do not build it: they add to its crowding, not its streets.)
+  let townWork = 0;
+  for (let k = EXT; k < SECTOR_COUNT; k++) townWork += L[k];
+  s.urbanPop = TIERS[s.tier].urban ? Math.min(s.pop, (townWork / Math.max(1, workers)) * s.pop + s.pop * 0.05) : 0;
 
   // 4) Produce.
   let value = 0;
@@ -262,13 +271,15 @@ export function runMonthlyFood(world: World): void {
     const adapt = culture.traitEffects;
     const famine = fed < 0.98 ? (1 - fed) * 0.3 * (1 - Math.min(0.8, adapt.famineResist)) : 0;
     const plague = s.plague * 0.22 * (1 - Math.min(0.8, fx.sanitation)) * (1 - Math.min(0.8, adapt.plagueResist));
+    // Crowded towns are filthy: fouled water, refuse and sickness carry people off.
+    const squalor = Math.min(3, s.crowding) * 0.025 * (1 - Math.min(0.8, fx.sanitation));
     let pop = 0;
     for (const r in s.races) {
       const rd = world.raceById.get(r);
       const g = rd ? rd.growth : 0.02;
       const rate = crowd >= 0 ? g * fed * crowd : crowd * 0.1;
       const hardy = 1 - (rd?.hardiness ?? 0);
-      const n = Math.max(0, s.races[r] * (1 + (rate - (famine + plague) * hardy) / 12));
+      const n = Math.max(0, s.races[r] * (1 + (rate - (famine + plague + squalor) * hardy) / 12));
       if (n < 0.5) delete s.races[r];
       else {
         s.races[r] = n;
@@ -290,7 +301,6 @@ export function runConsumption(world: World): void {
 
 function consume(world: World, s: Settlement): void {
   const pol = world.polities[s.polityId];
-  const fx = pol.effects;
   const culture = world.cultures[s.cultureId];
 
   s.foodRatio = s.foodNeeded > 0 ? s.foodEaten / s.foodNeeded : 1;
@@ -312,14 +322,15 @@ function consume(world: World, s: Settlement): void {
   s.stability += (luxCover - 0.5) * 0.01;
 
   // Construction: timber always, dressed stone once masonry is known.
-  const housingMax = fx.housingMax;
-  const desired = Math.max(0, Math.min(housingMax, s.pop * 1.3 + 40) - s.housing);
-  const usesStone = housingMax > 3000;
+  // People build whatever shelter they can; building skill decides comfort, not how many can live here.
+  const desired = Math.max(0, s.pop * 1.3 + 40 - s.housing);
+  const usesStone = s.buildings === 'stone';
   if (desired > 0) {
     // Builders leave some timber and stone for the workshops.
     let units = Math.min(desired, (s.stock[Good.Timber] * 0.7) / 0.25);
     if (usesStone && s.housing > 2000) units = Math.min(units, (s.stock[Good.Stone] * 0.7) / 0.15 + desired * 0.05);
-    if (s.housing < 500) units = Math.max(units, desired * 0.3); // huts and tents need little
+    // Huts, tents and mud brick need little timber.
+    units = Math.max(units, desired * (s.housing < 500 ? 0.3 : 0.12));
     units = Math.max(0, units);
     const timberUsed = Math.min(s.stock[Good.Timber], units * 0.25);
     s.stock[Good.Timber] -= timberUsed;
@@ -331,7 +342,7 @@ function consume(world: World, s: Settlement): void {
     }
     s.housing += units;
   }
-  s.housing = Math.min(s.housing * 0.99, Math.max(housingMax, s.pop));
+  s.housing *= 0.99;
 
   // Wear (food spoils month by month).
   for (let g = 0; g < GOOD_COUNT; g++) if (g !== Good.Food) s.stock[g] *= 1 - GOOD_DECAY[g];
@@ -362,14 +373,14 @@ export function updatePrices(world: World, s: Settlement, militarism: number): v
   const t = s.target;
   const met = fx.metallurgy;
   const wealthPerCap = s.wealth / Math.max(1, pop);
-  const desired = Math.max(0, Math.min(fx.housingMax, pop * 1.3 + 40) - s.housing);
+  const desired = Math.max(0, pop * 1.3 + 40 - s.housing);
   // Tribute feeds the court; it is not for resale.
   t[Good.Food] = foodNeed(world, s) * 1.2 + (world.polities[s.polityId].capitalId === s.id ? s.tributeIn : 0);
   t[Good.Tools] = workers * 0.08;
   t[Good.Weapons] = pop * 0.02 * (0.5 + militarism);
   const craftDemand = (t[Good.Tools] + t[Good.Weapons]) * 0.35;
   t[Good.Timber] = pop * 0.05 + desired * 0.25 + craftDemand * 0.4;
-  t[Good.Stone] = (fx.housingMax > 3000 ? desired * 0.15 : 0) + (met === 0 ? craftDemand * 0.6 : 0) + pop * 0.005;
+  t[Good.Stone] = (s.buildings === 'stone' ? desired * 0.15 : 0) + (met === 0 ? craftDemand * 0.6 : 0) + pop * 0.005;
   t[Good.Copper] = met >= 1 && met < 3 ? craftDemand * 0.9 : met >= 1 ? pop * 0.002 : 0;
   t[Good.Tin] = met >= 2 && met < 3 ? craftDemand * 0.25 : 0;
   t[Good.Iron] = met >= 3 ? craftDemand * 1.1 : 0;

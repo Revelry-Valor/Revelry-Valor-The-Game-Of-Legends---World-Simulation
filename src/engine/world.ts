@@ -8,6 +8,7 @@ import { Rng } from './rng';
 import { caravansMonth, planCaravans } from './systems/caravans';
 import { runCulture } from './systems/culture';
 import { runConsumption, runMonthlyFood, runProduction } from './systems/economy';
+import { runDevelopment } from './systems/development';
 import { runEvents } from './systems/events';
 import { runMigration, settlersMonth } from './systems/migration';
 import { militaryMonth, raiseArmies } from './systems/military';
@@ -155,6 +156,7 @@ export class World {
     runTrade(this);
     runTribute(this);
     runConsumption(this);
+    runDevelopment(this);
     runMigration(this);
     runCulture(this);
     runPolitics(this);
@@ -280,6 +282,10 @@ export class World {
       exported: new Float64Array(GOOD_COUNT),
       labor: new Float64Array(SECTOR_COUNT),
       idle: 0,
+      urbanPop: 0,
+      cityTiles: 0,
+      crowding: 0,
+      buildings: 'huts',
       yearMade: new Float64Array(GOOD_COUNT),
       yearUsed: new Float64Array(GOOD_COUNT),
       yearBought: new Float64Array(GOOD_COUNT),

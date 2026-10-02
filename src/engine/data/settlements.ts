@@ -6,17 +6,33 @@ export interface SettlementTier {
   name: string;
   /** Population at which a settlement reaches this size. */
   minPop: number;
+  /** Largest share of its workers a settlement this size can keep busy in crafts: bigger markets support more specialists. */
+  crafts: number;
+  /** Whether it has a town at its heart, built up on City land. */
+  urban: boolean;
 }
 
 export const TIERS: SettlementTier[] = [
-  { name: 'Camp', minPop: 0 },
-  { name: 'Hamlet', minPop: 150 },
-  { name: 'Village', minPop: 600 },
-  { name: 'Town', minPop: 2000 },
-  { name: 'City', minPop: 8000 },
-  { name: 'Great City', minPop: 30000 },
-  { name: 'Metropolis', minPop: 100000 },
+  { name: 'Camp', minPop: 0, crafts: 0.03, urban: false },
+  { name: 'Hamlet', minPop: 150, crafts: 0.06, urban: false },
+  { name: 'Village', minPop: 600, crafts: 0.1, urban: false },
+  { name: 'Town', minPop: 2000, crafts: 0.2, urban: true },
+  { name: 'City', minPop: 8000, crafts: 0.32, urban: true },
+  { name: 'Great City', minPop: 30000, crafts: 0.42, urban: true },
+  { name: 'Metropolis', minPop: 100000, crafts: 0.5, urban: true },
 ];
+
+/** People one tile of City land holds before the town spills onto the next. */
+export const CITY_TILE_PEOPLE = 2500;
+
+/** What a settlement's buildings are made of, and how readily they burn. */
+export const BUILDINGS: Record<string, { name: string; fire: number }> = {
+  tents: { name: 'hide tents', fire: 0.8 },
+  huts: { name: 'huts of reed and earth', fire: 0.6 },
+  timber: { name: 'timber halls and houses', fire: 1 },
+  mudbrick: { name: 'mud brick', fire: 0.3 },
+  stone: { name: 'stone', fire: 0.25 },
+};
 
 export function tierIndex(pop: number): number {
   let i = 0;

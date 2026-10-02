@@ -1,14 +1,15 @@
 import './styles.css';
 import { chronicleMarkdown, describeValues, fmt, polityEra, settlementTier, worldSnapshot } from '../engine/chronicle';
 import { MONTHS, seasonOf } from '../engine/calendar';
-import { LAND_USE_COLORS, LAND_USE_NAMES } from '../engine/data/settlements';
+import { BUILDINGS, LAND_USE_COLORS, LAND_USE_NAMES, TIERS } from '../engine/data/settlements';
+import { comfort } from '../engine/systems/development';
 import { ringRadius } from '../engine/systems/land';
 import { MAP_SIZES, defaultConfig } from '../engine/config';
 import { BIOMES } from '../engine/data/biomes';
 import { GOOD_NAMES, JOBS, RES_COUNT, RES_NAMES, Res, SECTOR_KEYS } from '../engine/data/economy';
 import { DEFAULT_RACES } from '../engine/data/races';
 import { ERA_NAMES, TECHS, TECH_BY_ID } from '../engine/data/techs';
-import type { EventKind, HistoryEvent, RaceDef, WorldConfig } from '../engine/types';
+import type { EventKind, HistoryEvent, RaceDef, Settlement, WorldConfig } from '../engine/types';
 import { VALUE_KEYS } from '../engine/types';
 import { World } from '../engine/world';
 import { lineChart, compact } from './chart';
@@ -551,6 +552,7 @@ function renderSettlement(id: number): string {
       ${s.surrounded > 0.4 ? `<p class="small"><span class="chip warn">surrounded</span> ${pct(s.surrounded)} of the land around it is held by hostile powers.</p>` : ''}
       ${Object.keys(s.claims).length ? `<p class="small"><span class="k">Claimed by</span> ${Object.entries(s.claims).map(([q, y]) => `${pLink(+q)} <span class="muted">(lost it in ${y})</span>`).join(', ')}</p>` : ''}
     </section>` : ''}
+    ${s.alive ? developmentSection(s) : ''}
     ${s.alive ? landSection(s) : ''}
     ${races.length ? `<section><h3>Peoples</h3>${races.map(([r, n]) => meter(esc(world.raceById.get(r)?.plural ?? r), n / Math.max(1, s.pop))).join('')}</section>` : ''}
     ${s.alive ? `<section><h3>Economy</h3>
@@ -616,6 +618,20 @@ function accountsSection(s: { yearMade: Float64Array; yearUsed: Float64Array; ye
     <details><summary>Last year's accounts</summary><div class="table-wrap"><table>
       <thead><tr><th>Good</th><th class="num">Made</th><th class="num">Used</th><th class="num">Bought</th><th class="num">Sold</th><th class="num">Passed on</th></tr></thead>
       <tbody>${rows.join('')}</tbody></table></div></details>`;
+}
+
+/** How developed the settlement is: its size, what it is built of, its town, and how crowded it is. */
+function developmentSection(s: Settlement): string {
+  const tier = TIERS[s.tier];
+  const room = comfort(world, s);
+  const crowd = s.crowding;
+  const note = crowd <= 0 ? 'room to spare' : crowd < 0.3 ? 'getting crowded' : crowd < 1 ? 'crowded: more sickness, fires and unrest' : 'packed to bursting: filth, plague and fire';
+  return `<section><h3>Development</h3>
+    <p class="small"><b>${tier.name}</b> · built of ${BUILDINGS[s.buildings].name} · can keep up to ${pct(tier.crafts)} of its workers in crafts</p>
+    ${tier.urban ? `<p class="small"><span class="k">Town</span> ${fmt(s.urbanPop)} townsfolk on ${s.cityTiles} tile${s.cityTiles === 1 ? '' : 's'} of City land</p>` : ''}
+    <p class="small"><span class="k">Crowding</span> ${crowd > 0 ? `<b>${(1 + crowd).toFixed(1)}×</b> what it holds in comfort` : 'none'} ${crowd >= 0.3 ? '<span class="chip crit">crowded</span>' : ''}</p>
+    <p class="small muted">Holds ${fmt(room)} in comfort with its building skills and town; ${note}.</p>
+  </section>`;
 }
 
 /** The settlement's land: the ring of tiles it works, and how much of it goes to each use. */

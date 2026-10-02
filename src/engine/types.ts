@@ -322,6 +322,14 @@ export interface Settlement {
   labor: Float64Array;
   /** Workers with no work this year. */
   idle: number;
+  /** People living in the town at its heart rather than on the land: craftsmen, merchants and officials, with their families. */
+  urbanPop: number;
+  /** Tiles of its land built over as City. */
+  cityTiles: number;
+  /** How far it is packed beyond what it can hold in comfort (0 = comfortable). */
+  crowding: number;
+  /** What its buildings are made of (a key of BUILDINGS). */
+  buildings: string;
   /** Last full year's accounts, good by good: made, used, bought and sold. */
   yearMade: Float64Array;
   yearUsed: Float64Array;

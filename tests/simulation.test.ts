@@ -296,6 +296,31 @@ describe('work and trade', () => {
   });
 });
 
+describe('development', () => {
+  const w = new World(small({ seed: 21 }));
+  w.run(400);
+
+  it('builds towns over their least needed land, from their own tile out, and never farms it again', () => {
+    const towns = [...w.aliveSettlements()].filter((s) => s.cityTiles > 0);
+    expect(towns.length).toBeGreaterThan(0);
+    for (const s of towns) {
+      expect(w.map.landUse[s.tile]).toBe(LandUse.City);
+      expect(s.territory.filter((t) => w.map.landUse[t] === LandUse.City).length).toBe(s.cityTiles);
+    }
+    // Villages that were never towns have no City land; a town that shrinks keeps its streets.
+    for (const s of w.aliveSettlements()) if (s.peakPop < 2000) expect(s.cityTiles).toBe(0);
+  });
+
+  it('lets settlements grow past what their building skills hold in comfort, at a cost', () => {
+    for (const s of w.aliveSettlements()) {
+      expect(s.crowding).toBeGreaterThanOrEqual(0);
+      expect(s.urbanPop).toBeLessThanOrEqual(s.pop + 1e-6);
+    }
+    const crafts = [...w.aliveSettlements()].map((s) => s.labor.slice(15).reduce((a, b) => a + b, 0) / Math.max(1, s.labor.reduce((a, b) => a + b, 0) + s.idle));
+    expect(Math.max(...crafts)).toBeLessThanOrEqual(0.6);
+  });
+});
+
 describe('real time', () => {
   it('advances month by month and reaches the same year as whole-year steps', () => {
     const a = new World(small());

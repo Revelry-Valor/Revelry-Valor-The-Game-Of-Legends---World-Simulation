@@ -75,7 +75,7 @@ function plague(world: World): void {
   for (const s of alive) {
     if (s.pop < 800 || s.plague > 0 || s.immunity > 0.2) continue;
     const san = world.polities[s.polityId].effects.sanitation;
-    const chance = 0.0012 * world.cfg.calamity * Math.sqrt(s.pop / 3000) * (1 - Math.min(0.85, san * 0.7));
+    const chance = 0.0012 * world.cfg.calamity * Math.sqrt(s.pop / 3000) * (1 - Math.min(0.85, san * 0.7)) * (1 + Math.min(3, s.crowding) * 1.5);
     if (!rng.chance(chance)) continue;
     s.plague = rng.range(0.45, 1);
     s.immunity = 1;

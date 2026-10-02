@@ -178,6 +178,7 @@ function updateStability(world: World): void {
     for (const t of p.ruler.traits) target += TRAIT_STABILITY[t] ?? 0;
     target += Math.min(0.08, s.greatWorks.length * 0.03);
     target += (s.loyalty - 0.6) * 0.2;
+    target -= Math.min(0.15, s.crowding * 0.08);
     s.stability = Math.max(0, Math.min(1, s.stability + (target - s.stability) * 0.15 + rng.normal() * 0.015));
     const a = acc.get(p.id) ?? [0, 0];
     a[0] += s.stability * s.pop;

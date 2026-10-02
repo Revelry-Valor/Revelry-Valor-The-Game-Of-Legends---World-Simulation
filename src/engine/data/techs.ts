@@ -13,7 +13,10 @@ export interface TechEffects {
   timber: number;
   mining: number;
   craft: number;
-  /** Largest settlement size the building techniques support. */
+  /**
+   * How many people a settlement can hold in comfort with these building and sanitation skills.
+   * Settlements can grow past it; beyond it they are crowded, with more disease, fire and unrest.
+   */
   housingMax: number;
   tradeRange: number;
   tradeEff: number;

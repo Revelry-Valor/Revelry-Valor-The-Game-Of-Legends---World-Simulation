@@ -18,6 +18,8 @@ export function attractiveness(world: World, s: Settlement): number {
     // Towns on busy caravan roads draw people with work and opportunity.
     0.12 * Math.min(1, s.transit / (s.pop * 0.5 + 1)) -
     s.plague * 0.4 -
+    // No one moves to a town already full of people without work.
+    Math.min(0.5, (s.idle / Math.max(1, s.pop * 0.55)) * 0.7) -
     war
   );
 }
@@ -57,7 +59,10 @@ export function runMigration(world: World): void {
       Math.max(0, 1 - s.foodRatio) * 0.6 +
       Math.max(0, s.pop / Math.max(1, s.housing) - 0.95) * 1.5 +
       s.plague * 0.3 +
-      Math.max(0, 0.35 - s.stability) * 0.5;
+      Math.max(0, 0.35 - s.stability) * 0.5 +
+      Math.min(0.4, s.crowding * 0.15) +
+      // People without work go where there is some.
+      Math.min(0.5, (s.idle / Math.max(1, s.pop * 0.55)) * 0.8);
     const a0 = attr.get(s.id)!;
     const dests: { d: Settlement; w: number }[] = [];
     for (const li of s.links) {
