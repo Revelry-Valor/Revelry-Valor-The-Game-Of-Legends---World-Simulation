@@ -525,8 +525,16 @@ function renderSettlement(id: number): string {
   const p = world.polities[s.polityId];
   const races = Object.entries(s.races).filter(([, n]) => n >= 1).sort((a, b) => b[1] - a[1]);
   const events = world.history.filter((e) => e.settlements?.includes(id));
-  const allLinks = [...s.links.map((li) => world.links[li]), ...world.hubLinks.filter((l) => l.a === id || l.b === id)];
-  const partners = allLinks.map((l) => ({ o: l.a === id ? l.b : l.a, v: l.volume, sea: l.sea, kind: l.kind, hub: !!l.hub })).filter((x) => world.settlements[x.o].alive && x.kind === 'internal').sort((a, b) => b.v - a.v);
+  const market = s.marketId === id;
+  const mine = (l: { a: number; b: number }) => l.a === id || l.b === id;
+  // Villages trade only with their market; markets with each other, the hub, and the villages they serve.
+  const allLinks = [
+    ...(market ? s.links.map((li) => world.links[li]).filter((l) => world.settlements[l.a].marketId === l.a && world.settlements[l.b].marketId === l.b) : []),
+    ...world.hubLinks.filter(mine),
+    ...world.marketLinks.filter(mine),
+  ];
+  const partners = allLinks.map((l) => ({ o: l.a === id ? l.b : l.a, v: l.volume, sea: l.sea, kind: l.kind, hub: !!l.hub, toMarket: world.marketLinks.includes(l) })).filter((x) => world.settlements[x.o].alive && x.kind === 'internal').sort((a, b) => b.v - a.v);
+  const served = world.settlements.filter((o) => o.alive && o.id !== id && o.marketId === id);
   const caravans = world.caravans.filter((c) => c.homeId === id);
   const houses = world.houses.filter((h) => h.homeId === id && h.closed === null);
   const road = world.map.road[s.tile] | 0;
@@ -563,7 +571,8 @@ function renderSettlement(id: number): string {
     <section><h3>Trade</h3>
       <p class="small"><span class="k">Internal</span> ${compact(s.tradeByKind.internal)} · <span class="k">Caravans</span> ${compact(s.tradeByKind.caravan)} · <span class="k">Convoys</span> ${compact(s.tradeByKind.convoy)} · <span class="k">Passing</span> ${compact(s.transit)} <span class="muted">silver/yr</span></p>
       <p class="small"><span class="k">Road</span> ${road ? ROAD_NAMES[road] : 'No road yet'} · <button type="button" class="mini" data-market="${id}">Open market</button></p>
-      ${partners.length ? `<h4 class="mini-h">Trading neighbours in the realm</h4><ul class="plain">${partners.slice(0, 6).map((x) => `<li>${sLink(x.o)} <span class="chip">${x.hub ? 'road to hub' : 'internal'}</span> <span class="muted small">${x.sea ? 'by sea' : 'overland'} · ${compact(x.v)}/yr</span></li>`).join('')}</ul>` : '<p class="muted small">No trading neighbours in its own realm.</p>'}
+      <p class="small"><span class="k">Market</span> ${market ? `${s.tier >= 3 ? 'holds a market' : 'holds the market for the villages around it'}${served.length ? ` for ${served.length} settlement${served.length > 1 ? 's' : ''}: ${served.slice(0, 6).map((o) => sLink(o.id)).join(', ')}${served.length > 6 ? ` and ${served.length - 6} more` : ''}` : ''}` : `trades through ${sLink(s.marketId)}`}</p>
+      ${partners.length ? `<h4 class="mini-h">Trading neighbours in the realm</h4><ul class="plain">${partners.slice(0, 6).map((x) => `<li>${sLink(x.o)} <span class="chip">${x.hub ? 'road to hub' : x.toMarket ? (market ? 'comes to market' : 'its market') : 'neighbour'}</span> <span class="muted small">${x.sea ? 'by sea' : 'overland'} · ${compact(x.v)}/yr</span></li>`).join('')}</ul>` : '<p class="muted small">No trading neighbours in its own realm.</p>'}
       ${houses.length ? `<p class="small">Home of ${houses.map((h) => `<b>${esc(h.name)}</b> <span class="muted">(${compact(h.wealth)} silver, ${h.trips} ventures)</span>`).join(', ')}.</p>` : ''}
       ${caravans.length ? `<h4 class="mini-h">On the road</h4><ul class="plain small">${caravans.map((c) => `<li><span class="swatch-dot" style="background:${CARAVAN_COLOR[c.kind]}"></span>${CARAVAN_KIND[c.kind]} (${c.size} beasts) ${c.returning ? 'coming home from' : 'bound for'} ${sLink(c.returning ? c.fromId : c.toId)}${c.cargo.length ? ` with ${c.cargo.map((x) => `${Math.round(x.qty)} ${GOOD_NAMES[x.good].toLowerCase()}`).join(', ')}` : ', empty'}</li>`).join('')}</ul>` : ''}
     </section>` : ''}

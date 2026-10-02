@@ -289,6 +289,17 @@ describe('work and trade', () => {
     expect(checked).toBeGreaterThan(0);
   });
 
+  it('has every village and hamlet trade through a market of its own nation', () => {
+    for (const s of w.aliveSettlements()) {
+      const m = w.settlements[s.marketId];
+      expect(m.alive).toBe(true);
+      expect(m.polityId).toBe(s.polityId);
+      expect(m.marketId).toBe(m.id);
+      if (s.tier >= 3) expect(s.marketId).toBe(s.id);
+    }
+    for (const c of w.caravans) if (c.kind !== 'convoy') expect(w.settlements[c.homeId].marketId).toBe(c.homeId);
+  });
+
   it('rarely has a settlement both buy and sell the same good', () => {
     const towns = [...w.aliveSettlements()];
     const both = towns.filter((s) => s.yearSold.some((q, g) => q > 1 && s.yearBought[g] > 1));

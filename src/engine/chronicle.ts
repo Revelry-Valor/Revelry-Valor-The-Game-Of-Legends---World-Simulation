@@ -169,7 +169,7 @@ export function worldSnapshot(world: World): unknown {
       id: s.id, name: s.name, x: s.x, y: s.y, alive: s.alive, founded: s.founded, abandoned: s.abandoned,
       pop: Math.round(s.pop), peakPop: Math.round(s.peakPop), races: Object.fromEntries(Object.entries(s.races).map(([k, v]) => [k, Math.round(v)])),
       polity: s.polityId, culture: s.cultureId, wealth: Math.round(s.wealth), stability: +s.stability.toFixed(2), greatWorks: s.greatWorks,
-      loyalty: +s.loyalty.toFixed(2), holder: s.holder, claims: s.claims, connected: s.connected, occupiedBy: s.occupiedBy,
+      loyalty: +s.loyalty.toFixed(2), holder: s.holder, claims: s.claims, connected: s.connected, occupiedBy: s.occupiedBy, market: s.marketId, cityTiles: s.cityTiles, buildings: s.buildings, idle: Math.round(s.idle),
       biome: BIOMES[world.map.biome[s.tile]].name, coastal: s.coastal, river: s.river,
     })),
     polities: world.polities.map((p) => ({

@@ -73,8 +73,94 @@ export function buildTradeLinks(world: World, full = true): void {
   world.linksDirty = false;
 }
 
+/** How far (in tiles) villagers will go to market: about two days on the road with the default spacing. */
+export function marketReach(world: World): number {
+  return world.cfg.settlementSpacing * 2.5;
+}
+
+/** Whether a settlement holds a market: towns and larger, and the villages others come to. */
+export function isMarket(s: Settlement): boolean {
+  return s.marketId === s.id;
+}
+
 /**
- * Internal trade routes: every settlement of a nation is tied by road to the nation's hub,
+ * Hamlets and villages do not run markets of their own: each trades through the nearest town of
+ * its own nation within reach. Where no town is near, the leading village of the cluster (the most
+ * developed, then the richest) holds the market for the rest.
+ */
+export function assignMarkets(world: World): void {
+  const reach = marketReach(world);
+  const alive = [...world.aliveSettlements()];
+  const byPolity = new Map<number, Settlement[]>();
+  for (const s of alive) {
+    const list = byPolity.get(s.polityId) ?? [];
+    list.push(s);
+    byPolity.set(s.polityId, list);
+  }
+  const rank = (s: Settlement) => s.tier * 1e9 + s.wealth;
+  for (const s of alive) {
+    const before = s.marketId;
+    if (s.tier >= 3) s.marketId = s.id;
+    else {
+      let town: Settlement | null = null;
+      let leader: Settlement = s;
+      let bd = Infinity;
+      for (const o of byPolity.get(s.polityId)!) {
+        if (o === s || o.landmass !== s.landmass) continue;
+        const d = Math.hypot(o.x - s.x, o.y - s.y);
+        if (d > reach) continue;
+        if (o.tier >= 3 && d < bd) {
+          bd = d;
+          town = o;
+        }
+        if (rank(o) > rank(leader)) leader = o;
+      }
+      s.marketId = town ? town.id : leader.id;
+    }
+    if (s.marketId !== before) world.marketsDirty = true;
+  }
+  // A village others come to holds a market, even if it would itself look further afield.
+  for (const s of alive) {
+    const m = world.settlements[s.marketId];
+    if (m.id !== s.id && m.marketId !== m.id) {
+      m.marketId = m.id;
+      world.marketsDirty = true;
+    }
+  }
+}
+
+/** Roads from every village and hamlet to its market. */
+export function buildMarketLinks(world: World): void {
+  const pf = world.pathfinder;
+  const map = world.map;
+  const old = new Map(world.marketLinks.map((l) => [pairKey(l.a, l.b), l]));
+  const out: TradeLink[] = [];
+  for (const s of world.aliveSettlements()) {
+    if (isMarket(s)) continue;
+    const m = world.settlements[s.marketId];
+    if (!m?.alive) continue;
+    // Keep the roads that still lead to the same market; only new ones are surveyed.
+    const kept = old.get(pairKey(s.id, m.id));
+    if (kept) {
+      out.push(kept);
+      continue;
+    }
+    const sea = world.polities[s.polityId].effects.seaTravel;
+    let explored = 0;
+    pf.run(s.tile, 80, sea, (tile) => tile === m.tile || ++explored > 4000);
+    const path = pf.pathTo(m.tile);
+    if (path.length < 2) continue;
+    out.push({
+      a: Math.min(s.id, m.id), b: Math.max(s.id, m.id), cost: pf.costTo(m.tile), path,
+      sea: path.some((t) => map.elevation[t] < 0), volume: 0, kind: 'internal',
+    });
+  }
+  world.marketLinks = out;
+  world.marketsDirty = false;
+}
+
+/**
+ * Internal trade routes: every market town of a nation is tied by road to the nation's hub,
  * its largest settlement, so goods (and roads) converge on the heart of the realm.
  */
 export function buildHubLinks(world: World): void {
@@ -87,7 +173,8 @@ export function buildHubLinks(world: World): void {
     if (p.settlementIds.length < 2) continue;
     const hub = world.settlements[p.hubId];
     if (!hub?.alive || hub.polityId !== p.id) continue;
-    const members = new Set(p.settlementIds.filter((id) => id !== hub.id));
+    // Villages reach the hub through their market towns.
+    const members = new Set(p.settlementIds.filter((id) => id !== hub.id && isMarket(world.settlements[id])));
     let remaining = members.size;
     const reach = 45 + p.effects.roads * 20 + p.effects.seaTravel * 10;
     const hits: number[] = [];
@@ -139,7 +226,8 @@ export function runTrade(world: World): void {
     s.tradeByKind = { internal: 0, caravan: 0, convoy: 0 };
     s.lastPrice.set(s.price);
   }
-  const all = [...world.links, ...world.hubLinks];
+  // Villages trade only with their market; markets trade with each other and the hub.
+  const all = [...world.links.filter((l) => isMarket(world.settlements[l.a]) && isMarket(world.settlements[l.b])), ...world.hubLinks, ...world.marketLinks];
   const order = all.map((_, i) => i);
   world.rng.shuffle(order);
   let total = 0;

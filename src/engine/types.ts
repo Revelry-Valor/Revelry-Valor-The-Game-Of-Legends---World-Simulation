@@ -324,6 +324,8 @@ export interface Settlement {
   idle: number;
   /** People living in the town at its heart rather than on the land: craftsmen, merchants and officials, with their families. */
   urbanPop: number;
+  /** Settlement whose market it trades through (its own id if it is a market itself). */
+  marketId: number;
   /** Tiles of its land built over as City. */
   cityTiles: number;
   /** How far it is packed beyond what it can hold in comfort (0 = comfortable). */

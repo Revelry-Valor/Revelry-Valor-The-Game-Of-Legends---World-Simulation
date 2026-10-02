@@ -173,7 +173,8 @@ export function planCaravans(world: World): void {
       houseAt.set(s.id, h);
       world.log('house', 2, `The merchant family ${h.name} rose to prominence in ${s.name}, sending its own caravans far and wide.`, { settlements: [s.id], polities: [s.polityId] });
     }
-    if (world.caravans.length >= MAX_CARAVANS || s.pop < 300) continue;
+    // Merchants set out from market towns; the villages' goods reach them through the market.
+    if (world.caravans.length >= MAX_CARAVANS || s.pop < 300 || s.marketId !== s.id) continue;
     const house = houseAt.get(s.id);
     let kind: CaravanKind | null = null;
     if (house && (byHouse.get(house.id) ?? 0) < Math.min(4, 1 + Math.floor(house.wealth / 1500)) && rng.chance(0.5)) kind = 'family';

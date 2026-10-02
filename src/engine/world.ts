@@ -19,7 +19,7 @@ import { claimTile } from './systems/land';
 import { LandUse, tierIndex } from './data/settlements';
 import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
-import { buildHubLinks, buildTradeLinks, runTrade, runTribute } from './systems/trade';
+import { assignMarkets, buildHubLinks, buildMarketLinks, buildTradeLinks, runTrade, runTribute } from './systems/trade';
 import type {
   Army, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
   NobleHouse, Pact, Settlement, SettlerParty, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
@@ -51,6 +51,9 @@ export class World {
   links: TradeLink[] = [];
   /** Roads from each settlement to its nation's hub. */
   hubLinks: TradeLink[] = [];
+  /** Roads from every village and hamlet to the market town it trades through. */
+  marketLinks: TradeLink[] = [];
+  marketsDirty = true;
   caravans: Caravan[] = [];
   houses: TradingHouse[] = [];
   nobles: NobleHouse[] = [];
@@ -152,6 +155,8 @@ export class World {
       if (this.hubsDirty && this.year - this.lastHubBuild >= 8) buildHubLinks(this);
     }
     runEvents(this);
+    assignMarkets(this);
+    if (this.marketsDirty) buildMarketLinks(this);
     runProduction(this);
     runTrade(this);
     runTribute(this);
@@ -283,6 +288,7 @@ export class World {
       labor: new Float64Array(SECTOR_COUNT),
       idle: 0,
       urbanPop: 0,
+      marketId: -1,
       cityTiles: 0,
       crowding: 0,
       buildings: 'huts',
