@@ -151,18 +151,10 @@ export class MapRenderer {
     const d = img.data;
     const w = map.width;
     if (view.layer === 'land') {
-      // What each settlement uses its tiles for, with each settlement's land outlined; common land faintly shaded.
+      // What each settlement uses the tiles of its ring for, with each settlement's land outlined.
       for (let i = 0; i < map.size; i++) {
         const o = map.owner[i];
-        if (o < 0) {
-          if (map.commons[i] > 0 && map.elevation[i] >= 0) {
-            d[i * 4] = 214;
-            d[i * 4 + 1] = 204;
-            d[i * 4 + 2] = 160;
-            d[i * 4 + 3] = 70;
-          }
-          continue;
-        }
+        if (o < 0) continue;
         const [r, g, b] = LAND_USE_COLORS[map.landUse[i]];
         const x = i % w;
         const edge = (x + 1 < w && map.owner[i + 1] !== o) || (x > 0 && map.owner[i - 1] !== o) || (i + w < map.size && map.owner[i + w] !== o) || (i - w >= 0 && map.owner[i - w] !== o);

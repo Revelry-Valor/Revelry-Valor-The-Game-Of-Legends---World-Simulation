@@ -5,8 +5,8 @@ import { DEFAULT_RACES } from '../src/engine/data/races';
 import { TECH_BY_ID } from '../src/engine/data/techs';
 import { Rng } from '../src/engine/rng';
 import { World } from '../src/engine/world';
-import { LandUse, TIERS } from '../src/engine/data/settlements';
-import { useAllowed } from '../src/engine/systems/land';
+import { LandUse } from '../src/engine/data/settlements';
+import { ringRadius, useAllowed } from '../src/engine/systems/land';
 import { friendly } from '../src/engine/systems/diplomacy';
 import { settlementValue } from '../src/engine/systems/warAims';
 import { generateMap } from '../src/engine/worldgen';
@@ -242,13 +242,15 @@ describe('land', () => {
   const w = new World(small({ seed: 9 }));
   w.run(300);
 
-  it('gives each settlement its own land, no more than its size allows', () => {
+  it('gives each settlement the ring of land around its own tile, shared out with its neighbours', () => {
     const seen = new Set<number>();
+    const R = ringRadius(w);
     for (const s of w.aliveSettlements()) {
       expect(w.map.owner[s.tile]).toBe(s.id);
-      expect(s.territory.length).toBeLessThanOrEqual(TIERS[s.tier].tiles);
+      expect(s.territory.length).toBeLessThanOrEqual((2 * R + 1) ** 2);
       for (const t of s.territory) {
         expect(w.map.owner[t]).toBe(s.id);
+        expect(Math.max(Math.abs((t % w.map.width) - s.x), Math.abs(Math.floor(t / w.map.width) - s.y))).toBeLessThanOrEqual(R);
         expect(seen.has(t)).toBe(false);
         seen.add(t);
       }
@@ -261,7 +263,7 @@ describe('land', () => {
       const u = w.map.landUse[t];
       if (u !== LandUse.None) expect(useAllowed(w, t, u)).toBe(true);
     }
-    expect([...w.aliveSettlements()].some((s) => s.territory.length >= 8)).toBe(true);
+    expect([...w.aliveSettlements()].some((s) => s.territory.length >= 12)).toBe(true);
     expect([...w.aliveSettlements()].some((s) => s.territory.some((t) => w.map.landUse[t] === LandUse.Fields))).toBe(true);
   });
 });

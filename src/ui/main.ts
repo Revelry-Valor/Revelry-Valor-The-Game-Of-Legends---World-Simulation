@@ -1,7 +1,8 @@
 import './styles.css';
 import { chronicleMarkdown, describeValues, fmt, polityEra, settlementTier, worldSnapshot } from '../engine/chronicle';
 import { MONTHS, seasonOf } from '../engine/calendar';
-import { LAND_USE_COLORS, LAND_USE_NAMES, TIERS } from '../engine/data/settlements';
+import { LAND_USE_COLORS, LAND_USE_NAMES } from '../engine/data/settlements';
+import { ringRadius } from '../engine/systems/land';
 import { MAP_SIZES, defaultConfig } from '../engine/config';
 import { BIOMES } from '../engine/data/biomes';
 import { GOOD_NAMES, RES_COUNT, RES_NAMES, Res, SECTOR_NAMES } from '../engine/data/economy';
@@ -288,7 +289,7 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-layer]')) 
     drawMap();
   });
 }
-$('land-legend').innerHTML = LAND_USE_NAMES.map((n, u) => (u === 0 ? '' : `<span><i class="swatch-dot" style="background:rgb(${LAND_USE_COLORS[u].join(',')})"></i>${n}</span>`)).join('') + '<span><i class="swatch-dot" style="background:rgb(214,204,160);opacity:.6"></i>Common land</span>';
+$('land-legend').innerHTML = LAND_USE_NAMES.map((n, u) => (u === 0 ? '' : `<span><i class="swatch-dot" style="background:rgb(${LAND_USE_COLORS[u].join(',')})"></i>${n}</span>`)).join('') ;
 const resSel = $<HTMLSelectElement>('resource');
 resSel.innerHTML = RES_NAMES.map((n, i) => `<option value="${i}" ${i === view.resource ? 'selected' : ''}>${n}</option>`).join('');
 resSel.addEventListener('change', () => {
@@ -572,15 +573,15 @@ function renderSettlement(id: number): string {
     <section><h3>Local history</h3>${eventList(events, 15)}</section>`;
 }
 
-/** The settlement's land: how many tiles it holds for its size, and what it uses them for. */
-function landSection(s: { tier: number; territory: number[]; commonTiles: number; hemmedIn: boolean }): string {
-  const tier = TIERS[s.tier];
+/** The settlement's land: the ring of tiles it works, and how much of it goes to each use. */
+function landSection(s: { territory: number[] }): string {
+  const R = ringRadius(world);
   const counts = new Map<number, number>();
   for (const t of s.territory) counts.set(world.map.landUse[t], (counts.get(world.map.landUse[t]) ?? 0) + 1);
   const uses = [...counts].sort((a, b) => b[1] - a[1]).map(([u, n]) => `<span class="chip"><i class="swatch-dot" style="background:rgb(${LAND_USE_COLORS[u].join(',')})"></i>${LAND_USE_NAMES[u]} ${n}</span>`).join(' ');
-  const short = s.hemmedIn;
+  const full = (2 * R + 1) ** 2;
   return `<section><h3>Land</h3>
-    <p class="small">${tier.name}: <b>${s.territory.length}</b> of ${tier.tiles} tile${tier.tiles > 1 ? 's' : ''}${short ? ' <span class="chip warn">hemmed in</span>' : ''}${s.commonTiles ? ` · shares ${s.commonTiles} tiles of common land for hunting, grazing and wood` : ''}</p>
+    <p class="small">Works <b>${s.territory.length}</b> tiles in the ring of ${R} around it${s.territory.length < full * 0.6 ? ', crowded by neighbours, the sea or the mountains' : ''}.</p>
     <p class="small">${uses}</p></section>`;
 }
 
@@ -690,7 +691,7 @@ function renderTile(t: number): string {
         <div><dt>Climate</dt><dd>${Math.round(-25 + m.temperature[t] * 55)} °C mean</dd></div>
         <div><dt>Rainfall</dt><dd>${Math.round(m.moisture[t] * 2000)} mm/yr</dd></div>
         <div><dt>River</dt><dd>${m.river[t] > 0 ? 'yes' : 'no'}</dd></div>
-        <div><dt>Worked by</dt><dd>${o >= 0 ? sLink(o) : m.commons[t] > 0 && m.elevation[t] >= 0 ? `common land of ${m.commons[t]} settlement${m.commons[t] > 1 ? 's' : ''}` : 'no one'}</dd></div>
+        <div><dt>Worked by</dt><dd>${o >= 0 ? sLink(o) : 'no one'}</dd></div>
         ${o >= 0 ? `<div><dt>Used for</dt><dd>${LAND_USE_NAMES[m.landUse[t]]}</dd></div>` : ''}
       </dl>
       ${res.length ? res.map(([r, v]) => meter(RES_NAMES[r], Math.min(1, v))).join('') : '<p class="muted">No notable resources.</p>'}

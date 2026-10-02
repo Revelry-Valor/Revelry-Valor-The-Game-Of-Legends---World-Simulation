@@ -290,8 +290,6 @@ export class World {
       tier: 0,
       sectorCap: new Float64Array(EXTRACTION_SECTORS.length),
       sectorPressure: new Float64Array(EXTRACTION_SECTORS.length).fill(-1),
-      commonTiles: 0,
-      hemmedIn: false,
       habitat: 0,
       tributeIn: 0,
       tradeByKind: { internal: 0, caravan: 0, convoy: 0 },

@@ -1,4 +1,5 @@
 import { BIOMES } from './data/biomes';
+import { tierOf } from './data/settlements';
 import { GOOD_NAMES } from './data/economy';
 import { ERA_NAMES, TECH_BY_ID } from './data/techs';
 import { TRAIT_BY_ID } from './data/traits';
@@ -9,13 +10,7 @@ import type { World } from './world';
 export const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 
 export function settlementTier(pop: number): string {
-  if (pop < 150) return 'Camp';
-  if (pop < 600) return 'Hamlet';
-  if (pop < 2000) return 'Village';
-  if (pop < 8000) return 'Town';
-  if (pop < 30000) return 'City';
-  if (pop < 100000) return 'Great City';
-  return 'Metropolis';
+  return tierOf(pop).name;
 }
 
 export function polityEra(p: Polity): string {
