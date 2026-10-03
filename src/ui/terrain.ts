@@ -95,13 +95,15 @@ export class TerrainShader {
    * Paint a W×H pixel image of the map region starting at (x0, y0) in map coordinates, each pixel
    * covering sx × sy of the map.
    */
-  paint(img: ImageData, x0: number, y0: number, sx: number, sy: number): void {
+  paint(img: ImageData, x0: number, y0: number, sx: number, sy: number, mask?: ImageData): void {
     const map = this.map;
     const w = map.width;
     const h = map.height;
     const W = img.width;
     const H = img.height;
     const d = img.data;
+    // The mask is opaque over dry land, with a soft edge at the shore, so realm colours stop at the coast.
+    const md = mask?.data;
     const { elev, temp, shadeAt, lakeAt } = this;
     for (let py = 0; py < H; py++) {
       // Sampling coordinates put tile centres on whole numbers.
@@ -111,6 +113,7 @@ export class TerrainShader {
         const o = (py * W + px) * 4;
         if (fx < -0.5 || fy < -0.5 || fx > w - 0.5 || fy > h - 0.5) {
           d[o + 3] = 0;
+          if (md) md[o + 3] = 0;
           continue;
         }
         const e = elev(fx, fy);
@@ -121,10 +124,17 @@ export class TerrainShader {
         let r: number;
         let g: number;
         let b: number;
-        // Lakes take their shape from the lake tiles, with the same ragged edge as the biomes.
-        const lake = lakeAt(fx + (jx - fx) * 0.6, fy + (jy - fy) * 0.6);
+        // Lakes take their shape from the lake tiles, warped at two scales so the shore wanders and frays.
+        const lx = fx + edgeNoise.noise(fx * 0.45 + 17, fy * 0.45) * 0.9 + edgeNoise.noise(fx * 1.6, fy * 1.6 + 5) * 0.15;
+        const ly = fy + edgeNoise.noise(fx * 0.45, fy * 0.45 + 17) * 0.9 + edgeNoise.noise(fx * 1.6 + 5, fy * 1.6) * 0.15;
+        const lake = lakeAt(lx, ly);
+        const sea = e < 0 && (lakeAt(fx, fy) <= 0.02 || e < -0.03);
+        if (md) {
+          md[o] = md[o + 1] = md[o + 2] = 255;
+          md[o + 3] = lake > 0.5 || sea ? 0 : e < 0 ? 255 : 255 * clamp(e / 0.004 + 0.75, 0, 1);
+        }
         if (lake > 0.5) [r, g, b] = BIOMES[Biome.Lake].color;
-        else if (e < 0 && (lakeAt(fx, fy) <= 0.02 || e < -0.03)) {
+        else if (sea) {
           const depth = clamp(-e * 2.2, 0, 1);
           r = SEA_SHALLOW[0] + (SEA_DEEP[0] - SEA_SHALLOW[0]) * depth;
           g = SEA_SHALLOW[1] + (SEA_DEEP[1] - SEA_SHALLOW[1]) * depth;
