@@ -349,6 +349,37 @@ describe('technology', () => {
   });
 });
 
+describe('bands, tribes and peoples', () => {
+  const w = new World(small({ seed: 8, start: 'bands' }));
+  const start = w.bands.length;
+  w.run(150);
+
+  it('begins with wandering bands and no settlements', () => {
+    const fresh = new World(small({ seed: 8, start: 'bands' }));
+    expect(fresh.bands.length).toBeGreaterThan(0);
+    expect([...fresh.aliveSettlements()].length).toBe(0);
+    expect(start).toBe(fresh.bands.length);
+  });
+
+  it('keeps bands on land with living people, under tribes of their own people', () => {
+    for (const b of w.bands) {
+      expect(b.alive).toBe(true);
+      expect(b.pop).toBeGreaterThan(0);
+      expect(Math.abs(Object.values(b.races).reduce((a, n) => a + n, 0) - b.pop)).toBeLessThan(1e-6 * Math.max(1, b.pop) + 1e-6);
+      expect(w.tribes[b.tribeId].cultureId).toBe(b.cultureId);
+      expect(w.map.elevation[b.tile]).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('settles some tribes into nations while nomadic peoples keep wandering', () => {
+    expect([...w.aliveSettlements()].length).toBeGreaterThan(0);
+    const settledTribes = w.tribes.filter((t) => t.polityId >= 0);
+    expect(settledTribes.length).toBeGreaterThan(0);
+    for (const t of settledTribes) expect(w.polities[t.polityId].cultureId >= 0).toBe(true);
+    expect(w.history.some((e) => e.kind === 'tribe')).toBe(true);
+  });
+});
+
 describe('real time', () => {
   it('advances month by month and reaches the same year as whole-year steps', () => {
     const a = new World(small());

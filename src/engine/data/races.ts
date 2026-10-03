@@ -7,6 +7,7 @@ import type { RaceDef } from '../types';
 export const DEFAULT_RACES: RaceDef[] = [
   {
     id: 'human',
+    lifestyle: 'settled',
     name: 'Human',
     plural: 'Humans',
     adjective: 'Human',
@@ -34,6 +35,7 @@ export const DEFAULT_RACES: RaceDef[] = [
   },
   {
     id: 'elf',
+    lifestyle: 'seminomadic',
     name: 'Elf',
     plural: 'Elves',
     adjective: 'Elven',
@@ -64,6 +66,7 @@ export const DEFAULT_RACES: RaceDef[] = [
   },
   {
     id: 'dwarf',
+    lifestyle: 'settled',
     name: 'Dwarf',
     plural: 'Dwarves',
     adjective: 'Dwarven',
@@ -94,6 +97,7 @@ export const DEFAULT_RACES: RaceDef[] = [
   },
   {
     id: 'orc',
+    lifestyle: 'nomadic',
     name: 'Orc',
     plural: 'Orcs',
     adjective: 'Orcish',
@@ -123,6 +127,7 @@ export const DEFAULT_RACES: RaceDef[] = [
   },
   {
     id: 'halfling',
+    lifestyle: 'settled',
     name: 'Halfling',
     plural: 'Halflings',
     adjective: 'Halfling',
@@ -151,6 +156,7 @@ export const DEFAULT_RACES: RaceDef[] = [
   },
   {
     id: 'lizardfolk',
+    lifestyle: 'seminomadic',
     name: 'Lizardfolk',
     plural: 'Lizardfolk',
     adjective: 'Saurian',

@@ -34,6 +34,8 @@ export interface ViewState {
   selectedSettlement: number;
   selectedPolity: number;
   selectedTile: number;
+  /** Band picked on the map (-1 if none). */
+  selectedBand?: number;
 }
 
 interface NationShapes {
@@ -310,6 +312,7 @@ export class MapRenderer {
     this.paintOverlay(view);
     ctx.drawImage(this.overlay, tx(0), ty(0), map.width * z, map.height * z);
     const selected = view.selectedPolity >= 0 && world.polities[view.selectedPolity]?.alive ? view.selectedPolity : -1;
+    const selectedBand = view.selectedBand ?? -1;
 
     const w = map.width;
     const cx = (t: number) => tx((t % w) + 0.5);
@@ -394,6 +397,44 @@ export class MapRenderer {
       this.paintFocus(selected);
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(this.focus, tx(0), ty(0), map.width * z, map.height * z);
+    }
+
+    // Wandering bands: a small tent in their tribe's colour, with a faint trail to their next seasonal ground.
+    for (const b of world.bands) {
+      if (!b.alive) continue;
+      const to = Math.min(b.step, Math.max(0, b.path.length - 1));
+      const [X, Y] = b.path.length > 1 ? along(b.path, Math.min(b.prevStep, to), to) : [cx(b.tile), cy(b.tile)];
+      const tribe = world.tribes[b.tribeId];
+      const mine = selectedBand === b.id;
+      if (selected >= 0 && tribe.polityId !== selected && !mine) ctx.globalAlpha = 0.35;
+      if (b.path.length > 1 && to < b.path.length - 1) {
+        ctx.beginPath();
+        ctx.moveTo(X, Y);
+        for (let k = to + 1; k < b.path.length; k++) ctx.lineTo(cx(b.path[k]), cy(b.path[k]));
+        ctx.strokeStyle = 'rgba(255, 240, 210, 0.45)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([1, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      const r = Math.max(2.5, Math.min(5.5, 1.5 + Math.sqrt(b.pop) * 0.22)) * Math.max(0.8, Math.min(1.5, z / 5));
+      ctx.beginPath();
+      ctx.moveTo(X, Y - r * 1.2);
+      ctx.lineTo(X + r, Y + r * 0.8);
+      ctx.lineTo(X - r, Y + r * 0.8);
+      ctx.closePath();
+      ctx.fillStyle = tribe.color;
+      ctx.fill();
+      ctx.strokeStyle = mine ? '#fff' : b.way === 'herders' ? '#3b2a12' : '#1d2a1d';
+      ctx.lineWidth = mine ? 2.5 : 1.2;
+      ctx.stroke();
+      if (b.way === 'herders') {
+        ctx.beginPath();
+        ctx.arc(X + r * 1.3, Y + r * 0.6, r * 0.35, 0, Math.PI * 2);
+        ctx.fillStyle = '#f3ead2';
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     }
 
     // Columns of settlers: a white figure with a faint trail to the land they mean to settle.

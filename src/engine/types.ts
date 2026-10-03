@@ -72,7 +72,15 @@ export interface RaceDef {
   phonemes: Phonemes;
   /** Optional polity-name templates by government; "{name}" is replaced. */
   titles?: Partial<Record<Government, string>>;
+  /**
+   * How readily this people gives up wandering for a settled life: 'settled' peoples settle as soon
+   * as farming or a rich site makes it pay, 'seminomadic' ones take longer, 'nomadic' ones hardly
+   * ever, unless boxed in by settled lands. Missing = settled.
+   */
+  lifestyle?: Lifestyle;
 }
+
+export type Lifestyle = 'settled' | 'seminomadic' | 'nomadic';
 
 export interface WorldConfig {
   name: string;
@@ -97,6 +105,8 @@ export interface WorldConfig {
   tribesPerHomeland: number;
   /** Minimum distance in tiles between settlements. */
   settlementSpacing: number;
+  /** How peoples begin: as wandering bands of hunters and gatherers, or already settled in villages. */
+  start?: 'bands' | 'settlements';
   races: RaceDef[];
 }
 
@@ -128,6 +138,8 @@ export interface MapData {
    * is only ever used inside the simulation.)
    */
   region: Int32Array;
+  /** How worn the wild land is by bands hunting, gathering and grazing on it, 0..1; it recovers over time. */
+  pressure: Float32Array;
   /** What the owning settlement uses each tile for (LandUse). */
   landUse: Uint8Array;
   /** Emergent road quality from trade traffic, 0..3. */
@@ -196,6 +208,51 @@ export interface Caravan {
   legs: number;
   returning: boolean;
   started: number;
+}
+
+/** A tribe: bands of one people under one chief and council, a nation once it settles. */
+export interface Tribe {
+  id: number;
+  name: string;
+  baseName: string;
+  cultureId: number;
+  color: string;
+  founded: number;
+  /** Year its last band settled or vanished. */
+  dissolved: number | null;
+  /** Nation it founded or joined by settling (-1 while it still only wanders). */
+  polityId: number;
+  /** What its people know, before they have a nation to know it for them. */
+  techs: Set<string>;
+  progress: Map<string, number>;
+  /** Tribe it split from, -1 for the first tribes of a people. */
+  parentId: number;
+}
+
+/** A band: one wandering group of a tribe, following its food through the seasons. */
+export interface Band {
+  id: number;
+  name: string;
+  tribeId: number;
+  cultureId: number;
+  races: Record<string, number>;
+  pop: number;
+  /** Hunting and gathering, or following herds. */
+  way: 'foragers' | 'herders';
+  tile: number;
+  /** Where it is heading (its next seasonal ground), and the path there. */
+  ground: number;
+  path: number[];
+  step: number;
+  prevStep: number;
+  /** Food carried and stored. */
+  food: number;
+  /** Months it went short this year and last. */
+  hungry: number;
+  lastHungry: number;
+  founded: number;
+  lastSplit: number;
+  alive: boolean;
 }
 
 /** A column of settlers on its way to found a new settlement. */
@@ -602,7 +659,8 @@ export type EventKind =
   | 'house'
   | 'nobility'
   | 'diplomacy'
-  | 'defection';
+  | 'defection'
+  | 'tribe';
 
 export interface HistoryEvent {
   year: number;
@@ -629,4 +687,7 @@ export interface YearStats {
   barterTrade: number;
   caravans: number;
   armies: number;
+  /** People living in wandering bands, and how many bands. */
+  wanderers?: number;
+  bands?: number;
 }

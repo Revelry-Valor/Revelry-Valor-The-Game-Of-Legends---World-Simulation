@@ -5,6 +5,7 @@ import { combineTraits } from './data/traits';
 import { NameBook, adjectiveOf, deriveLanguage, mutateLanguage, randomColor } from './names';
 import { Pathfinder } from './pathfinding';
 import { Rng } from './rng';
+import { bandsMonth, bandsYear } from './systems/bands';
 import { caravansMonth, planCaravans } from './systems/caravans';
 import { runCulture } from './systems/culture';
 import { runConsumption, runMonthlyFood, runProduction } from './systems/economy';
@@ -21,8 +22,8 @@ import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
 import { assignMarkets, buildHubLinks, buildMarketLinks, buildTradeLinks, runTrade, runTribute, updateExportPrices } from './systems/trade';
 import type {
-  Army, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
-  NobleHouse, Pact, Settlement, SettlerParty, TradeAgreement, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
+  Army, Band, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
+  NobleHouse, Pact, Settlement, SettlerParty, TradeAgreement, Tribe, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
 } from './types';
 import { VALUE_KEYS } from './types';
 import { generateMap } from './worldgen';
@@ -69,6 +70,9 @@ export class World {
   barterTrade = 0;
   armies: Army[] = [];
   settlers: SettlerParty[] = [];
+  tribes: Tribe[] = [];
+  bands: Band[] = [];
+  nextBandId = 0;
   nextSettlerId = 0;
   agreements: TradeAgreement[] = [];
   nextCaravanId = 0;
@@ -125,6 +129,7 @@ export class World {
    */
   stepMonth(): void {
     runMonthlyFood(this);
+    bandsMonth(this);
     if (this.month === SPRING_MUSTER) raiseArmies(this);
     settlersMonth(this);
     militaryMonth(this);
@@ -164,6 +169,7 @@ export class World {
     runConsumption(this);
     runDevelopment(this);
     runMigration(this);
+    bandsYear(this);
     runCulture(this);
     runPolitics(this);
     runTechnology(this);
@@ -495,6 +501,13 @@ export class World {
       population += s.pop;
       for (const r in s.races) byRace[r] = (byRace[r] ?? 0) + s.races[r];
     }
+    let wanderers = 0;
+    for (const b of this.bands) {
+      if (!b.alive) continue;
+      wanderers += b.pop;
+      for (const r in b.races) byRace[r] = (byRace[r] ?? 0) + b.races[r];
+    }
+    population += wanderers;
     let polities = 0;
     for (const p of this.alivePolities()) {
       polities++;
@@ -507,6 +520,7 @@ export class World {
     this.stats.push({
       year: this.year, population, settlements, polities, cultures, byRace, wars, tradeVolume: this.tradeVolume,
       coinTrade: this.coinTrade, barterTrade: this.barterTrade, caravans: this.caravans.length, armies: this.armies.length,
+      wanderers, bands: this.bands.filter((b) => b.alive).length,
     });
   }
 }

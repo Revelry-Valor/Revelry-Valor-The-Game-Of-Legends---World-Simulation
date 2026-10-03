@@ -38,9 +38,12 @@ export function runCulture(world: World): void {
     if (!a.core || s.pop > a.core.pop) a.core = s;
   }
 
+  // Peoples still wandering in bands are alive even with no settlement to their name.
+  const wandering = new Set(world.bands.filter((b) => b.alive).map((b) => b.cultureId));
   for (const c of world.cultures) {
     if (!c.alive) continue;
     const a = agg[c.id];
+    if (a.n === 0 && wandering.has(c.id)) continue;
     if (a.n === 0) {
       c.alive = false;
       c.extinct = world.year;

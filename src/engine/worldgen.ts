@@ -331,6 +331,7 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     moveCost,
     owner: new Int32Array(size).fill(-1),
     landUse: new Uint8Array(size),
+    pressure: new Float32Array(size),
     region: new Int32Array(size).fill(-1),
     settlementAt: new Int32Array(size).fill(-1),
     road: new Float32Array(size),

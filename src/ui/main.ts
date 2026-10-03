@@ -9,7 +9,7 @@ import { BIOMES } from '../engine/data/biomes';
 import { GOOD_NAMES, JOBS, RES_COUNT, RES_NAMES, Res, SECTOR_KEYS } from '../engine/data/economy';
 import { DEFAULT_RACES } from '../engine/data/races';
 import { ERA_NAMES, TECHS, TECH_BY_ID } from '../engine/data/techs';
-import type { EventKind, HistoryEvent, RaceDef, Settlement, WorldConfig } from '../engine/types';
+import type { Band, EventKind, HistoryEvent, RaceDef, Settlement, WorldConfig } from '../engine/types';
 import { VALUE_KEYS } from '../engine/types';
 import { World } from '../engine/world';
 import { lineChart, compact } from './chart';
@@ -193,6 +193,19 @@ function pick(e: PointerEvent): void {
       best = s.id;
     }
   }
+  // A wandering band under the pointer, if no settlement is closer.
+  let band = -1;
+  for (const b of world.bands) {
+    if (!b.alive) continue;
+    const t = b.path.length > 1 ? b.path[Math.min(b.step, b.path.length - 1)] : b.tile;
+    const d = Math.hypot((t % world.map.width) + 0.5 - wx, Math.floor(t / world.map.width) + 0.5 - wy);
+    if (d < bd) {
+      bd = d;
+      band = b.id;
+      best = -1;
+    }
+  }
+  view.selectedBand = band;
   const tx = Math.floor(wx);
   const ty = Math.floor(wy);
   view.selectedTile = tx >= 0 && ty >= 0 && tx < world.map.width && ty < world.map.height ? ty * world.map.width + tx : -1;
@@ -514,10 +527,47 @@ function eventList(events: HistoryEvent[], limit: number): string {
 
 function renderInspect(): string {
   if (selectedCulture >= 0) return renderCulture(selectedCulture);
+  if ((view.selectedBand ?? -1) >= 0) {
+    const b = world.bands.find((x) => x.id === view.selectedBand && x.alive);
+    if (b) return renderBand(b);
+  }
   if (view.selectedSettlement >= 0) return renderSettlement(view.selectedSettlement);
   if (view.selectedPolity >= 0) return renderPolity(view.selectedPolity) + (view.selectedTile >= 0 ? renderTile(view.selectedTile) : '');
   if (view.selectedTile >= 0) return renderTile(view.selectedTile);
   return `<div class="empty"><h2>Nothing selected</h2><p>Click a settlement or any stretch of land on the map to inspect it. Settlements marked with a diamond are capitals.</p><p>Press <b>Play</b> or add years to watch peoples spread, trade, invent and wage war.</p></div>`;
+}
+
+/** A wandering band: its tribe and people, its way of life, its seasonal round and how it is faring. */
+function renderBand(b: Band): string {
+  const tribe = world.tribes[b.tribeId];
+  const culture = world.cultures[b.cultureId];
+  const race = Object.entries(b.races).sort((x, y) => y[1] - x[1])[0]?.[0] ?? '';
+  const kin = world.bands.filter((x) => x.alive && x.tribeId === tribe.id);
+  const moving = b.step < b.path.length - 1;
+  const need = b.pop * (world.raceById.get(race)?.foodNeed ?? 1);
+  const months = need > 0 ? (b.food / need) * 12 : 0;
+  const parent = tribe.parentId >= 0 ? world.tribes[tribe.parentId] : null;
+  const know = [...tribe.techs].map((t) => TECH_BY_ID.get(t)?.name ?? t);
+  return `
+    <header class="head">
+      <p class="eyebrow">Wandering band · ${b.way === 'herders' ? 'herders' : 'hunters and gatherers'}</p>
+      <h2><span class="dot big" style="background:${tribe.color}"></span>${esc(b.name.charAt(0).toUpperCase() + b.name.slice(1))}</h2>
+      <p class="sub">Of the ${esc(tribe.name)} tribe · ${cLink(b.cultureId)} people · ${esc(world.raceById.get(race)?.plural ?? race)}</p>
+    </header>
+    <dl class="facts">
+      <div><dt>People</dt><dd>${fmt(b.pop)}</dd></div>
+      <div><dt>Since</dt><dd>Year ${b.founded}</dd></div>
+      <div><dt>Food carried</dt><dd>${months >= 1 ? `${months.toFixed(1)} months` : 'barely any'}</dd></div>
+      <div><dt>Lean months</dt><dd>${b.lastHungry} last year</dd></div>
+    </dl>
+    <section><h3>The seasonal round</h3>
+      <p class="small">${moving ? `On the move to its ${world.season === 'autumn' || world.season === 'winter' ? 'winter' : 'summer'} grounds, ${b.path.length - 1 - b.step} tiles away.` : `Camped on its ${world.season === 'autumn' || world.season === 'winter' ? 'winter' : 'summer'} grounds, ${b.way === 'herders' ? 'grazing its herds' : 'hunting and gathering'} on the wild land around.`} Bands move to summer grounds in spring and to sheltered winter grounds in autumn, and move on early when the land runs thin.</p>
+    </section>
+    <section><h3>The ${esc(tribe.name)}</h3>
+      <p class="small">${kin.length} band${kin.length === 1 ? '' : 's'}, ${fmt(kin.reduce((n, x) => n + x.pop, 0))} people${parent ? `; broke away from the ${esc(parent.name)} in year ${tribe.founded}` : `; one of the first tribes of the ${esc(culture.name)}`}.${tribe.polityId >= 0 ? ` Some of its people have settled: ${pLink(tribe.polityId)}.` : ''}</p>
+      <p class="small"><span class="k">Knows</span> ${know.length ? esc(know.join(', ')) : 'only the old ways'}</p>
+      <p class="small muted">${esc(world.raceById.get(race)?.plural ?? '')} are ${world.raceById.get(race)?.lifestyle === 'nomadic' ? 'a nomadic people who seldom settle' : world.raceById.get(race)?.lifestyle === 'seminomadic' ? 'slow to settle' : 'quick to settle once farming or a rich site makes it pay'}.</p>
+    </section>`;
 }
 
 function renderSettlement(id: number): string {
@@ -799,12 +849,17 @@ function renderPeoples(): string {
     <header class="head"><h2>Peoples</h2><p class="sub">Races are fixed; cultures are born, drift apart and fade.</p></header>
     <section><h3>Races</h3>${world.races.map((r) => `<div class="race"><span class="dot" style="background:${r.color}"></span><b>${esc(r.plural)}</b><span class="num">${fmt(st.byRace[r.id] ?? 0)}</span><p class="muted small">${esc(r.description)}</p></div>`).join('')}</section>
     <section><h3>Living cultures</h3><div class="table-wrap"><table>
-      <thead><tr><th>Culture</th><th class="num">People</th><th class="num">Towns</th></tr></thead>
-      <tbody>${cultures.map(({ c, pop, n }) => `<tr><td><span class="dot" style="background:${c.color}"></span>${cLink(c.id)}<div class="muted small">${esc(world.raceById.get(c.raceId)?.plural ?? '')}${c.parentId >= 0 ? ` · from ${esc(world.cultures[c.parentId].name)}` : ''}</div></td><td class="num">${compact(pop)}</td><td class="num">${n}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>Culture</th><th class="num">Settled</th><th class="num">Towns</th><th class="num">Wandering</th></tr></thead>
+      <tbody>${cultures.map(({ c, pop, n }) => {
+        const bands = world.bands.filter((b) => b.alive && b.cultureId === c.id);
+        const tribes = new Set(bands.map((b) => b.tribeId)).size;
+        const wander = bands.reduce((a, b) => a + b.pop, 0);
+        return `<tr><td><span class="dot" style="background:${c.color}"></span>${cLink(c.id)}<div class="muted small">${esc(world.raceById.get(c.raceId)?.plural ?? '')}${c.parentId >= 0 ? ` · from ${esc(world.cultures[c.parentId].name)}` : ''}</div></td><td class="num">${compact(pop)}</td><td class="num">${n}</td><td class="num">${bands.length ? `${compact(wander)}<div class="muted small">${tribes} tribe${tribes === 1 ? '' : 's'}, ${bands.length} band${bands.length === 1 ? '' : 's'}</div>` : '—'}</td></tr>`;
+      }).join('')}</tbody>
     </table></div></section>`;
 }
 
-const KINDS: EventKind[] = ['war', 'conquest', 'peace', 'rebellion', 'union', 'nobility', 'diplomacy', 'defection', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'army', 'agreement', 'caravan', 'house', 'road'];
+const KINDS: EventKind[] = ['tribe', 'war', 'conquest', 'peace', 'rebellion', 'union', 'nobility', 'diplomacy', 'defection', 'polity', 'government', 'ruler', 'technology', 'culture', 'founding', 'abandonment', 'migration', 'plague', 'famine', 'disaster', 'monster', 'wonder', 'milestone', 'battle', 'army', 'agreement', 'caravan', 'house', 'road'];
 
 function renderChronicleShell(): string {
   return `
@@ -900,6 +955,7 @@ function renderSetup(): string {
         <button type="button" id="s-reroll">New seed</button>
       </div>
       <label class="field" for="s-size"><span>Map size</span><select id="s-size">${Object.entries(MAP_SIZES).map(([k, [w, h]]) => `<option value="${k}" ${k === sizeKey ? 'selected' : ''}>${k} (${w}×${h})</option>`).join('')}</select></label>
+      <label class="field" for="s-start"><span>Peoples begin as</span><select id="s-start"><option value="bands" ${cfg.start !== 'settlements' ? 'selected' : ''}>Wandering bands of hunters and gatherers</option><option value="settlements" ${cfg.start === 'settlements' ? 'selected' : ''}>Settled villages</option></select><small>Bands follow their food through the seasons, split into new tribes, and settle down when farming or the land makes it pay (each race's lifestyle decides how readily).</small></label>
       ${num('s-land', 'Land', cfg.landFraction, 0.2, 0.75, 0.01, 'Share of the map above sea level.')}
       ${num('s-temp', 'Temperature', cfg.temperature, -0.3, 0.3, 0.02, 'Negative for an ice age, positive for a hothouse.')}
       ${num('s-moist', 'Rainfall', cfg.moisture, -0.3, 0.3, 0.02, 'Drier worlds have more desert and steppe.')}
@@ -956,6 +1012,7 @@ function wireSetup(): void {
       magic: v('s-magic'),
       calamity: v('s-cal'),
       settlementSpacing: v('s-space'),
+      start: $<HTMLSelectElement>('s-start').value === 'settlements' ? 'settlements' : 'bands',
       homelandsPerRace: Math.max(1, Math.min(4, Math.floor(v('s-home')))),
       tribesPerHomeland: Math.max(1, Math.min(8, Math.floor(v('s-tribes')))),
       races: races.map((r) => ({ ...DEFAULT_RACES[0], ...r })),

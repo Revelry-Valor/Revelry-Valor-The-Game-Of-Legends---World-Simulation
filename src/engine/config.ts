@@ -23,6 +23,7 @@ export function defaultConfig(overrides: Partial<WorldConfig> = {}): WorldConfig
     homelandsPerRace: 1,
     tribesPerHomeland: 3,
     settlementSpacing: 4,
+    start: 'bands',
     races: structuredClone(DEFAULT_RACES),
     ...overrides,
   };
