@@ -137,6 +137,9 @@ export interface MapData {
   seaAnomaly: Float32Array;
   biome: Uint8Array;
   relief: Uint8Array;
+  /** Clan (tribe id) whose hunting grounds each tile is, -1 if unclaimed; and the year a tribe of that clan last used it. */
+  claim: Int32Array;
+  claimSeen: Float32Array;
   /** Accumulated river discharge (0 when no river). */
   river: Float32Array;
   landmass: Int32Array;
@@ -244,6 +247,11 @@ export interface Tribe {
   progress: Map<string, number>;
   /** Tribe it split from, -1 for the first tribes of a people. */
   parentId: number;
+  /** Clans it has fought over land, with the year of the last fight. */
+  feuds: Record<number, number>;
+  /** Fights over hunting grounds won and lost. */
+  wins: number;
+  losses: number;
 }
 
 /** A band: one wandering group of a tribe, following its food through the seasons. */
@@ -270,6 +278,12 @@ export interface Band {
   founded: number;
   lastSplit: number;
   alive: boolean;
+  /** Centre of the home range it has made its own (-1 while it is still searching for good land). */
+  home: number;
+  /** Years spent searching for a home range. */
+  searching: number;
+  /** Year it made its home range. */
+  homeSince: number;
 }
 
 /** A column of settlers on its way to found a new settlement. */

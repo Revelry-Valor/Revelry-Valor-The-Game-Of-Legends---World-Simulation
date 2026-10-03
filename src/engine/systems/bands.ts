@@ -22,6 +22,25 @@ const MAX_BANDS = 500;
 const AUTUMN_MOVE = 8;
 const HERD_LAND = new Set(['grassland', 'steppe', 'savanna', 'tundra']);
 const SETTLE: Record<Lifestyle, number> = { settled: 1, seminomadic: 0.35, nomadic: 0.04 };
+/** Reach of a tribe's home range around its centre. */
+const HOME_R = 5;
+/** Most new tiles of land a tribe claims in a year. */
+const CLAIM_RATE = 6;
+/** Years a clan's claim lasts once none of its tribes use the land. */
+const CLAIM_KEEP = 12;
+/** Food a tribe wants its home range to be able to give, against what it needs. */
+const RANGE_WANT = 1.6;
+/** Years a tribe roams, getting to know the land, before it settles on a home range. */
+const SCOUT_YEARS = 3;
+/** Years a tribe holds its home range before it will fight to take more. */
+const HOLD_YEARS = 4;
+/** Land good enough that a searching tribe stops and makes it home. */
+const HOME_GOOD = 1.4;
+/**
+ * Share of what wild land holds that can be taken year after year without hunting it out: why
+ * hunters and gatherers need so much more land than farmers.
+ */
+const SUSTAIN = 0.12;
 
 const raceOf = (world: World, b: Band) => {
   let best = '';
@@ -42,7 +61,7 @@ const needOf = (world: World, b: Band) => {
 const isWater = (world: World, t: number) => BIOMES[world.map.biome[t]].water;
 
 /** What a tile of wild land gives a band in a year: game and wild plants, grazing for herds, fish from the water. Land a settlement works is not wild. */
-function wildYield(world: World, b: Band, t: number): number {
+function wildYield(world: World, b: Band, t: number, potential = false): number {
   const map = world.map;
   if (map.owner[t] >= 0 || map.biome[t] === Biome.DeepOcean || map.biome[t] === Biome.Ice) return 0;
   const R = map.resources;
@@ -53,7 +72,23 @@ function wildYield(world: World, b: Band, t: number): number {
     const habitat = raceOf(world, b).habitat?.[BIOMES[map.biome[t]].key] ?? 0;
     y = R[Res.Game][t] * 30 + R[Res.Fertility][t] * 12 + habitat * 35 + R[Res.Fish][t] * 15;
   }
-  return y * WILD_SCALE * (1 - map.pressure[t]);
+  return y * WILD_SCALE * (potential ? 1 : 1 - map.pressure[t]);
+}
+
+/** Can a clan claim this tile as hunting ground: wild land (or fishing water) not worked by settled folk. */
+function claimable(world: World, b: Band, t: number, home: number): boolean {
+  const map = world.map;
+  if (map.owner[t] >= 0 || map.biome[t] === Biome.DeepOcean || map.biome[t] === Biome.Ice) return false;
+  return isWater(world, t) || map.landmass[t] === map.landmass[home];
+}
+
+/** What the land a clan holds around a tribe's home could give it in a year (with the game left to recover). */
+function homeYield(world: World, b: Band, home: number): number {
+  let sum = 0;
+  around(world, home, HOME_R, (t) => {
+    if (world.map.claim[t] === b.tribeId && claimable(world, b, t, home)) sum += wildYield(world, b, t, true) * SUSTAIN;
+  });
+  return sum;
 }
 
 function around(world: World, tile: number, r: number, fn: (t: number, d: number) => void): void {
@@ -87,6 +122,17 @@ function realmOf(world: World, t: number): number {
 }
 
 /**
+ * How welcome a camp ground is to a tribe by who claims it: its own clan's land is home, another
+ * clan's is trespass (and risks a fight), open land is for those still searching.
+ */
+function groundClaim(world: World, b: Band, t: number, homed: boolean): number {
+  const c = world.map.claim[t];
+  if (c === b.tribeId) return homed ? 1.25 : 1.1;
+  if (c >= 0) return b.lastHungry >= 3 ? 0.45 : 0.15;
+  return homed ? 0.6 : 1;
+}
+
+/**
  * Choose where to go next: in spring the best summer grounds within reach, in autumn sheltered
  * winter grounds (woods, river valleys, lower ground), when hungry anywhere with food. Bands keep
  * clear of one another and of settled lands, and a splinter band strikes out further.
@@ -96,12 +142,15 @@ function chooseGround(world: World, b: Band, winter: boolean, far = false): void
   const map = world.map;
   const w = map.width;
   const tribe = world.tribes[b.tribeId];
-  const reach = far ? SEARCH + 8 : SEARCH;
+  // A tribe with a home range keeps its seasonal round inside it; one still searching ranges widely.
+  const homed = b.home >= 0 && !far;
+  const centre = homed ? b.home : b.tile;
+  const reach = homed ? HOME_R : far ? SEARCH + 8 : SEARCH;
   let best = b.tile;
-  let bs = rangeYield(world, b, b.tile, 1) * (far ? 0 : 0.8);
+  let bs = rangeYield(world, b, b.tile, 1) * (far ? 0 : 0.8) * groundClaim(world, b, b.tile, homed);
   for (let a = 0; a < 40; a++) {
-    const x = (b.tile % w) + rng.int(-reach, reach);
-    const y = Math.floor(b.tile / w) + rng.int(-reach, reach);
+    const x = (centre % w) + rng.int(-reach, reach);
+    const y = Math.floor(centre / w) + rng.int(-reach, reach);
     if (x < 0 || y < 0 || x >= w || y >= map.height) continue;
     const t = y * w + x;
     if (isWater(world, t) || map.landmass[t] !== map.landmass[b.tile] || map.biome[t] === Biome.Ice || map.owner[t] >= 0) continue;
@@ -115,6 +164,7 @@ function chooseGround(world: World, b: Band, winter: boolean, far = false): void
     }
     const realm = realmOf(world, t);
     if (realm >= 0 && realm !== tribe.polityId) score *= 0.35;
+    score *= groundClaim(world, b, t, homed);
     let crowd = 0;
     for (const o of world.bands) if (o.alive && o !== b && Math.abs((o.ground % w) - x) <= 3 && Math.abs(Math.floor(o.ground / w) - y) <= 3) crowd++;
     score /= 1 + crowd * 1.5;
@@ -200,7 +250,7 @@ function newTribe(world: World, cultureId: number, parentId: number, near: numbe
   const parent = parentId >= 0 ? world.tribes[parentId] : null;
   const t: Tribe = {
     id: world.tribes.length, name: baseName, baseName, cultureId, color: randomColor(world.rng), founded: world.year, dissolved: null,
-    polityId: -1, techs: new Set(parent?.techs ?? []), progress: new Map(), parentId,
+    polityId: -1, techs: new Set(parent?.techs ?? []), progress: new Map(), parentId, feuds: {}, wins: 0, losses: 0,
   };
   world.tribes.push(t);
   return t;
@@ -209,9 +259,9 @@ function newTribe(world: World, cultureId: number, parentId: number, near: numbe
 export function createBand(world: World, tribe: Tribe, tile: number, races: Record<string, number>): Band {
   const pop = Object.values(races).reduce((a, n) => a + n, 0);
   const b: Band = {
-    id: world.nextBandId++, name: `the ${world.names.person(world.rng, world.cultures[tribe.cultureId].language)} clan`, tribeId: tribe.id,
+    id: world.nextBandId++, name: `the ${world.names.person(world.rng, world.cultures[tribe.cultureId].language)} tribe`, tribeId: tribe.id,
     cultureId: tribe.cultureId, races: { ...races }, pop, way: 'foragers', tile, ground: tile, path: [], step: 0, prevStep: 0,
-    food: pop * 0.25, hungry: 0, lastHungry: 0, founded: world.year, lastSplit: world.year, alive: true,
+    food: pop * 0.25, hungry: 0, lastHungry: 0, founded: world.year, lastSplit: world.year, alive: true, home: -1, searching: 0, homeSince: 0,
   };
   world.bands.push(b);
   return b;
@@ -269,7 +319,7 @@ function tribeLearning(world: World, tribe: Tribe, bands: Band[]): void {
     tribe.techs.add(tech.id);
     if (!world.firstTech.has(tech.id)) {
       world.firstTech.set(tech.id, -1);
-      world.log('technology', 2, `The wandering ${tribe.name} were the first to master ${tech.name}: ${tech.description}`, { cultures: [tribe.cultureId] });
+      world.log('technology', 2, `The wandering ${tribe.name} clan were the first to master ${tech.name}: ${tech.description}`, { cultures: [tribe.cultureId] });
     }
   }
 }
@@ -313,7 +363,7 @@ function settle(world: World, b: Band, tribe: Tribe): boolean {
   b.alive = false;
   if (holder >= 0) {
     world.polities[holder].settlementIds.push(s.id);
-    world.log('founding', 1, `${cap(b.name)} of the ${tribe.name} settled down and founded ${s.name}.`, { settlements: [s.id], polities: [holder] });
+    world.log('founding', 1, `${cap(b.name)} of the ${tribe.name} clan settled down and founded ${s.name}.`, { settlements: [s.id], polities: [holder] });
     return true;
   }
   const p = world.createPolity(b.cultureId, s, -1, tribe.techs);
@@ -322,7 +372,7 @@ function settle(world: World, b: Band, tribe: Tribe): boolean {
   p.color = tribe.color;
   p.name = world.polityName(p);
   tribe.polityId = p.id;
-  world.log('tribe', 2, `The ${tribe.name} gave up the wandering life: ${b.name} settled at ${s.name}, and the ${p.name} was born.`, { settlements: [s.id], polities: [p.id], cultures: [b.cultureId] });
+  world.log('tribe', 2, `The ${tribe.name} clan gave up the wandering life: ${b.name} settled at ${s.name}, and the ${p.name} was born.`, { settlements: [s.id], polities: [p.id], cultures: [b.cultureId] });
   return true;
 }
 
@@ -357,6 +407,7 @@ export function bandsYear(world: World): void {
     byTribe.set(b.tribeId, list);
   }
   for (const [tid, bands] of byTribe) tribeLearning(world, world.tribes[tid], bands);
+  clanLands(world);
   let alive = [...byTribe.values()].reduce((n, l) => n + l.length, 0);
 
   for (const b of [...world.bands]) {
@@ -378,7 +429,7 @@ export function bandsYear(world: World): void {
         b.food += q;
         killPop(s, Math.min(s.pop * 0.01, b.pop * 0.05));
         s.stability -= 0.04;
-        if (s.pop > 400) world.log('tribe', s.pop > 3000 ? 2 : 1, `Hungry raiders of the ${tribe.name} fell on ${s.name} and carried off its stores.`, { settlements: [s.id], polities: [s.polityId], cultures: [b.cultureId] });
+        if (s.pop > 400) world.log('tribe', s.pop > 3000 ? 2 : 1, `Hungry raiders of the ${tribe.name} clan fell on ${s.name} and carried off its stores.`, { settlements: [s.id], polities: [s.polityId], cultures: [b.cultureId] });
       } else if (rng.chance(0.4)) {
         // Meat, hides and horses for grain and tools.
         s.wealth += b.pop * 0.05;
@@ -387,7 +438,7 @@ export function bandsYear(world: World): void {
         const k = `trade:${tribe.id}:${s.polityId}`;
         if (!world.flags.has(k)) {
           world.flags.add(k);
-          world.log('tribe', 1, `The ${tribe.name} began to trade ${b.way === 'herders' ? 'horses, hides and wool' : 'meat and hides'} at ${s.name} for grain and tools.`, { settlements: [s.id], polities: [s.polityId], cultures: [b.cultureId] });
+          world.log('tribe', 1, `The ${tribe.name} clan began to trade ${b.way === 'herders' ? 'horses, hides and wool' : 'meat and hides'} at ${s.name} for grain and tools.`, { settlements: [s.id], polities: [s.polityId], cultures: [b.cultureId] });
         }
       }
       // A small band in a great nation's lands may simply settle among them.
@@ -397,7 +448,7 @@ export function bandsYear(world: World): void {
         s.pop += b.pop;
         b.alive = false;
         alive--;
-        if (b.pop > 50) world.log('tribe', 1, `${cap(b.name)} of the ${tribe.name} gave up wandering and settled among the people of ${s.name}.`, { settlements: [s.id], polities: [s.polityId], cultures: [b.cultureId] });
+        if (b.pop > 50) world.log('tribe', 1, `${cap(b.name)} of the ${tribe.name} clan gave up wandering and settled among the people of ${s.name}.`, { settlements: [s.id], polities: [s.polityId], cultures: [b.cultureId] });
         continue;
       }
     }
@@ -438,7 +489,8 @@ export function bandsYear(world: World): void {
       b.pop *= 1 - share;
       b.lastSplit = world.year;
       const siblings = byTribe.get(b.tribeId)?.filter((x) => x.alive).length ?? 1;
-      const breakAway = siblings >= 4 && rng.chance(0.35);
+      // Most splits stay in the clan and go looking for new land to claim at its edge; in a large clan, some go their own way.
+      const breakAway = siblings >= 6 && rng.chance(0.2);
       const home = breakAway ? newTribe(world, b.cultureId, tribe.id, b.tile) : tribe;
       const nb = createBand(world, home, b.tile, races);
       nb.food = b.food * share;
@@ -446,7 +498,7 @@ export function bandsYear(world: World): void {
       nb.way = b.way;
       chooseGround(world, nb, world.season === 'winter', true);
       alive++;
-      if (breakAway) world.log('tribe', 2, `Some of the ${tribe.name} broke away under a chief of their own and went their own way as the ${home.name}.`, { cultures: [b.cultureId] });
+      if (breakAway) world.log('tribe', 2, `Some of the ${tribe.name} clan broke away under a chief of their own and went their own way as the ${home.name} clan.`, { cultures: [b.cultureId] });
     }
 
     // Dwindling bands join their kin or are lost.
@@ -464,4 +516,185 @@ export function bandsYear(world: World): void {
   // Tribes with no bands left live on only in the nations they founded.
   const live = new Set(world.bands.map((b) => b.tribeId));
   for (const t of world.tribes) if (t.dissolved === null && !live.has(t.id)) t.dissolved = world.year;
+}
+
+/** Tribes of a clan within reach of a spot, and the fighters they can muster there. */
+function fightersNear(world: World, clan: number, tile: number, r: number): { bands: Band[]; strength: number } {
+  const w = world.map.width;
+  const x = tile % w;
+  const y = (tile - x) / w;
+  const bands: Band[] = [];
+  let strength = 0;
+  for (const o of world.bands) {
+    if (!o.alive || o.tribeId !== clan) continue;
+    const at = o.home >= 0 ? o.home : o.tile;
+    if (Math.max(Math.abs((at % w) - x), Math.abs(Math.floor(at / w) - y)) > r) continue;
+    bands.push(o);
+    const culture = world.cultures[o.cultureId];
+    // About one in four is a fighting man or woman; warlike peoples fight harder.
+    strength += o.pop * 0.25 * (0.8 + culture.values.militarism * 0.5);
+  }
+  return { bands, strength };
+}
+
+function losses(world: World, bands: Band[], share: number): number {
+  let dead = 0;
+  for (const o of bands) {
+    const k = Math.min(0.5, share * world.rng.range(0.6, 1.4));
+    for (const r in o.races) o.races[r] *= 1 - k;
+    dead += o.pop * k;
+    o.pop *= 1 - k;
+  }
+  return dead;
+}
+
+const placeOf = (world: World, t: number) => {
+  if (isWater(world, t)) return world.map.biome[t] === Biome.Lake ? 'the lakeshore' : 'the coast';
+  const key = BIOMES[world.map.biome[t]].name.toLowerCase();
+  return world.map.river[t] > 0 ? `the ${key} by the river` : `the ${key}`;
+};
+
+/**
+ * Clans and their hunting grounds, once a year. A tribe still searching settles on a home range
+ * once it finds land rich enough in game and wild food (or after years of looking). Around its
+ * home it claims land for its clan, a few tiles a year, until the clan's land there can feed it
+ * with room to spare. When it can't grow any more because a neighbouring clan holds the land, it
+ * may take it by force: the tribes of both clans close by gather, and the stronger side (with
+ * luck, and an edge to those defending their own ground) wins. Winners take the hunting grounds;
+ * the losers' tribes nearby are driven out to find land elsewhere. Land no tribe of the clan has
+ * used for years falls out of its hands.
+ */
+function clanLands(world: World): void {
+  const map = world.map;
+  const rng = world.rng;
+  const year = world.year;
+  for (const b of world.bands) {
+    if (!b.alive) continue;
+    const tribe = world.tribes[b.tribeId];
+    const need = needOf(world, b);
+    if (b.home < 0) {
+      b.searching++;
+      const g = b.step < b.path.length - 1 ? b.tile : b.ground;
+      // How rich is the open land (and the clan's own) around where it is camped?
+      let open = 0;
+      around(world, g, HOME_R, (t) => {
+        const c = map.claim[t];
+        if ((c < 0 || c === b.tribeId) && claimable(world, b, t, g)) open += wildYield(world, b, t, true) * SUSTAIN;
+      });
+      if (b.searching >= SCOUT_YEARS && (open >= need * RANGE_WANT * HOME_GOOD || (b.searching >= SCOUT_YEARS + 4 && open >= need * 0.9))) {
+        b.home = g;
+        b.searching = 0;
+        b.homeSince = year;
+        const first = !world.bands.some((o) => o !== b && o.alive && o.tribeId === b.tribeId && o.home >= 0);
+        if (first) world.log('tribe', 1, `The ${tribe.name} clan made ${placeOf(world, g)} their hunting grounds.`, { cultures: [b.cultureId] });
+      } else continue;
+    }
+    // Using the land keeps the claim alive.
+    around(world, b.home, HOME_R, (t) => {
+      if (map.claim[t] === b.tribeId) map.claimSeen[t] = year;
+    });
+    const want = need * RANGE_WANT;
+    let have = homeYield(world, b, b.home);
+    if (have >= want) continue;
+    // Claim the best open land around home, nearest first.
+    const options: [number, number][] = [];
+    const hx = b.home % map.width;
+    const hy = (b.home - hx) / map.width;
+    around(world, b.home, HOME_R, (t) => {
+      if (map.claim[t] >= 0 || !claimable(world, b, t, b.home)) return;
+      const d = Math.hypot((t % map.width) - hx, Math.floor(t / map.width) - hy);
+      if (d > HOME_R + 0.5) return;
+      options.push([t, wildYield(world, b, t, true) / (1 + d * 0.3)]);
+    });
+    options.sort((a, c) => c[1] - a[1]);
+    for (let k = 0; k < options.length && k < CLAIM_RATE && have < want; k++) {
+      const t = options[k][0];
+      map.claim[t] = b.tribeId;
+      map.claimSeen[t] = year;
+      have += wildYield(world, b, t, true) * SUSTAIN;
+    }
+    if (have >= want * 0.85 || year - b.homeSince < HOLD_YEARS) continue;
+    // Not enough land and none left open: the neighbours' grounds.
+    const rivals = new Map<number, number>();
+    around(world, b.home, HOME_R, (t) => {
+      const c = map.claim[t];
+      if (c >= 0 && c !== b.tribeId) rivals.set(c, (rivals.get(c) ?? 0) + wildYield(world, b, t, true));
+    });
+    if (!rivals.size) continue;
+    const enemy = [...rivals.entries()].sort((a, c) => c[1] - a[1])[0][0];
+    const foe = world.tribes[enemy];
+    const culture = world.cultures[b.cultureId];
+    const feud = tribe.feuds[enemy] !== undefined && year - tribe.feuds[enemy] < 30;
+    const short = 1 - have / want;
+    const p = (0.12 + culture.values.militarism * 0.35 + (b.lastHungry >= 2 ? 0.2 : 0) + (feud ? 0.2 : 0)) * Math.min(1, short * 1.5);
+    if (!rng.chance(p)) continue;
+    clanFight(world, b, tribe, foe);
+  }
+  // Claims lapse on land the clan no longer uses, and on land the settled have put to work.
+  for (let t = 0; t < map.size; t++) {
+    const c = map.claim[t];
+    if (c < 0) continue;
+    if (map.owner[t] >= 0 || year - map.claimSeen[t] > CLAIM_KEEP) map.claim[t] = -1;
+  }
+}
+
+/** A fight between two clans over the hunting grounds around a tribe's home. */
+function clanFight(world: World, b: Band, tribe: Tribe, foe: Tribe): void {
+  const map = world.map;
+  const rng = world.rng;
+  const at = b.home;
+  const us = fightersNear(world, tribe.id, at, HOME_R * 2);
+  const them = fightersNear(world, foe.id, at, HOME_R * 2);
+  tribe.feuds[foe.id] = world.year;
+  foe.feuds[tribe.id] = world.year;
+  const take = (winner: Tribe, loser: Tribe, r: number) => {
+    let n = 0;
+    around(world, at, r, (t) => {
+      if (map.claim[t] !== loser.id) return;
+      map.claim[t] = winner.id;
+      map.claimSeen[t] = world.year;
+      n++;
+    });
+    return n;
+  };
+  const drive = (bands: Band[]) => {
+    for (const o of bands) {
+      o.home = -1;
+      o.searching = 0;
+      chooseGround(world, o, world.season === 'winter', true);
+    }
+  };
+  const where = placeOf(world, at);
+  if (them.strength <= 0) {
+    // Nobody there to hold it.
+    const n = take(tribe, foe, HOME_R);
+    if (n >= 6) world.log('tribe', 1, `The ${tribe.name} clan moved into the unguarded hunting grounds of the ${foe.name} clan in ${where}.`, { cultures: [tribe.cultureId, foe.cultureId] });
+    return;
+  }
+  const attack = us.strength * rng.range(0.7, 1.3);
+  const defend = them.strength * rng.range(0.7, 1.3) * 1.15;
+  const size = us.strength + them.strength;
+  const big = size > 120 ? 2 : 1;
+  if (attack > defend) {
+    const deadThem = losses(world, them.bands, 0.08 + 0.1 * Math.min(1, attack / defend - 1));
+    const deadUs = losses(world, us.bands, 0.04);
+    take(tribe, foe, HOME_R);
+    // Their tribes whose homes lay in the lost land are driven out to look for new hunting grounds.
+    const w = map.width;
+    const ax = at % w;
+    const ay = (at - ax) / w;
+    drive(them.bands.filter((o) => o.home >= 0 && Math.max(Math.abs((o.home % w) - ax), Math.abs(Math.floor(o.home / w) - ay)) <= HOME_R + 2));
+    tribe.wins++;
+    foe.losses++;
+    world.log('tribe', big, `The ${tribe.name} clan fought the ${foe.name} clan for the hunting grounds in ${where} and drove them out (${Math.round(deadThem)} of the ${foe.name} and ${Math.round(deadUs)} of the ${tribe.name} fell).`, { cultures: [tribe.cultureId, foe.cultureId] });
+  } else {
+    const deadUs = losses(world, us.bands, 0.08 + 0.1 * Math.min(1, defend / Math.max(1, attack) - 1));
+    const deadThem = losses(world, them.bands, 0.04);
+    // The defenders push back into the attackers' nearest land, and the attacking tribe must look elsewhere.
+    take(foe, tribe, 2);
+    drive([b]);
+    foe.wins++;
+    tribe.losses++;
+    world.log('tribe', big, `The ${foe.name} clan held their hunting grounds in ${where} against the ${tribe.name} clan and threw them back (${Math.round(deadUs)} of the ${tribe.name} and ${Math.round(deadThem)} of the ${foe.name} fell).`, { cultures: [tribe.cultureId, foe.cultureId] });
+  }
 }

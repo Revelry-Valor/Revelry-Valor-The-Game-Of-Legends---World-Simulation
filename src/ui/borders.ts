@@ -155,7 +155,9 @@ export function traceRegions(labels: Int32Array, w: number, h: number, smoothing
       if (fixed || x === 0 || y === 0 || x === w || y === h) return [x, y] as Point;
       return [x + (hash01(v, 7) - 0.5) * 0.5, y + (hash01(v, 8) - 0.5) * 0.5] as Point;
     });
-    return { a: c.a, b: c.b, pts: c.closed ? chaikinLoop(pts.slice(0, -1), smoothing) : chaikin(pts, smoothing) };
+    // Straighten the little steps of the grid first, then round off what is left.
+    const simple = simplify(pts, 0.7);
+    return { a: c.a, b: c.b, pts: c.closed ? chaikinLoop(simple.slice(0, -1), smoothing) : chaikin(simple, smoothing) };
   });
 
   // Each region's outlines from the stretches around it, walked with the region on the left.
@@ -202,6 +204,54 @@ function pushList<T>(m: Map<number, T[]>, k: number, v: T): void {
   const l = m.get(k);
   if (l) l.push(v);
   else m.set(k, [v]);
+}
+
+/**
+ * Drop points that stray less than `tol` from the straight line between their neighbours
+ * (Douglas–Peucker), keeping both ends: a staircase of grid steps becomes a few straight runs.
+ */
+export function simplify(pts: Point[], tol: number): Point[] {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack: [number, number][] = [[0, pts.length - 1]];
+  // A closed loop starts and ends on the same point: split it at its farthest point first.
+  if (pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) {
+    let far = 1;
+    let fd = -1;
+    for (let k = 1; k < pts.length - 1; k++) {
+      const d = Math.hypot(pts[k][0] - pts[0][0], pts[k][1] - pts[0][1]);
+      if (d > fd) {
+        fd = d;
+        far = k;
+      }
+    }
+    keep[far] = 1;
+    stack.length = 0;
+    stack.push([0, far], [far, pts.length - 1]);
+  }
+  while (stack.length) {
+    const [i, j] = stack.pop()!;
+    const [ax, ay] = pts[i];
+    const [bx, by] = pts[j];
+    const vx = bx - ax;
+    const vy = by - ay;
+    const len = Math.hypot(vx, vy) || 1;
+    let worst = -1;
+    let wd = tol;
+    for (let k = i + 1; k < j; k++) {
+      const d = Math.abs((pts[k][0] - ax) * vy - (pts[k][1] - ay) * vx) / len;
+      if (d > wd) {
+        wd = d;
+        worst = k;
+      }
+    }
+    if (worst >= 0) {
+      keep[worst] = 1;
+      stack.push([i, worst], [worst, j]);
+    }
+  }
+  return pts.filter((_, k) => keep[k]);
 }
 
 /** Corner-cutting smoothing of an open line, keeping its two ends where they are. */

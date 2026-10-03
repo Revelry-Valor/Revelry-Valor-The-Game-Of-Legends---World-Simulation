@@ -128,6 +128,8 @@ export function claimTile(world: World, s: Settlement, t: number, use: LandUse):
     o.territory = o.territory.filter((x) => x !== t);
   }
   map.owner[t] = s.id;
+  // Settled folk working the land end any clan's claim to hunt it.
+  map.claim[t] = -1;
   if (use !== LandUse.None || map.landUse[t] === LandUse.None) map.landUse[t] = use;
   if (!s.territory.includes(t)) s.territory.push(t);
   world.territoryDirty = true;
@@ -180,6 +182,7 @@ function assignRings(world: World, alive: Settlement[]): void {
     const o = owner[t];
     if (o !== map.owner[t]) world.territoryDirty = true;
     map.owner[t] = o;
+    if (o >= 0) map.claim[t] = -1;
     if (o < 0) map.landUse[t] = LandUse.None;
     else world.settlements[o].territory.push(t);
   }

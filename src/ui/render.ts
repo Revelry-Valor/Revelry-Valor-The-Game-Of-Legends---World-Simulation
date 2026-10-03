@@ -157,6 +157,9 @@ export function traceSmooth(ctx: CanvasRenderingContext2D, pts: Point[]): void {
 
 type RegionKind = 'polity' | 'culture' | 'race';
 
+/** Region labels from here up are clans' hunting grounds (clan id + CLAN_BASE) rather than nations. */
+const CLAN_BASE = 1 << 20;
+
 interface RegionPaths {
   /** Each region's outline as a fillable shape, in map coordinates. */
   fills: Map<number, Path2D>;
@@ -350,9 +353,16 @@ export class MapRenderer {
       if (!s.alive) continue;
       bySettlement[s.id] = kind === 'polity' ? s.polityId : kind === 'culture' ? s.cultureId : raceIndex.get(world.majorityRaceId(s)) ?? -1;
     }
+    // A clan's hunting grounds, outside any realm: its own region (its own colour, under the realms).
+    const byClan = new Int32Array(world.tribes.length).fill(-1);
+    for (const t of world.tribes) {
+      const culture = world.cultures[t.cultureId];
+      byClan[t.id] = kind === 'polity' ? CLAN_BASE + t.id : kind === 'culture' ? t.cultureId : raceIndex.get(culture.raceId) ?? -1;
+    }
     for (let i = 0; i < map.size; i++) {
       const o = map.region[i];
       if (o >= 0) labels[i] = bySettlement[o];
+      else if (map.claim[i] >= 0) labels[i] = byClan[map.claim[i]];
     }
     return labels;
   }
@@ -371,7 +381,7 @@ export class MapRenderer {
     // Traced on a finer, gently warped grid so borders wander like real ones rather than step from tile to tile.
     const F = 3;
     const { width: w, height: h } = world.map;
-    const shapes = scaleShapes(traceRegions(warpLabels(labels, w, h, F), w * F, h * F, 2), 1 / F);
+    const shapes = scaleShapes(traceRegions(warpLabels(labels, w, h, F), w * F, h * F, 3), 1 / F);
     const paths: RegionPaths = { fills: new Map(), borders: new Path2D(), edges: shapes.segments };
     for (const [label, loops] of shapes.loops) {
       const p = new Path2D();
@@ -390,6 +400,7 @@ export class MapRenderer {
 
   private colorOf(kind: RegionKind, label: number): string {
     const world = this.world;
+    if (label >= CLAN_BASE) return world.tribes[label - CLAN_BASE].color;
     return kind === 'polity' ? world.polities[label].color : kind === 'culture' ? world.cultures[label].color : world.races[label].color;
   }
 
@@ -440,13 +451,10 @@ export class MapRenderer {
         o.fillRect(0, 0, map.width, map.height);
       }
       for (const [label, path] of paths.fills) {
-        if (layer === 'nations') {
-          o.fillStyle = this.colorOf(kind, label);
-          o.globalAlpha = 0.8;
-        } else {
-          o.fillStyle = this.colorOf(kind, label);
-          o.globalAlpha = 0.45;
-        }
+        // Clans' hunting grounds are washed paler than settled realms.
+        const clan = label >= CLAN_BASE;
+        o.fillStyle = this.colorOf(kind, label);
+        o.globalAlpha = layer === 'nations' ? (clan ? 0.45 : 0.8) : clan ? 0.28 : 0.45;
         o.fill(path);
       }
       o.globalAlpha = 1;

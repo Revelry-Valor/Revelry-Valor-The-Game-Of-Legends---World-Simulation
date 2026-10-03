@@ -46,6 +46,8 @@ describe('smooth regions', () => {
     let sharp = 0;
     for (let k = 1; k < seg.pts.length - 1; k++) {
       const [a, b, c] = [seg.pts[k - 1], seg.pts[k], seg.pts[k + 1]];
+      // The map's own edges and corners are not part of the staircase.
+      if (b[0] < 2 || b[1] < 2 || b[0] > w - 2 || b[1] > h - 2) continue;
       const d1 = Math.atan2(b[1] - a[1], b[0] - a[0]);
       const d2 = Math.atan2(c[1] - b[1], c[0] - b[0]);
       let turn = Math.abs(d2 - d1);

@@ -618,7 +618,7 @@ function renderInspect(): string {
   return `<div class="empty"><h2>Nothing selected</h2><p>Click a settlement or any stretch of land on the map to inspect it. Settlements marked with a diamond are capitals.</p><p>Press <b>Play</b> or add years to watch peoples spread, trade, invent and wage war.</p></div>`;
 }
 
-/** A wandering band: its tribe and people, its way of life, its seasonal round and how it is faring. */
+/** A wandering tribe: its clan and people, its way of life, its home range and how it is faring. */
 function renderBand(b: Band): string {
   const tribe = world.tribes[b.tribeId];
   const culture = world.cultures[b.cultureId];
@@ -629,11 +629,15 @@ function renderBand(b: Band): string {
   const months = need > 0 ? (b.food / need) * 12 : 0;
   const parent = tribe.parentId >= 0 ? world.tribes[tribe.parentId] : null;
   const know = [...tribe.techs].map((t) => TECH_BY_ID.get(t)?.name ?? t);
+  let lands = 0;
+  for (let i = 0; i < world.map.size; i++) if (world.map.claim[i] === tribe.id) lands++;
+  const feuds = Object.entries(tribe.feuds).filter(([, y]) => world.year - y < 30).sort((x, y) => y[1] - x[1]);
+  const season = world.season === 'autumn' || world.season === 'winter' ? 'winter' : 'summer';
   return `
     <header class="head">
-      <p class="eyebrow">Wandering band · ${b.way === 'herders' ? 'herders' : 'hunters and gatherers'}</p>
+      <p class="eyebrow">Wandering tribe · ${b.way === 'herders' ? 'herders' : 'hunters and gatherers'}</p>
       <h2><span class="dot big" style="background:${tribe.color}"></span>${esc(b.name.charAt(0).toUpperCase() + b.name.slice(1))}</h2>
-      <p class="sub">Of the ${esc(tribe.name)} tribe · ${cLink(b.cultureId)} people · ${esc(world.raceById.get(race)?.plural ?? race)}</p>
+      <p class="sub">Of the ${esc(tribe.name)} clan · ${cLink(b.cultureId)} people · ${esc(world.raceById.get(race)?.plural ?? race)}</p>
     </header>
     <dl class="facts">
       <div><dt>People</dt><dd>${fmt(b.pop)}</dd></div>
@@ -641,11 +645,13 @@ function renderBand(b: Band): string {
       <div><dt>Food carried</dt><dd>${months >= 1 ? `${months.toFixed(1)} months` : 'barely any'}</dd></div>
       <div><dt>Lean months</dt><dd>${b.lastHungry} last year</dd></div>
     </dl>
-    <section><h3>The seasonal round</h3>
-      <p class="small">${moving ? `On the move to its ${world.season === 'autumn' || world.season === 'winter' ? 'winter' : 'summer'} grounds, ${b.path.length - 1 - b.step} tiles away.` : `Camped on its ${world.season === 'autumn' || world.season === 'winter' ? 'winter' : 'summer'} grounds, ${b.way === 'herders' ? 'grazing its herds' : 'hunting and gathering'} on the wild land around.`} Bands move to summer grounds in spring and to sheltered winter grounds in autumn, and move on early when the land runs thin.</p>
+    <section><h3>Home range</h3>
+      <p class="small">${b.home >= 0 ? `It has made its home in the ${esc(BIOMES[world.map.biome[b.home]].name.toLowerCase())} since year ${b.homeSince}, and keeps its seasonal round within its clan's hunting grounds there, claiming more as it grows and defending them against other clans.` : `Still searching for good hunting and foraging land to make its own (${b.searching} year${b.searching === 1 ? '' : 's'} so far). Tribes roam for a few years before they settle on a home range and start claiming it.`}</p>
+      <p class="small">${moving ? `On the move to its ${season} grounds, ${b.path.length - 1 - b.step} tiles away.` : `Camped on its ${season} grounds, ${b.way === 'herders' ? 'grazing its herds' : 'hunting and gathering'} on the wild land around.`} Tribes move to summer grounds in spring and to sheltered winter grounds in autumn, and move on early when the land runs thin.</p>
     </section>
-    <section><h3>The ${esc(tribe.name)}</h3>
-      <p class="small">${kin.length} band${kin.length === 1 ? '' : 's'}, ${fmt(kin.reduce((n, x) => n + x.pop, 0))} people${parent ? `; broke away from the ${esc(parent.name)} in year ${tribe.founded}` : `; one of the first tribes of the ${esc(culture.name)}`}.${tribe.polityId >= 0 ? ` Some of its people have settled: ${pLink(tribe.polityId)}.` : ''}</p>
+    <section><h3>The ${esc(tribe.name)} clan</h3>
+      <p class="small">${kin.length} tribe${kin.length === 1 ? '' : 's'}, ${fmt(kin.reduce((n, x) => n + x.pop, 0))} people, holding ${lands ? `${fmt(lands)} tiles of hunting grounds` : 'no land yet'}${parent ? `; broke away from the ${esc(parent.name)} clan in year ${tribe.founded}` : `; one of the first clans of the ${esc(culture.name)}`}.${tribe.polityId >= 0 ? ` Some of its people have settled: ${pLink(tribe.polityId)}.` : ''}</p>
+      ${tribe.wins + tribe.losses > 0 ? `<p class="small"><span class="k">Fights over land</span> ${tribe.wins} won, ${tribe.losses} lost${feuds.length ? ` · feuding with ${feuds.map(([id]) => `the ${esc(world.tribes[+id].name)}`).join(', ')}` : ''}</p>` : ''}
       <p class="small"><span class="k">Knows</span> ${know.length ? esc(know.join(', ')) : 'only the old ways'}</p>
       <p class="small muted">${esc(world.raceById.get(race)?.plural ?? '')} are ${world.raceById.get(race)?.lifestyle === 'nomadic' ? 'a nomadic people who seldom settle' : world.raceById.get(race)?.lifestyle === 'seminomadic' ? 'slow to settle' : 'quick to settle once farming or a rich site makes it pay'}.</p>
     </section>`;
@@ -893,6 +899,7 @@ function renderTile(t: number): string {
         <div><dt>Rainfall</dt><dd>${Math.round(m.moisture[t] * 2000)} mm/yr</dd></div>
         <div><dt>River</dt><dd>${m.river[t] > 0 ? 'yes' : 'no'}</dd></div>
         <div><dt>Realm</dt><dd>${m.region[t] >= 0 ? pLink(world.settlements[m.region[t]].polityId) : 'wilderness'}</dd></div>
+        ${m.claim[t] >= 0 ? `<div><dt>Hunting grounds of</dt><dd><span class="dot" style="background:${world.tribes[m.claim[t]].color}"></span>the ${esc(world.tribes[m.claim[t]].name)} clan</dd></div>` : ''}
         <div><dt>Worked by</dt><dd>${o >= 0 ? sLink(o) : 'no one'}</dd></div>
         ${o >= 0 ? `<div><dt>Used for</dt><dd>${LAND_USE_NAMES[m.landUse[t]]}</dd></div>` : ''}
       </dl>
@@ -935,7 +942,7 @@ function renderPeoples(): string {
         const bands = world.bands.filter((b) => b.alive && b.cultureId === c.id);
         const tribes = new Set(bands.map((b) => b.tribeId)).size;
         const wander = bands.reduce((a, b) => a + b.pop, 0);
-        return `<tr><td><span class="dot" style="background:${c.color}"></span>${cLink(c.id)}<div class="muted small">${esc(world.raceById.get(c.raceId)?.plural ?? '')}${c.parentId >= 0 ? ` · from ${esc(world.cultures[c.parentId].name)}` : ''}</div></td><td class="num">${compact(pop)}</td><td class="num">${n}</td><td class="num">${bands.length ? `${compact(wander)}<div class="muted small">${tribes} tribe${tribes === 1 ? '' : 's'}, ${bands.length} band${bands.length === 1 ? '' : 's'}</div>` : '—'}</td></tr>`;
+        return `<tr><td><span class="dot" style="background:${c.color}"></span>${cLink(c.id)}<div class="muted small">${esc(world.raceById.get(c.raceId)?.plural ?? '')}${c.parentId >= 0 ? ` · from ${esc(world.cultures[c.parentId].name)}` : ''}</div></td><td class="num">${compact(pop)}</td><td class="num">${n}</td><td class="num">${bands.length ? `${compact(wander)}<div class="muted small">${tribes} clan${tribes === 1 ? '' : 's'}, ${bands.length} tribe${bands.length === 1 ? '' : 's'}</div>` : '—'}</td></tr>`;
       }).join('')}</tbody>
     </table></div></section>`;
 }
@@ -1036,7 +1043,7 @@ function renderSetup(): string {
         <button type="button" id="s-reroll">New seed</button>
       </div>
       <label class="field" for="s-size"><span>Map size</span><select id="s-size">${Object.entries(MAP_SIZES).map(([k, [w, h]]) => `<option value="${k}" ${k === sizeKey ? 'selected' : ''}>${k} (${w}×${h})</option>`).join('')}</select></label>
-      <label class="field" for="s-start"><span>Peoples begin as</span><select id="s-start"><option value="bands" ${cfg.start !== 'settlements' ? 'selected' : ''}>Wandering bands of hunters and gatherers</option><option value="settlements" ${cfg.start === 'settlements' ? 'selected' : ''}>Settled villages</option></select><small>Bands follow their food through the seasons, split into new tribes, and settle down when farming or the land makes it pay (each race's lifestyle decides how readily).</small></label>
+      <label class="field" for="s-start"><span>Peoples begin as</span><select id="s-start"><option value="bands" ${cfg.start !== 'settlements' ? 'selected' : ''}>Wandering clans of hunters and gatherers</option><option value="settlements" ${cfg.start === 'settlements' ? 'selected' : ''}>Settled villages</option></select><small>Each clan's tribes roam until they find good hunting and foraging land, claim it as the clan's hunting grounds and defend it, split as they grow to claim more, fight other clans for land, and settle down when farming or the land makes it pay (each race's lifestyle decides how readily).</small></label>
       ${num('s-land', 'Land', cfg.landFraction, 0.2, 0.75, 0.01, 'Share of the map above sea level.')}
       ${num('s-temp', 'Temperature', cfg.temperature, -0.3, 0.3, 0.02, 'Negative for an ice age, positive for a hothouse.')}
       ${num('s-moist', 'Rainfall', cfg.moisture, -0.3, 0.3, 0.02, 'Drier worlds have more desert and steppe.')}
@@ -1059,7 +1066,7 @@ function renderSetup(): string {
       ${num('s-space', 'Settlement spacing', cfg.settlementSpacing, 3, 8, 1, 'Minimum tiles between towns. Wider spacing means fewer, larger settlements.')}
       <div class="row">
         <label class="field" for="s-home"><span>Homelands per race</span><input id="s-home" type="number" min="1" max="4" value="${cfg.homelandsPerRace}"></label>
-        <label class="field" for="s-tribes"><span>Tribes per homeland</span><input id="s-tribes" type="number" min="1" max="8" value="${cfg.tribesPerHomeland}"></label>
+        <label class="field" for="s-tribes"><span>Clans per homeland</span><input id="s-tribes" type="number" min="1" max="8" value="${cfg.tribesPerHomeland}"></label>
       </div>
       <label class="field" for="s-races"><span>Races (JSON)</span><textarea id="s-races" rows="12" spellcheck="false">${esc(JSON.stringify(cfg.races, null, 2))}</textarea><small>Edit traits, biome preferences, growth, sound palettes — or add your own people. Remove an entry to leave that race out.</small></label>
       <p id="s-error" class="error" role="alert" hidden></p>
