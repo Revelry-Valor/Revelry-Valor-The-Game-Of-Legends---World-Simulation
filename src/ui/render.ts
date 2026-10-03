@@ -174,7 +174,7 @@ export class MapRenderer {
       }
     } else {
       for (let i = 0; i < map.size; i++) {
-        const o = map.owner[i];
+        const o = map.region[i];
         if (o < 0) continue;
         const s = world.settlements[o];
         let color: string;
@@ -184,7 +184,7 @@ export class MapRenderer {
         const [r, g, b] = toRgb(color);
         // Borders drawn darker: tile differs from a neighbour in the same grouping.
         const group = (j: number) => {
-          const oj = map.owner[j];
+          const oj = map.region[j];
           if (oj < 0) return -1;
           const sj = world.settlements[oj];
           return view.layer === 'political' || view.layer === 'nations' ? sj.polityId : view.layer === 'culture' ? sj.cultureId : world.majorityRaceId(sj) === world.majorityRaceId(s) ? -2 : -3;
@@ -211,7 +211,7 @@ export class MapRenderer {
       if (view.layer === 'nations') {
         // Unclaimed wilds washed pale so the nations read clearly.
         for (let i = 0; i < map.size; i++) {
-          if (map.owner[i] >= 0 || map.elevation[i] < 0) continue;
+          if (map.region[i] >= 0 || map.elevation[i] < 0) continue;
           d[i * 4] = 236;
           d[i * 4 + 1] = 232;
           d[i * 4 + 2] = 222;
@@ -237,7 +237,7 @@ export class MapRenderer {
     const w = map.width;
     const polityAt = new Int32Array(map.size).fill(-1);
     for (let i = 0; i < map.size; i++) {
-      const o = map.owner[i];
+      const o = map.region[i];
       if (o >= 0 && map.elevation[i] >= 0) polityAt[i] = world.settlements[o].polityId;
     }
     const info = new Map<number, { tiles: number; sx: number; sy: number; edges: number[] }>();

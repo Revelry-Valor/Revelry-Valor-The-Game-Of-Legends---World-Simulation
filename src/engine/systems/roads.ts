@@ -37,7 +37,7 @@ export function updateRoads(world: World): void {
       map.traffic[i] = t * 0.6;
       continue;
     }
-    const o = map.owner[i];
+    const o = map.region[i];
     const polity = o >= 0 ? world.settlements[o].polityId : -1;
     const max = polity >= 0 ? roadTechLevel(world.polities[polity]) : 1;
     let want = 0;

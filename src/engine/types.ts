@@ -122,6 +122,12 @@ export interface MapData {
   owner: Int32Array;
   /** Settlement id sitting on the tile, -1 if none. */
   settlementAt: Int32Array;
+  /**
+   * Settlement whose realm each tile falls in: the nearest settlement within reach. This is what
+   * nations hold, what the map shows and where borders run. (A settlement's working land, \`owner\`,
+   * is only ever used inside the simulation.)
+   */
+  region: Int32Array;
   /** What the owning settlement uses each tile for (LandUse). */
   landUse: Uint8Array;
   /** Emergent road quality from trade traffic, 0..3. */

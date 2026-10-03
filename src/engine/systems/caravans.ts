@@ -71,7 +71,7 @@ function fillCargo(world: World, from: Settlement, to: Settlement, capacity: num
 function embargoed(world: World, path: number[], guest: number, destPolity: number): boolean {
   let last = -1;
   for (const t of path) {
-    const o = world.map.owner[t];
+    const o = world.map.region[t];
     if (o < 0) continue;
     const pid = world.settlements[o].polityId;
     if (pid === last) continue;
@@ -242,7 +242,7 @@ export function caravansMonth(world: World): void {
       budget -= Number.isFinite(step) ? step : 1;
       c.step++;
       map.traffic[next] += value * 0.4 + c.size;
-      const o = map.owner[next];
+      const o = map.region[next];
       if (o >= 0) {
         const hostId = world.settlements[o].polityId;
         if (hostId !== c.polityId && world.atWar(hostId, c.polityId) && rng.chance(0.2)) {
@@ -312,7 +312,7 @@ function transitTolls(world: World, c: Caravan, value: number, destPolity: numbe
   const seen = new Set<number>();
   let paid = 0;
   for (const t of c.path) {
-    const o = world.map.owner[t];
+    const o = world.map.region[t];
     if (o < 0) continue;
     const pid = world.settlements[o].polityId;
     if (pid === c.polityId || pid === destPolity || seen.has(pid)) continue;

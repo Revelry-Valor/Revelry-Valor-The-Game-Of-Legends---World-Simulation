@@ -55,7 +55,7 @@ export function passable(world: World, guest: Polity, destPolity = -1): (tile: n
   const map = world.map;
   const cache = new Map<number, boolean>();
   return (tile) => {
-    const o = map.owner[tile];
+    const o = map.region[tile];
     if (o < 0) return true;
     const pid = world.settlements[o].polityId;
     if (pid === guest.id || pid === destPolity) return true;

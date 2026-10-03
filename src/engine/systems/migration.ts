@@ -137,7 +137,7 @@ function colonize(world: World, s: Settlement): void {
     if (blocked) continue;
     // Nor where another column of settlers is already headed.
     if (world.settlers.some((p) => Math.hypot((p.targetTile % map.width) - x, Math.floor(p.targetTile / map.width) - y) < spacing)) continue;
-    const owner = map.owner[t];
+    const owner = map.region[t];
     if (owner >= 0 && world.settlements[owner].polityId !== s.polityId) continue;
     let score = siteScore(map, race, t, culture.traitEffects.habitat);
     if (score === -Infinity) continue;
@@ -211,7 +211,7 @@ function found(world: World, p: SettlerParty): void {
   const spacing = world.cfg.settlementSpacing;
   const from = world.settlements[p.fromId];
   const pol = world.polities[p.polityId];
-  const owner = map.owner[tile];
+  const owner = map.region[tile];
   const taken = owner >= 0 && world.settlements[owner].alive && world.settlements[owner].polityId !== p.polityId;
   const crowded = [...world.aliveSettlements()].some((o) => Math.hypot(o.x - x, o.y - y) < spacing);
   if (!pol.alive || taken || crowded || map.settlementAt[tile] >= 0) {

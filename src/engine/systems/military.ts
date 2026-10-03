@@ -107,7 +107,7 @@ function chooseTarget(world: World, army: Army): number {
   for (const e of world.armies) {
     if (!e.alive || e.polityId !== enemy.id) continue;
     const d = dist(world, army.tile, e.tile);
-    const inOurLand = world.map.owner[e.tile] >= 0 && world.settlements[world.map.owner[e.tile]].polityId === p.id;
+    const inOurLand = world.map.region[e.tile] >= 0 && world.settlements[world.map.region[e.tile]].polityId === p.id;
     const score = d - (inOurLand ? 8 : 0);
     if (d < 12 && score < bestScore) {
       bestScore = score;
@@ -213,7 +213,7 @@ function engage(world: World, army: Army): void {
   const foe = world.armies.find((e) => e.alive && e.id !== army.id && e.fought !== now && e.polityId !== p.id && world.atWar(e.polityId, p.id) && dist(world, e.tile, army.tile) <= 1.5);
   if (foe) {
     const q = world.polities[foe.polityId];
-    const ownLand = (a: Army) => world.map.owner[a.tile] >= 0 && world.settlements[world.map.owner[a.tile]].polityId === a.polityId;
+    const ownLand = (a: Army) => world.map.region[a.tile] >= 0 && world.settlements[world.map.region[a.tile]].polityId === a.polityId;
     const terrain = world.map.relief[foe.tile] === Relief.Hills ? 1.15 : world.map.relief[foe.tile] === Relief.Mountains ? 1.3 : 1;
     const sa = army.size * soldierQuality(world, p) * (ownLand(army) ? 1.1 : 1) * rng.range(0.7, 1.3);
     const sb = foe.size * soldierQuality(world, q) * (ownLand(foe) ? 1.1 : 1) * terrain * rng.range(0.7, 1.3);

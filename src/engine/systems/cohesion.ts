@@ -44,11 +44,11 @@ function markConnected(world: World, p: Polity): void {
   const dys = DY;
   const ocean = Biome.Ocean;
   const deep = Biome.DeepOcean;
-  const { biome, owner, moveCost } = map;
+  const { biome, region, moveCost, settlementAt } = map;
   const want = new Set(p.settlementIds);
   for (let qi = 0; qi < queue.length && reached.size < want.size; qi++) {
     const t = queue[qi];
-    const o = owner[t];
+    const o = settlementAt[t];
     if (o >= 0 && want.has(o) && world.settlements[o].occupiedBy < 0) reached.add(o);
     const x = t % w;
     const y = (t - x) / w;
@@ -61,7 +61,7 @@ function markConnected(world: World, p: Polity): void {
       seen[n] = 1;
       const b = biome[n];
       if (b === ocean ? sea < 1 : b === deep ? sea < 2 : !Number.isFinite(moveCost[n])) continue;
-      const no = owner[n];
+      const no = region[n];
       if (no >= 0 && !canPass(world.settlements[no].polityId)) continue;
       queue.push(n);
     }
@@ -82,7 +82,7 @@ function surroundings(world: World, s: Settlement, p: Polity): { share: number; 
       const x = s.x + dx;
       const y = s.y + dy;
       if (x < 0 || y < 0 || x >= w || y >= map.height || dx * dx + dy * dy > R * R) continue;
-      const o = map.owner[y * w + x];
+      const o = map.region[y * w + x];
       if (o < 0) continue;
       owned++;
       const q = world.settlements[o].polityId;

@@ -201,7 +201,7 @@ function pick(e: PointerEvent): void {
   view.selectedPolity = best >= 0 ? world.settlements[best].polityId : -1;
   selectedCulture = -1;
   if (best < 0 && view.selectedTile >= 0) {
-    const o = world.map.owner[view.selectedTile];
+    const o = world.map.region[view.selectedTile];
     view.selectedPolity = o >= 0 ? world.settlements[o].polityId : -1;
   }
   renderer.invalidate();
@@ -761,6 +761,7 @@ function renderTile(t: number): string {
         <div><dt>Climate</dt><dd>${Math.round(-25 + m.temperature[t] * 55)} °C mean</dd></div>
         <div><dt>Rainfall</dt><dd>${Math.round(m.moisture[t] * 2000)} mm/yr</dd></div>
         <div><dt>River</dt><dd>${m.river[t] > 0 ? 'yes' : 'no'}</dd></div>
+        <div><dt>Realm</dt><dd>${m.region[t] >= 0 ? pLink(world.settlements[m.region[t]].polityId) : 'wilderness'}</dd></div>
         <div><dt>Worked by</dt><dd>${o >= 0 ? sLink(o) : 'no one'}</dd></div>
         ${o >= 0 ? `<div><dt>Used for</dt><dd>${LAND_USE_NAMES[m.landUse[t]]}</dd></div>` : ''}
       </dl>
