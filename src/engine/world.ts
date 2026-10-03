@@ -27,6 +27,7 @@ import type {
 } from './types';
 import { VALUE_KEYS } from './types';
 import { generateMap } from './worldgen';
+import { siteOf } from './geometry';
 
 export interface EventRefs {
   settlements?: number[];
@@ -276,6 +277,8 @@ export class World {
       tile,
       x: tile % map.width,
       y: Math.floor(tile / map.width),
+      px: 0,
+      py: 0,
       founded: this.year,
       alive: true,
       abandoned: null,
@@ -352,6 +355,7 @@ export class World {
     s.stock[Good.Timber] = pop * 0.2;
     // Founded mid-year: the settlers live off the land and what they carried until the year's end.
     for (let m = this.month; m < 12 && this.monthIndex > 0; m++) s.foodSchedule[m] = (pop * 0.9) / 12;
+    [s.px, s.py] = siteOf(map, tile, s.id);
     this.settlements.push(s);
     map.settlementAt[tile] = s.id;
     s.tier = tierIndex(pop);

@@ -166,7 +166,8 @@ function assignRings(world: World, alive: Settlement[]): void {
         const b = map.biome[t];
         if (b === Biome.DeepOcean || b === Biome.Ice) continue;
         if (!isWater(world, t) && map.landmass[t] !== s.landmass) continue;
-        const d = dx === 0 && dy === 0 ? -1 : Math.hypot(dx, dy);
+        // Distance from where the settlement really stands, so the land it works follows its true position.
+        const d = dx === 0 && dy === 0 ? -1 : Math.hypot(x + 0.5 - s.px, y + 0.5 - s.py);
         if (d < best[t] - 1e-6) {
           best[t] = d;
           owner[t] = s.id;

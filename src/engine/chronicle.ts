@@ -166,7 +166,7 @@ export function worldSnapshot(world: World): unknown {
     year: world.year,
     config: world.cfg,
     settlements: world.settlements.map((s) => ({
-      id: s.id, name: s.name, x: s.x, y: s.y, alive: s.alive, founded: s.founded, abandoned: s.abandoned,
+      id: s.id, name: s.name, x: s.x, y: s.y, px: +s.px.toFixed(2), py: +s.py.toFixed(2), alive: s.alive, founded: s.founded, abandoned: s.abandoned,
       pop: Math.round(s.pop), peakPop: Math.round(s.peakPop), races: Object.fromEntries(Object.entries(s.races).map(([k, v]) => [k, Math.round(v)])),
       polity: s.polityId, culture: s.cultureId, wealth: Math.round(s.wealth), stability: +s.stability.toFixed(2), greatWorks: s.greatWorks,
       loyalty: +s.loyalty.toFixed(2), holder: s.holder, claims: s.claims, connected: s.connected, occupiedBy: s.occupiedBy, market: s.marketId, cityTiles: s.cityTiles, buildings: s.buildings, idle: Math.round(s.idle),

@@ -2,7 +2,7 @@ import { BIOMES, Biome } from '../engine/data/biomes';
 import { Noise2D } from '../engine/noise';
 import { Rng } from '../engine/rng';
 import type { MapData } from '../engine/types';
-import { DX, DY } from '../engine/worldgen';
+import { riverNext, riverPoint, type Point } from '../engine/geometry';
 
 /** Pixels per tile in the painted terrain: enough for smooth coasts and soft biome edges. */
 export const TERRAIN_SCALE = 4;
@@ -69,42 +69,62 @@ const SEA_SHALLOW: [number, number, number] = [92, 150, 190];
 const SEA_DEEP: [number, number, number] = [30, 64, 112];
 
 /**
- * Paint the land as one continuous surface rather than squares: heights are interpolated between
+ * Colours the land as one continuous surface rather than squares: heights are interpolated between
  * tile centres, coasts follow the smooth sea line, biomes meet along ragged natural edges, and the
- * relief is hill-shaded from the north-west. Rivers are drawn as winding lines on top.
+ * relief is hill-shaded from the north-west. It can paint the whole map at a few pixels per tile,
+ * or any small part of it at full screen resolution for close zoom.
  */
-export function paintTerrain(map: MapData, canvas: HTMLCanvasElement = document.createElement('canvas'), scale = TERRAIN_SCALE): HTMLCanvasElement {
-  const w = map.width;
-  const h = map.height;
-  const W = w * scale;
-  const Hh = h * scale;
-  canvas.width = W;
-  canvas.height = Hh;
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.createImageData(W, Hh);
-  const d = img.data;
-  const elev = sampler(map.elevation, w, h);
-  const temp = sampler(map.temperature, w, h);
-  const shadeAt = linear(tileShade(map.elevation, w, h), w, h);
-  for (let py = 0; py < Hh; py++) {
-    const fy = (py + 0.5) / scale - 0.5;
-    for (let px = 0; px < W; px++) {
-      const fx = (px + 0.5) / scale - 0.5;
-      const e = elev(fx, fy);
-      const o = (py * W + px) * 4;
-      // Biome from the nearest tile after a noisy nudge, so neighbouring biomes interlock.
-      const jx = fx + edgeNoise.fbm(fx * 0.35, fy * 0.35, 4) * 1.1;
-      const jy = fy + edgeNoise.fbm(fx * 0.35 + 40, fy * 0.35 + 40, 4) * 1.1;
-      const tx = clamp(Math.round(jx), 0, w - 1);
-      const ty = clamp(Math.round(jy), 0, h - 1);
-      const ti = ty * w + tx;
-      let r: number;
-      let g: number;
-      let b: number;
-      if (e < 0) {
-        const near = clamp(Math.round(fx), 0, w - 1) + clamp(Math.round(fy), 0, h - 1) * w;
-        if (map.biome[near] === Biome.Lake) [r, g, b] = BIOMES[Biome.Lake].color;
-        else {
+export class TerrainShader {
+  private elev: (fx: number, fy: number) => number;
+  private temp: (fx: number, fy: number) => number;
+  private shadeAt: (fx: number, fy: number) => number;
+  private lakeAt: (fx: number, fy: number) => number;
+
+  constructor(private map: MapData) {
+    const { width: w, height: h } = map;
+    // Lakes blend between tiles too, so their shores are as smooth as the sea's.
+    const lake = new Float32Array(map.size);
+    for (let i = 0; i < map.size; i++) lake[i] = map.biome[i] === Biome.Lake ? 1 : 0;
+    this.lakeAt = sampler(lake, w, h);
+    this.elev = sampler(map.elevation, w, h);
+    this.temp = sampler(map.temperature, w, h);
+    this.shadeAt = linear(tileShade(map.elevation, w, h), w, h);
+  }
+
+  /**
+   * Paint a W×H pixel image of the map region starting at (x0, y0) in map coordinates, each pixel
+   * covering sx × sy of the map.
+   */
+  paint(img: ImageData, x0: number, y0: number, sx: number, sy: number): void {
+    const map = this.map;
+    const w = map.width;
+    const h = map.height;
+    const W = img.width;
+    const H = img.height;
+    const d = img.data;
+    const { elev, temp, shadeAt, lakeAt } = this;
+    for (let py = 0; py < H; py++) {
+      // Sampling coordinates put tile centres on whole numbers.
+      const fy = y0 + (py + 0.5) * sy - 0.5;
+      for (let px = 0; px < W; px++) {
+        const fx = x0 + (px + 0.5) * sx - 0.5;
+        const o = (py * W + px) * 4;
+        if (fx < -0.5 || fy < -0.5 || fx > w - 0.5 || fy > h - 0.5) {
+          d[o + 3] = 0;
+          continue;
+        }
+        const e = elev(fx, fy);
+        // Biome from the nearest tile after a noisy nudge, so neighbouring biomes interlock.
+        const jx = fx + edgeNoise.fbm(fx * 0.35, fy * 0.35, 4) * 1.1;
+        const jy = fy + edgeNoise.fbm(fx * 0.35 + 40, fy * 0.35 + 40, 4) * 1.1;
+        const ti = clamp(Math.round(jy), 0, h - 1) * w + clamp(Math.round(jx), 0, w - 1);
+        let r: number;
+        let g: number;
+        let b: number;
+        // Lakes take their shape from the lake tiles, with the same ragged edge as the biomes.
+        const lake = lakeAt(fx + (jx - fx) * 0.6, fy + (jy - fy) * 0.6);
+        if (lake > 0.5) [r, g, b] = BIOMES[Biome.Lake].color;
+        else if (e < 0 && (lakeAt(fx, fy) <= 0.02 || e < -0.03)) {
           const depth = clamp(-e * 2.2, 0, 1);
           r = SEA_SHALLOW[0] + (SEA_DEEP[0] - SEA_SHALLOW[0]) * depth;
           g = SEA_SHALLOW[1] + (SEA_DEEP[1] - SEA_SHALLOW[1]) * depth;
@@ -116,81 +136,118 @@ export function paintTerrain(map: MapData, canvas: HTMLCanvasElement = document.
             g += (222 - g) * k * 0.5;
             b += (226 - b) * k * 0.5;
           }
-        }
-      } else {
-        let bi = map.biome[ti];
-        if (BIOMES[bi].water) bi = Biome.Grassland;
-        [r, g, b] = BIOMES[bi].color;
-        if (bi === Biome.Mountain) {
-          // Grey rock rising to bare stone, snow on the cold heights.
-          const t = temp(fx, fy);
-          if (t < 0.2 || e > 0.75) {
-            const k = clamp(Math.max((0.2 - t) / 0.08, (e - 0.75) / 0.1), 0, 1);
-            r += (240 - r) * k;
-            g += (242 - g) * k;
-            b += (246 - b) * k;
+        } else {
+          let bi = map.biome[ti];
+          if (BIOMES[bi].water) bi = Biome.Grassland;
+          [r, g, b] = BIOMES[bi].color;
+          if (bi === Biome.Mountain) {
+            // Grey rock rising to bare stone, snow on the cold heights.
+            const t = temp(fx, fy);
+            if (t < 0.2 || e > 0.75) {
+              const k = clamp(Math.max((0.2 - t) / 0.08, (e - 0.75) / 0.1), 0, 1);
+              r += (240 - r) * k;
+              g += (242 - g) * k;
+              b += (246 - b) * k;
+            }
           }
+          // Hill-shading, with a faint grain so broad plains aren't flat colour.
+          const shade = shadeAt(fx, fy) * (1 + edgeNoise.noise(fx * 1.7, fy * 1.7) * 0.05);
+          const lift = 1 + Math.min(0.12, e * 0.15);
+          r *= shade * lift;
+          g *= shade * lift;
+          b *= shade * lift;
         }
-        // Hill-shading, with a faint grain so broad plains aren't flat colour.
-        const shade = shadeAt(fx, fy) * (1 + edgeNoise.noise(fx * 1.7, fy * 1.7) * 0.05);
-        const lift = 1 + Math.min(0.12, e * 0.15);
-        r *= shade * lift;
-        g *= shade * lift;
-        b *= shade * lift;
+        d[o] = r > 255 ? 255 : r;
+        d[o + 1] = g > 255 ? 255 : g;
+        d[o + 2] = b > 255 ? 255 : b;
+        d[o + 3] = 255;
       }
-      d[o] = r > 255 ? 255 : r;
-      d[o + 1] = g > 255 ? 255 : g;
-      d[o + 2] = b > 255 ? 255 : b;
-      d[o + 3] = 255;
     }
   }
+}
+
+/** Paint the whole map at `scale` pixels per tile, optionally with its rivers. */
+export function paintTerrain(map: MapData, canvas: HTMLCanvasElement = document.createElement('canvas'), scale = TERRAIN_SCALE, rivers = true): HTMLCanvasElement {
+  canvas.width = map.width * scale;
+  canvas.height = map.height * scale;
+  const ctx = canvas.getContext('2d')!;
+  const img = ctx.createImageData(canvas.width, canvas.height);
+  new TerrainShader(map).paint(img, 0, 0, 1 / scale, 1 / scale);
   ctx.putImageData(img, 0, 0);
-  drawRivers(map, ctx, scale);
+  if (rivers) drawRiverCurves(ctx, riverCurves(map), { zoom: scale, ox: 0, oy: 0 });
   return canvas;
 }
 
-/** Rivers as lines that wind from tile to tile downhill, thickening as they gather water. */
-function drawRivers(map: MapData, ctx: CanvasRenderingContext2D, scale: number): void {
-  const w = map.width;
-  const h = map.height;
-  const { river, elevation } = map;
+/**
+ * Rivers as smooth winding curves in map coordinates, thickening as they gather water. Each river
+ * tile gives one stretch: from the midpoint with the main stream coming in, curving through its
+ * point, to the midpoint with the tile it flows on to. A tributary runs on to meet the main
+ * stream's curve. Packed as start x, y, control x, y, end x, y, width (in tiles).
+ */
+export function riverCurves(map: MapData): Float32Array {
+  const { river } = map;
+  const next = new Int32Array(map.size).fill(-1);
+  // The main stream into each tile: the upstream neighbour carrying the most water.
+  const main = new Int32Array(map.size).fill(-1);
+  let count = 0;
+  for (let i = 0; i < map.size; i++) {
+    if (river[i] <= 0) continue;
+    const n = riverNext(map, i);
+    next[i] = n;
+    if (n < 0) continue;
+    count++;
+    if (main[n] < 0 || river[i] > river[main[n]]) main[n] = i;
+  }
+  const P = (i: number): Point => riverPoint(map, i);
+  const mid = (a: Point, b: Point): Point => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const out = new Float32Array(count * 7);
+  let k = 0;
+  for (let i = 0; i < map.size; i++) {
+    const n = next[i];
+    if (n < 0) continue;
+    const p = P(i);
+    const q = P(n);
+    const start = main[i] >= 0 ? mid(P(main[i]), p) : p;
+    let end = mid(p, q);
+    if (map.elevation[n] < 0) end = q;
+    else if (main[n] !== i) {
+      const nn = next[n];
+      const m0 = mid(P(main[n]), q);
+      const m1 = nn >= 0 ? mid(q, P(nn)) : q;
+      // The point halfway along the main stream's curve through n.
+      end = [0.25 * m0[0] + 0.5 * q[0] + 0.25 * m1[0], 0.25 * m0[1] + 0.5 * q[1] + 0.25 * m1[1]];
+    }
+    out.set([start[0], start[1], p[0], p[1], end[0], end[1], clamp(Math.sqrt(river[i] / map.riverThreshold) * 0.08, 0.06, 0.28)], k);
+    k += 7;
+  }
+  return out;
+}
+
+/** Draw river curves for a view (zoom = screen pixels per tile, ox/oy = map point at the top-left). */
+export function drawRiverCurves(ctx: CanvasRenderingContext2D, curves: Float32Array, view: { zoom: number; ox: number; oy: number }, bounds?: { x0: number; y0: number; x1: number; y1: number }): void {
+  const z = view.zoom;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = 'rgb(62, 120, 178)';
-  const at = (i: number): [number, number] => {
-    const x = i % w;
-    const y = (i - x) / w;
-    // A small fixed wobble keeps the course from running ruler-straight.
-    const jx = edgeNoise.noise(x * 0.7, y * 0.7) * 0.22;
-    const jy = edgeNoise.noise(x * 0.7 + 9, y * 0.7 + 9) * 0.22;
-    return [(x + 0.5 + jx) * scale, (y + 0.5 + jy) * scale];
-  };
-  for (let i = 0; i < map.size; i++) {
-    if (river[i] <= 0) continue;
-    const x = i % w;
-    const y = (i - x) / w;
-    // Downstream: the neighbour carrying more water than this one with the least, or the sea.
-    let next = -1;
-    let best = Infinity;
-    for (let k = 0; k < 8; k++) {
-      const nx = x + DX[k];
-      const ny = y + DY[k];
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-      const j = ny * w + nx;
-      const v = elevation[j] < 0 ? 1e9 : river[j];
-      if (v > river[i] && v < best) {
-        best = v;
-        next = j;
-      }
-    }
-    if (next < 0) continue;
-    const width = clamp(Math.sqrt(river[i] / map.riverThreshold) * 0.32, 0.25, 1.1) * scale;
-    const [ax, ay] = at(i);
-    const [bx, by] = elevation[next] < 0 ? [(next % w + 0.5) * scale, (Math.floor(next / w) + 0.5) * scale] : at(next);
-    ctx.lineWidth = width;
+  // Batched by width so a few strokes draw them all.
+  const BINS = 6;
+  for (let bin = 0; bin < BINS; bin++) {
+    const lo = 0.06 + ((0.28 - 0.06) * bin) / BINS;
+    const hi = bin === BINS - 1 ? Infinity : 0.06 + ((0.28 - 0.06) * (bin + 1)) / BINS;
     ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
+    let any = false;
+    for (let k = 0; k < curves.length; k += 7) {
+      const wdt = curves[k + 6];
+      if (wdt < lo || wdt >= hi) continue;
+      const cxm = curves[k + 2];
+      const cym = curves[k + 3];
+      if (bounds && (cxm < bounds.x0 - 1 || cym < bounds.y0 - 1 || cxm > bounds.x1 + 1 || cym > bounds.y1 + 1)) continue;
+      ctx.moveTo((curves[k] - view.ox) * z, (curves[k + 1] - view.oy) * z);
+      ctx.quadraticCurveTo((cxm - view.ox) * z, (cym - view.oy) * z, (curves[k + 4] - view.ox) * z, (curves[k + 5] - view.oy) * z);
+      any = true;
+    }
+    if (!any) continue;
+    ctx.lineWidth = Math.max(0.8, ((lo + Math.min(hi, 0.3)) / 2) * z);
     ctx.stroke();
   }
 }

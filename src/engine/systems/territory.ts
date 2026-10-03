@@ -20,7 +20,7 @@ function assignRegions(world: World): void {
         const x = s.x + dx;
         const y = s.y + dy;
         if (x < 0 || y < 0 || x >= w || y >= map.height) continue;
-        const d = Math.hypot(dx, dy);
+        const d = Math.hypot(x + 0.5 - s.px, y + 0.5 - s.py);
         if (d > R + 0.5) continue;
         const t = y * w + x;
         if (BIOMES[map.biome[t]].water) {

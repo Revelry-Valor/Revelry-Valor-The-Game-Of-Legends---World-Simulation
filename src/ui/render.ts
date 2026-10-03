@@ -3,7 +3,9 @@ import type { MapData } from '../engine/types';
 import type { World } from '../engine/world';
 import { LAND_USE_COLORS } from '../engine/data/settlements';
 import { friendly } from '../engine/systems/diplomacy';
-import { paintTerrain } from './terrain';
+import { TERRAIN_SCALE, TerrainShader, drawRiverCurves, paintTerrain, riverCurves } from './terrain';
+import { pointAlong, waypoint, type Point } from '../engine/geometry';
+import { DX, DY } from '../engine/worldgen';
 
 const ROAD_STYLE = [
   { color: '', width: 0, min: 0 },
@@ -141,6 +143,17 @@ export function drawCurrents(ctx: CanvasRenderingContext2D, map: MapData, view: 
   ctx.stroke();
 }
 
+/** Trace a smooth curve through points: straight out of the first, rounded through each corner, straight into the last. */
+export function traceSmooth(ctx: CanvasRenderingContext2D, pts: Point[]): void {
+  const n = pts.length;
+  if (n === 0) return;
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  if (n === 1) return;
+  ctx.lineTo((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2);
+  for (let k = 1; k < n - 1; k++) ctx.quadraticCurveTo(pts[k][0], pts[k][1], (pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2);
+  ctx.lineTo(pts[n - 1][0], pts[n - 1][1]);
+}
+
 const colorCache = new Map<string, [number, number, number]>();
 
 /** Parse "#rrggbb" or "hsl(h s% l%)" to RGB. */
@@ -183,6 +196,13 @@ export class MapRenderer {
   private focusKey = '';
   private shapes: NationShapes | null = null;
   private shapesKey = '';
+  private rivers: Float32Array = new Float32Array(0);
+  private shader: TerrainShader | null = null;
+  private detail = document.createElement('canvas');
+  private detailKey = '';
+  private detailTimer = 0;
+  /** Called when a sharper painting of the view is ready to be drawn. */
+  onDetail?: () => void;
 
   constructor(private world: World) {
     const { width, height } = world.map;
@@ -197,7 +217,34 @@ export class MapRenderer {
   }
 
   private paintBase(): void {
-    paintTerrain(this.world.map, this.base);
+    paintTerrain(this.world.map, this.base, TERRAIN_SCALE, false);
+    this.rivers = riverCurves(this.world.map);
+  }
+
+  /**
+   * Close in, the whole-map terrain image is too coarse, so once the view settles the visible part
+   * is painted again at screen resolution. Until then the coarse image stands in.
+   */
+  private detailFor(view: ViewState, cw: number, ch: number): HTMLCanvasElement | null {
+    if (view.zoom <= TERRAIN_SCALE * 1.15) return null;
+    const key = `${view.zoom.toFixed(3)}:${view.ox.toFixed(3)}:${view.oy.toFixed(3)}:${cw}:${ch}`;
+    if (key === this.detailKey) return this.detail;
+    clearTimeout(this.detailTimer);
+    this.detailTimer = window.setTimeout(() => {
+      const res = Math.min(1.5, window.devicePixelRatio || 1);
+      const W = Math.ceil(cw * res);
+      const H = Math.ceil(ch * res);
+      this.detail.width = W;
+      this.detail.height = H;
+      const ctx = this.detail.getContext('2d')!;
+      const img = ctx.createImageData(W, H);
+      this.shader ??= new TerrainShader(this.world.map);
+      this.shader.paint(img, view.ox, view.oy, 1 / (view.zoom * res), 1 / (view.zoom * res));
+      ctx.putImageData(img, 0, 0);
+      this.detailKey = key;
+      this.onDetail?.();
+    }, 140);
+    return null;
   }
 
   private paintOverlay(view: ViewState): void {
@@ -372,6 +419,9 @@ export class MapRenderer {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.base, tx(0), ty(0), map.width * z, map.height * z);
+    const detail = this.detailFor(view, cw, ch);
+    if (detail) ctx.drawImage(detail, 0, 0, cw, ch);
+    drawRiverCurves(ctx, this.rivers, view, { x0: view.ox, y0: view.oy, x1: view.ox + cw / z, y1: view.oy + ch / z });
     this.paintOverlay(view);
     // Climate layers are smooth fields; the realm layers keep crisp tile edges until borders are drawn as lines.
     ctx.imageSmoothingEnabled = view.layer === 'temperature' || view.layer === 'rainfall' || view.layer === 'currents';
@@ -382,14 +432,17 @@ export class MapRenderer {
     const selectedBand = view.selectedBand ?? -1;
 
     const w = map.width;
-    const cx = (t: number) => tx((t % w) + 0.5);
-    const cy = (t: number) => ty(Math.floor(t / w) + 0.5);
+    /** Screen position of the point a path passes through on a tile. */
+    const wp = (t: number): Point => {
+      const [x, y] = waypoint(map, world.settlements, t);
+      return [tx(x), ty(y)];
+    };
+    const cx = (t: number) => wp(t)[0];
+    const cy = (t: number) => wp(t)[1];
+    /** A path drawn as a smooth curve through its waypoints. */
     const pathTo = (path: number[], from = 0) => {
       ctx.beginPath();
-      for (let k = from; k < path.length; k++) {
-        if (k === from) ctx.moveTo(cx(path[k]), cy(path[k]));
-        else ctx.lineTo(cx(path[k]), cy(path[k]));
-      }
+      traceSmooth(ctx, path.slice(from).map(wp));
       ctx.stroke();
     };
     const x0 = Math.max(0, Math.floor(view.ox) - 1);
@@ -397,9 +450,13 @@ export class MapRenderer {
     const x1 = Math.min(w, Math.ceil(view.ox + cw / z) + 1);
     const y1 = Math.min(map.height, Math.ceil(view.oy + ch / z) + 1);
 
-    // Roads: each level drawn as its own line style, joining neighbouring road tiles.
+    // Roads: each level drawn as its own line style. Every road tile draws its own stretch, curving
+    // from the midpoint towards one neighbour, through its waypoint, to the midpoint towards the
+    // other, so the pieces join into smooth winding roads that meet at the towns.
     if (view.showRoads) {
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const nbs: Point[] = [];
       for (let level = 1; level <= 4; level++) {
         const style = ROAD_STYLE[level];
         ctx.strokeStyle = style.color;
@@ -410,16 +467,26 @@ export class MapRenderer {
           for (let x = x0; x < x1; x++) {
             const i = y * w + x;
             if ((map.road[i] | 0) < level) continue;
-            // Right, down, and both down diagonals, so every link is drawn once.
-            for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [-1, 1]]) {
-              const nx = x + dx;
-              const ny = y + dy;
-              if (nx < 0 || nx >= w || ny >= map.height) continue;
-              const j = ny * w + nx;
-              if ((map.road[j] | 0) < level) continue;
-              if (dx !== 0 && dy !== 0 && ((map.road[y * w + nx] | 0) >= level || (map.road[ny * w + x] | 0) >= level)) continue;
-              ctx.moveTo(cx(i), cy(i));
-              ctx.lineTo(cx(j), cy(j));
+            const p = wp(i);
+            nbs.length = 0;
+            for (let d = 0; d < 8; d++) {
+              const nx = x + DX[d];
+              const ny = y + DY[d];
+              if (nx < 0 || ny < 0 || nx >= w || ny >= map.height) continue;
+              if ((map.road[ny * w + nx] | 0) < level) continue;
+              // A diagonal step is left out where the two tiles already join round the corner.
+              if (DX[d] !== 0 && DY[d] !== 0 && ((map.road[y * w + nx] | 0) >= level || (map.road[ny * w + x] | 0) >= level)) continue;
+              const q = wp(ny * w + nx);
+              nbs.push([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]);
+            }
+            if (nbs.length === 2) {
+              ctx.moveTo(nbs[0][0], nbs[0][1]);
+              ctx.quadraticCurveTo(p[0], p[1], nbs[1][0], nbs[1][1]);
+            } else {
+              for (const m of nbs) {
+                ctx.moveTo(p[0], p[1]);
+                ctx.lineTo(m[0], m[1]);
+              }
             }
           }
         }
@@ -447,16 +514,22 @@ export class MapRenderer {
     }
 
     const frac = view.frac;
-    const lerpTile = (a: number, b: number): [number, number] => [cx(a) + (cx(b) - cx(a)) * frac, cy(a) + (cy(b) - cy(a)) * frac];
-    /** Position along a path between last month's step and this month's. */
-    const along = (path: number[], from: number, to: number): [number, number] => {
-      if (frac >= 1 || from >= to) return [cx(path[to]), cy(path[to])];
-      const pos = from + (to - from) * frac;
-      const k = Math.floor(pos);
-      const f = pos - k;
-      const a = path[Math.min(k, path.length - 1)];
-      const b = path[Math.min(k + 1, path.length - 1)];
-      return [cx(a) + (cx(b) - cx(a)) * f, cy(a) + (cy(b) - cy(a)) * f];
+    /** Position along a path's smooth curve between last month's step and this month's. */
+    const along = (path: number[], from: number, to: number): Point => {
+      const pos = frac >= 1 || from >= to ? to : from + (to - from) * frac;
+      // Only the waypoints around the traveller matter for the curve.
+      const lo = Math.max(0, Math.floor(pos) - 1);
+      const hi = Math.min(path.length, Math.ceil(pos) + 2);
+      return pointAlong(path.slice(lo, hi).map(wp), pos - lo);
+    };
+    /** An army's position: along its marching path when last month's tile is on it, else straight between the two. */
+    const armyAt = (a: { path: number[]; step: number; prevTile: number; tile: number }): Point => {
+      if (a.path[a.step] === a.tile) {
+        for (let k = a.step; k >= Math.max(0, a.step - 12); k--) if (a.path[k] === a.prevTile) return along(a.path, k, a.step);
+      }
+      const p = wp(a.prevTile);
+      const q = wp(a.tile);
+      return [p[0] + (q[0] - p[0]) * frac, p[1] + (q[1] - p[1]) * frac];
     };
 
     // Everything outside the selected nation sinks into shadow (roads and routes included).
@@ -476,8 +549,7 @@ export class MapRenderer {
       if (selected >= 0 && tribe.polityId !== selected && !mine) ctx.globalAlpha = 0.35;
       if (b.path.length > 1 && to < b.path.length - 1) {
         ctx.beginPath();
-        ctx.moveTo(X, Y);
-        for (let k = to + 1; k < b.path.length; k++) ctx.lineTo(cx(b.path[k]), cy(b.path[k]));
+        traceSmooth(ctx, [[X, Y], ...b.path.slice(to + 1).map(wp)]);
         ctx.strokeStyle = 'rgba(255, 240, 210, 0.45)';
         ctx.lineWidth = 1;
         ctx.setLineDash([1, 3]);
@@ -510,8 +582,7 @@ export class MapRenderer {
       const [X, Y] = along(p.path, Math.min(p.prevStep, to), to);
       if (selected >= 0 && p.polityId !== selected) ctx.globalAlpha = 0.35;
       ctx.beginPath();
-      ctx.moveTo(X, Y);
-      for (let k = to + 1; k < p.path.length; k++) ctx.lineTo(cx(p.path[k]), cy(p.path[k]));
+      traceSmooth(ctx, [[X, Y], ...p.path.slice(to + 1).map(wp)]);
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 3]);
@@ -560,7 +631,7 @@ export class MapRenderer {
           ctx.setLineDash([]);
           ctx.globalAlpha = 1;
         }
-        const [X, Y] = lerpTile(a.prevTile, a.tile);
+        const [X, Y] = armyAt(a);
         const s = Math.max(5, Math.min(12, 3 + Math.log10(Math.max(10, a.size)) * 2)) * Math.max(0.8, Math.min(1.4, z / 5));
         ctx.beginPath();
         ctx.moveTo(X, Y - s);
@@ -588,8 +659,7 @@ export class MapRenderer {
         const life = m.kind === 'capture' ? 8 : 5;
         if (age > life) continue;
         const alpha = Math.max(0, 1 - age / life);
-        const X = cx(m.tile);
-        const Y = cy(m.tile);
+        const [X, Y] = wp(m.tile);
         const r = (5 + Math.min(10, Math.log10(Math.max(10, m.size)) * 3)) * Math.max(0.8, Math.min(1.5, z / 5));
         ctx.globalAlpha = alpha;
         ctx.strokeStyle = m.kind === 'capture' ? '#d62f2f' : '#1b1b1b';
@@ -700,7 +770,7 @@ export class MapRenderer {
     for (const s of world.settlements) {
       if (!s.alive || s.connected || (selected >= 0 && s.polityId !== selected)) continue;
       ctx.beginPath();
-      ctx.arc(tx(s.x + 0.5), ty(s.y + 0.5), Math.max(6, z * 0.9), 0, Math.PI * 2);
+      ctx.arc(tx(s.px), ty(s.py), Math.max(6, z * 0.9), 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -710,7 +780,7 @@ export class MapRenderer {
       if (!s.alive || s.occupiedBy < 0) continue;
       if (selected >= 0 && s.polityId !== selected && s.occupiedBy !== selected) continue;
       ctx.beginPath();
-      ctx.arc(tx(s.x + 0.5), ty(s.y + 0.5), Math.max(7, z * 1.1), 0, Math.PI * 2);
+      ctx.arc(tx(s.px), ty(s.py), Math.max(7, z * 1.1), 0, Math.PI * 2);
       ctx.strokeStyle = '#111';
       ctx.lineWidth = 4;
       ctx.stroke();
@@ -725,8 +795,8 @@ export class MapRenderer {
     ctx.font = `600 ${Math.max(10, Math.min(14, z * 2))}px "Alegreya Sans", system-ui, sans-serif`;
     ctx.textBaseline = 'middle';
     for (const s of list) {
-      const X = tx(s.x + 0.5);
-      const Y = ty(s.y + 0.5);
+      const X = tx(s.px);
+      const Y = ty(s.py);
       if (X < -20 || Y < -20 || X > cw + 20 || Y > ch + 20) continue;
       const foreign = selected >= 0 && (!s.alive || s.polityId !== selected);
       ctx.globalAlpha = foreign ? 0.35 : 1;
@@ -764,9 +834,13 @@ export class MapRenderer {
     if (selected >= 0 && shapes) nameNation(selected, true);
 
     if (view.selectedTile >= 0 && view.selectedSettlement < 0) {
+      // The inspected spot of land: a ring, not a square.
+      const [X, Y] = wp(view.selectedTile);
       ctx.strokeStyle = ink.accent;
       ctx.lineWidth = 2;
-      ctx.strokeRect(tx(view.selectedTile % map.width), ty(Math.floor(view.selectedTile / map.width)), z, z);
+      ctx.beginPath();
+      ctx.arc(X, Y, Math.max(5, z * 0.6), 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 }

@@ -51,7 +51,7 @@ const store = {
 
 let cfg: WorldConfig = loadConfig();
 let world = new World(cfg);
-let renderer = new MapRenderer(world);
+let renderer = newRenderer();
 let tab: Tab = (store.get('tab') as Tab) || 'inspect';
 let playing = false;
 let speed = 10;
@@ -95,6 +95,12 @@ const view: ViewState = {
   selectedPolity: -1,
   selectedTile: -1,
 };
+
+function newRenderer(): MapRenderer {
+  const r = new MapRenderer(world);
+  r.onDetail = () => drawMap();
+  return r;
+}
 
 function loadConfig(): WorldConfig {
   const saved = store.get('config');
@@ -233,7 +239,7 @@ function pick(e: PointerEvent): void {
   let bd = Math.max(1.2, 10 / view.zoom);
   for (const s of world.settlements) {
     if (!s.alive && !(view.showRuins && s.peakPop > 800)) continue;
-    const d = Math.hypot(s.x + 0.5 - wx, s.y + 0.5 - wy);
+    const d = Math.hypot(s.px - wx, s.py - wy);
     if (d < bd) {
       bd = d;
       best = s.id;
@@ -1253,7 +1259,7 @@ function newWorld(): void {
   playing = false;
   pendingYears = 0;
   world = new World(cfg);
-  renderer = new MapRenderer(world);
+  renderer = newRenderer();
   view.selectedSettlement = -1;
   view.selectedPolity = -1;
   view.selectedTile = -1;

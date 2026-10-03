@@ -379,8 +379,12 @@ export interface Settlement {
   id: number;
   name: string;
   tile: number;
+  /** The tile it stands on (the simulation keeps its books per tile). */
   x: number;
   y: number;
+  /** Where exactly it stands on the land, in map coordinates (the tile's centre is x + 0.5). */
+  px: number;
+  py: number;
   founded: number;
   alive: boolean;
   abandoned: number | null;
