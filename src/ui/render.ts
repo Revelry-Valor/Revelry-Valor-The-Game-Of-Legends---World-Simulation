@@ -1,8 +1,9 @@
-import { BIOMES, Biome, Relief } from '../engine/data/biomes';
 import { Res } from '../engine/data/economy';
+import type { MapData } from '../engine/types';
 import type { World } from '../engine/world';
 import { LAND_USE_COLORS } from '../engine/data/settlements';
 import { friendly } from '../engine/systems/diplomacy';
+import { paintTerrain } from './terrain';
 
 const ROAD_STYLE = [
   { color: '', width: 0, min: 0 },
@@ -13,7 +14,7 @@ const ROAD_STYLE = [
 ];
 export const CARAVAN_COLOR: Record<string, string> = { merchant: '#e8b923', family: '#b57be0', nomad: '#d99152', convoy: '#3fbf7f' };
 
-export type MapLayer = 'terrain' | 'political' | 'nations' | 'culture' | 'race' | 'resource' | 'land';
+export type MapLayer = 'terrain' | 'political' | 'nations' | 'culture' | 'race' | 'resource' | 'land' | 'temperature' | 'rainfall' | 'currents';
 
 export interface ViewState {
   layer: MapLayer;
@@ -42,6 +43,102 @@ interface NationShapes {
   /** Nation owning each land tile, -1 if none. */
   polityAt: Int32Array;
   info: Map<number, { tiles: number; sx: number; sy: number; edges: number[] }>;
+}
+
+const TEMP_RAMP: [number, [number, number, number]][] = [
+  [0, [70, 40, 160]],
+  [0.2, [70, 130, 230]],
+  [0.4, [120, 210, 220]],
+  [0.55, [150, 215, 110]],
+  [0.7, [240, 210, 70]],
+  [0.85, [240, 130, 50]],
+  [1, [200, 40, 40]],
+];
+const RAIN_RAMP: [number, [number, number, number]][] = [
+  [0, [190, 140, 80]],
+  [0.25, [225, 200, 120]],
+  [0.45, [150, 200, 100]],
+  [0.65, [60, 160, 90]],
+  [0.85, [40, 120, 170]],
+  [1, [40, 60, 160]],
+];
+
+function ramp(stops: [number, [number, number, number]][], v: number): [number, number, number] {
+  if (v <= stops[0][0]) return stops[0][1];
+  for (let k = 1; k < stops.length; k++) {
+    if (v <= stops[k][0]) {
+      const [a, ca] = stops[k - 1];
+      const [b, cb] = stops[k];
+      const t = (v - a) / (b - a);
+      return [ca[0] + (cb[0] - ca[0]) * t, ca[1] + (cb[1] - ca[1]) * t, ca[2] + (cb[2] - ca[2]) * t];
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+
+export type ClimateLayer = 'temperature' | 'rainfall' | 'currents';
+
+/** Colour a climate layer into RGBA pixels, one per tile. */
+export function paintClimate(map: MapData, layer: ClimateLayer, d: Uint8ClampedArray): void {
+  for (let i = 0; i < map.size; i++) {
+    let c: [number, number, number];
+    let a = 175;
+    if (layer === 'temperature') c = ramp(TEMP_RAMP, map.temperature[i]);
+    else if (layer === 'rainfall') {
+      if (map.elevation[i] < 0) continue;
+      c = ramp(RAIN_RAMP, map.moisture[i]);
+    } else {
+      // Water warmer than usual for its latitude in red, colder in blue.
+      if (map.elevation[i] >= 0) continue;
+      const v = Math.max(-1, Math.min(1, map.seaAnomaly[i] / 0.08));
+      c = v >= 0 ? [220, 70, 50] : [50, 110, 220];
+      a = Math.round(Math.abs(v) * 190);
+    }
+    d[i * 4] = c[0];
+    d[i * 4 + 1] = c[1];
+    d[i * 4 + 2] = c[2];
+    d[i * 4 + 3] = a;
+  }
+}
+
+/** Arrows along the ocean currents, spaced to suit the zoom. */
+export function drawCurrents(ctx: CanvasRenderingContext2D, map: MapData, view: { zoom: number; ox: number; oy: number }, cw: number, ch: number): void {
+  const z = view.zoom;
+  const w = map.width;
+  const every = Math.max(2, Math.round(14 / z));
+  const x0 = Math.max(0, Math.floor(view.ox / every) * every);
+  const y0 = Math.max(0, Math.floor(view.oy / every) * every);
+  const x1 = Math.min(w, Math.ceil(view.ox + cw / z));
+  const y1 = Math.min(map.height, Math.ceil(view.oy + ch / z));
+  ctx.strokeStyle = 'rgba(240, 248, 255, 0.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let y = y0; y < y1; y += every) {
+    for (let x = x0; x < x1; x += every) {
+      const i = y * w + x;
+      if (map.elevation[i] >= 0) continue;
+      const u = map.currentU[i];
+      const v = map.currentV[i];
+      const m = Math.hypot(u, v);
+      if (m < 0.15) continue;
+      const len = Math.min(1, m) * every * z * 0.8;
+      const sx = (x + 0.5 - view.ox) * z;
+      const sy = (y + 0.5 - view.oy) * z;
+      const ex = sx + (u / m) * len;
+      const ey = sy + (v / m) * len;
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      // Arrow head.
+      const hx = (u / m) * Math.min(5, len * 0.4);
+      const hy = (v / m) * Math.min(5, len * 0.4);
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - hx - hy * 0.6, ey - hy + hx * 0.6);
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - hx + hy * 0.6, ey - hy - hx * 0.6);
+    }
+  }
+  ctx.stroke();
 }
 
 const colorCache = new Map<string, [number, number, number]>();
@@ -90,8 +187,6 @@ export class MapRenderer {
   constructor(private world: World) {
     const { width, height } = world.map;
     this.base = document.createElement('canvas');
-    this.base.width = width;
-    this.base.height = height;
     this.overlay = document.createElement('canvas');
     this.overlay.width = width;
     this.overlay.height = height;
@@ -102,42 +197,7 @@ export class MapRenderer {
   }
 
   private paintBase(): void {
-    const map = this.world.map;
-    const ctx = this.base.getContext('2d')!;
-    const img = ctx.createImageData(map.width, map.height);
-    const w = map.width;
-    for (let i = 0; i < map.size; i++) {
-      const b = map.biome[i];
-      let [r, g, bl] = BIOMES[b].color;
-      const e = map.elevation[i];
-      if (e >= 0) {
-        // Hillshade from the north-west.
-        const x = i % w;
-        const nw = x > 0 && i - w - 1 >= 0 ? Math.max(0, map.elevation[i - w - 1]) : e;
-        const shade = 1 + Math.max(-0.35, Math.min(0.35, (nw - e) * -6));
-        const lift = map.relief[i] === Relief.Mountains ? 1.08 : 1;
-        r *= shade * lift;
-        g *= shade * lift;
-        bl *= shade * lift;
-        if (map.temperature[i] < 0.18 && map.relief[i] === Relief.Mountains) [r, g, bl] = [236, 238, 242];
-        if (map.river[i] > 0) {
-          const k = Math.min(1, 0.45 + map.river[i] / (map.riverThreshold * 6));
-          r = r * (1 - k) + 58 * k;
-          g = g * (1 - k) + 118 * k;
-          bl = bl * (1 - k) + 176 * k;
-        }
-      } else if (b !== Biome.Lake) {
-        const depth = Math.min(1, -e);
-        r *= 1 - depth * 0.35;
-        g *= 1 - depth * 0.3;
-        bl *= 1 - depth * 0.2;
-      }
-      img.data[i * 4] = Math.min(255, r);
-      img.data[i * 4 + 1] = Math.min(255, g);
-      img.data[i * 4 + 2] = Math.min(255, bl);
-      img.data[i * 4 + 3] = 255;
-    }
-    ctx.putImageData(img, 0, 0);
+    paintTerrain(this.world.map, this.base);
   }
 
   private paintOverlay(view: ViewState): void {
@@ -152,7 +212,9 @@ export class MapRenderer {
     const img = ctx.createImageData(map.width, map.height);
     const d = img.data;
     const w = map.width;
-    if (view.layer === 'land') {
+    if (view.layer === 'temperature' || view.layer === 'rainfall' || view.layer === 'currents') {
+      paintClimate(map, view.layer, d);
+    } else if (view.layer === 'land') {
       // What every worked tile is used for.
       for (let i = 0; i < map.size; i++) {
         if (map.owner[i] < 0) continue;
@@ -307,10 +369,15 @@ export class MapRenderer {
     const z = view.zoom;
     const tx = (x: number) => (x - view.ox) * z;
     const ty = (y: number) => (y - view.oy) * z;
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.base, tx(0), ty(0), map.width * z, map.height * z);
     this.paintOverlay(view);
+    // Climate layers are smooth fields; the realm layers keep crisp tile edges until borders are drawn as lines.
+    ctx.imageSmoothingEnabled = view.layer === 'temperature' || view.layer === 'rainfall' || view.layer === 'currents';
     ctx.drawImage(this.overlay, tx(0), ty(0), map.width * z, map.height * z);
+    ctx.imageSmoothingEnabled = false;
+    if (view.layer === 'currents') drawCurrents(ctx, map, view, cw, ch);
     const selected = view.selectedPolity >= 0 && world.polities[view.selectedPolity]?.alive ? view.selectedPolity : -1;
     const selectedBand = view.selectedBand ?? -1;
 

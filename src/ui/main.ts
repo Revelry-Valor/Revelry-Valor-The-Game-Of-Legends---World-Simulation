@@ -20,6 +20,8 @@ import { pactsBetween, sameConfederation } from '../engine/systems/diplomacy';
 import { CARAVAN_COLOR, MapRenderer, type MapLayer, type ViewState } from './render';
 import { mountTechTree, techDetail } from './techtree';
 import { TRAITS, TRAIT_BY_ID } from '../engine/data/traits';
+import { BRUSHES, type BrushTool } from '../engine/editor';
+import { WorldEditor, type EditorView } from './worldeditor';
 
 type Tab = 'inspect' | 'market' | 'realms' | 'peoples' | 'chronicle' | 'charts' | 'setup';
 
@@ -72,6 +74,9 @@ let overlay: 'nation' | 'tech' | null = null;
 let overlayPolity = -1;
 let selectedTech: string | null = null;
 let lastOverlay = 0;
+/** The world editor, while the land is being shaped (the simulation waits). */
+let editing: WorldEditor | null = null;
+let spaceHeld = false;
 
 const view: ViewState = {
   layer: 'political',
@@ -118,9 +123,11 @@ function resizeCanvas(): void {
 
 function fitView(): void {
   const r = canvas.getBoundingClientRect();
-  view.zoom = Math.max(1, Math.min(r.width / world.map.width, r.height / world.map.height));
-  view.ox = (world.map.width - r.width / view.zoom) / 2;
-  view.oy = (world.map.height - r.height / view.zoom) / 2;
+  const mw = editing ? editing.width : world.map.width;
+  const mh = editing ? editing.height : world.map.height;
+  view.zoom = Math.max(1, Math.min(r.width / mw, r.height / mh));
+  view.ox = (mw - r.width / view.zoom) / 2;
+  view.oy = (mh - r.height / view.zoom) / 2;
 }
 
 function ink() {
@@ -129,7 +136,8 @@ function ink() {
 }
 
 function drawMap(): void {
-  renderer.draw(canvas, view, ink());
+  if (editing) editing.draw(canvas, view);
+  else renderer.draw(canvas, view, ink());
 }
 
 function centerOn(x: number, y: number): void {
@@ -141,11 +149,40 @@ function centerOn(x: number, y: number): void {
 }
 
 let drag: { x: number; y: number; ox: number; oy: number; moved: boolean } | null = null;
+/** Pointer position in tile coordinates. */
+function tileAt(e: PointerEvent): [number, number] {
+  const r = canvas.getBoundingClientRect();
+  return [view.ox + (e.clientX - r.left) / view.zoom, view.oy + (e.clientY - r.top) / view.zoom];
+}
 canvas.addEventListener('pointerdown', (e) => {
-  drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false };
   canvas.setPointerCapture(e.pointerId);
+  // In the editor the left button paints; the right or middle button, or Space, pans.
+  if (editing && e.button === 0 && !spaceHeld) {
+    editing.begin(...tileAt(e));
+    drawMap();
+    return;
+  }
+  drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false };
+});
+canvas.addEventListener('contextmenu', (e) => {
+  if (editing) e.preventDefault();
+});
+canvas.addEventListener('pointerleave', () => {
+  if (editing && !editing.painting) {
+    editing.cursor = null;
+    drawMap();
+  }
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (editing) {
+    const [x, y] = tileAt(e);
+    editing.cursor = { x, y };
+    if (editing.painting) editing.move(x, y);
+    if (!drag) {
+      drawMap();
+      return;
+    }
+  }
   if (!drag) return;
   const dx = e.clientX - drag.x;
   const dy = e.clientY - drag.y;
@@ -158,6 +195,15 @@ canvas.addEventListener('pointermove', (e) => {
   drawMap();
 });
 canvas.addEventListener('pointerup', (e) => {
+  if (editing) {
+    if (editing.painting) {
+      editing.end();
+      drawMap();
+      renderPanel(true);
+    }
+    drag = null;
+    return;
+  }
   if (drag && !drag.moved) pick(e);
   drag = null;
 });
@@ -293,17 +339,24 @@ $('theme').addEventListener('click', () => {
 
 // ------------------------------------------------------------------ map tools
 
+const LAYER_LEGEND: Partial<Record<MapLayer, string>> = {
+  temperature: '<span><i class="ramp" style="background:linear-gradient(90deg,#4628a0,#4682e6,#78d2dc,#96d76e,#f0d246,#f08232,#c82828)"></i>Frozen → sweltering (yearly mean)</span>',
+  rainfall: '<span><i class="ramp" style="background:linear-gradient(90deg,#be8c50,#e1c878,#96c864,#3ca05a,#2878aa,#283ca0)"></i>Desert dry → drenched</span>',
+  currents: '<span><i class="swatch-dot" style="background:#dc4632"></i>Warmer water than usual for the latitude</span><span><i class="swatch-dot" style="background:#326ede"></i>Colder</span><span>Arrows: the way the surface water flows</span>',
+};
+
 for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-layer]')) {
   btn.addEventListener('click', () => {
     view.layer = btn.dataset.layer as MapLayer;
     for (const b of document.querySelectorAll<HTMLButtonElement>('[data-layer]')) b.setAttribute('aria-pressed', String(b === btn));
     $('resource-pick').hidden = view.layer !== 'resource';
-    $('land-legend').hidden = view.layer !== 'land';
+    const legend = LAYER_LEGEND[view.layer];
+    $('land-legend').hidden = !legend;
+    $('land-legend').innerHTML = legend ?? '';
     renderer.invalidate();
     drawMap();
   });
 }
-$('land-legend').innerHTML = LAND_USE_NAMES.map((n, u) => (u === 0 ? '' : `<span><i class="swatch-dot" style="background:rgb(${LAND_USE_COLORS[u].join(',')})"></i>${n}</span>`)).join('') ;
 const resSel = $<HTMLSelectElement>('resource');
 resSel.innerHTML = RES_NAMES.map((n, i) => `<option value="${i}" ${i === view.resource ? 'selected' : ''}>${n}</option>`).join('');
 resSel.addEventListener('change', () => {
@@ -491,6 +544,24 @@ for (const el of [overlayBody, ttDetail]) {
   });
 }
 document.addEventListener('keydown', (e) => {
+  if (editing) {
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+    if (e.key === ' ' && !typing) {
+      spaceHeld = true;
+      e.preventDefault();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) {
+      e.preventDefault();
+      if (editing.undo()) {
+        drawMap();
+        renderPanel(true);
+      }
+    } else if (!typing && (e.key === '[' || e.key === ']')) {
+      editing.radius = Math.max(1, Math.min(40, editing.radius + (e.key === ']' ? 1 : -1)));
+      drawMap();
+      renderPanel(true);
+    }
+    return;
+  }
   if (e.key !== 'Escape') return;
   if (overlay) return closeOverlay();
   // Esc with nothing open clears the map selection and its nation highlight.
@@ -501,6 +572,10 @@ document.addEventListener('keydown', (e) => {
   renderer.invalidate();
   drawMap();
   renderPanel(true);
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.key === ' ') spaceHeld = false;
 });
 
 const sLink = (id: number) => {
@@ -959,6 +1034,19 @@ function renderSetup(): string {
       ${num('s-land', 'Land', cfg.landFraction, 0.2, 0.75, 0.01, 'Share of the map above sea level.')}
       ${num('s-temp', 'Temperature', cfg.temperature, -0.3, 0.3, 0.02, 'Negative for an ice age, positive for a hothouse.')}
       ${num('s-moist', 'Rainfall', cfg.moisture, -0.3, 0.3, 0.02, 'Drier worlds have more desert and steppe.')}
+      <div class="row">
+        ${num('s-latn', 'Top edge latitude', cfg.latNorth ?? 90, -90, 90, 1, 'Degrees: 90 is the north pole, 0 the equator.')}
+        ${num('s-lats', 'Bottom edge latitude', cfg.latSouth ?? -90, -90, 90, 1, '-90 is the south pole.')}
+      </div>
+      ${num('s-tilt', 'Axial tilt', cfg.axialTilt ?? 23.5, 0, 60, 0.5, 'Degrees. Earth is 23.5. More tilt: harsher seasons, milder poles, a cooler equator.')}
+      <label class="toggle" for="s-currents"><input id="s-currents" type="checkbox" ${cfg.oceanCurrents !== false ? 'checked' : ''}> Ocean currents <small>&nbsp;warm water carried poleward along eastern coasts, cold water towards the equator along western ones</small></label>
+      <div class="shape-box">
+        <p>${cfg.heightmap ? 'This world’s land was <strong>shaped by hand</strong>.' : 'The land is generated from the seed.'} Paint coasts, raise hills, mountains, peaks and cliffs, and cut valleys.</p>
+        <div class="row">
+          <button type="button" id="s-shape">Shape the land…</button>
+          ${cfg.heightmap ? '<label class="toggle" for="s-keep"><input id="s-keep" type="checkbox" checked> Keep the hand-shaped land</label>' : ''}
+        </div>
+      </div>
       ${num('s-abund', 'Mineral wealth', cfg.resourceAbundance, 0.3, 2.5, 0.1, 'How rich the ore, gold and gem deposits are.')}
       ${num('s-magic', 'Magic', cfg.magic, 0, 2, 1, '0 none · 1 low · 2 high. Ley lines, arcane techs and monsters.')}
       ${num('s-cal', 'Calamity', cfg.calamity, 0, 3, 0.1, 'Frequency of plagues, disasters and beasts.')}
@@ -978,14 +1066,29 @@ function renderSetup(): string {
 
 function wireSetup(): void {
   const form = $<HTMLFormElement>('setup');
-  for (const id of ['s-land', 's-temp', 's-moist', 's-abund', 's-magic', 's-cal', 's-space']) {
+  for (const id of ['s-land', 's-temp', 's-moist', 's-abund', 's-magic', 's-cal', 's-space', 's-latn', 's-lats', 's-tilt']) {
     const inp = $<HTMLInputElement>(id);
     inp.addEventListener('input', () => ($(id + '-o').textContent = inp.value));
   }
   $('s-reroll').addEventListener('click', () => ($<HTMLInputElement>('s-seed').value = String(Math.floor(Math.random() * 1e6))));
   $('s-reset-races').addEventListener('click', () => ($<HTMLTextAreaElement>('s-races').value = JSON.stringify(DEFAULT_RACES, null, 2)));
+  $('s-shape').addEventListener('click', () => {
+    const next = readSetup();
+    if (next) openEditor(next);
+  });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
+    const next = readSetup();
+    if (!next) return;
+    cfg = next;
+    store.set('config', JSON.stringify(cfg));
+    newWorld();
+  });
+}
+
+/** The settings in the Setup form, or null (with the error shown) if the races can't be read. */
+function readSetup(): WorldConfig | null {
+  {
     const err = $('s-error');
     let races: RaceDef[];
     try {
@@ -995,12 +1098,13 @@ function wireSetup(): void {
     } catch (x) {
       err.textContent = `Races could not be read: ${(x as Error).message}`;
       err.hidden = false;
-      return;
+      return null;
     }
     err.hidden = true;
     const [w, h] = MAP_SIZES[$<HTMLSelectElement>('s-size').value] ?? MAP_SIZES.medium;
     const v = (id: string) => Number($<HTMLInputElement>(id).value);
-    cfg = defaultConfig({
+    const keep = document.getElementById('s-keep') as HTMLInputElement | null;
+    return defaultConfig({
       name: $<HTMLInputElement>('s-name').value.trim() || 'Aerth',
       seed: Math.floor(v('s-seed')) || 1,
       width: w,
@@ -1016,8 +1120,129 @@ function wireSetup(): void {
       homelandsPerRace: Math.max(1, Math.min(4, Math.floor(v('s-home')))),
       tribesPerHomeland: Math.max(1, Math.min(8, Math.floor(v('s-tribes')))),
       races: races.map((r) => ({ ...DEFAULT_RACES[0], ...r })),
+      latNorth: v('s-latn'),
+      latSouth: v('s-lats'),
+      axialTilt: v('s-tilt'),
+      oceanCurrents: $<HTMLInputElement>('s-currents').checked,
+      heightmap: keep?.checked ? cfg.heightmap : undefined,
     });
+  }
+}
+
+// ------------------------------------------------------------------ world editor
+
+function openEditor(base: WorldConfig): void {
+  playing = false;
+  closeOverlay();
+  editing = new WorldEditor(base);
+  autoFit = true;
+  fitView();
+  canvas.classList.add('painting');
+  showMapChrome(false);
+  drawMap();
+  refreshTopbar();
+  renderPanel(true);
+}
+
+/** The map's layer bar and key belong to the simulation; the editor hides them. */
+function showMapChrome(on: boolean): void {
+  for (const el of document.querySelectorAll<HTMLElement>('.map-tools, .hint')) el.hidden = !on;
+}
+
+function closeEditor(): void {
+  editing = null;
+  canvas.classList.remove('painting');
+  showMapChrome(true);
+  autoFit = true;
+  fitView();
+  drawMap();
+  renderPanel(true);
+}
+
+function renderEditor(ed: WorldEditor): string {
+  const c = ed.cfg;
+  const brush = BRUSHES.find((b) => b.id === ed.tool)!;
+  const num = (id: string, label: string, v: number, min: number, max: number, step: number, hint = '') =>
+    `<label class="field" for="${id}"><span>${label} <output id="${id}-o">${v}</output></span><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${v}">${hint ? `<small>${hint}</small>` : ''}</label>`;
+  const views: [EditorView, string][] = [['terrain', 'Terrain'], ['temperature', 'Temperature'], ['rainfall', 'Rainfall'], ['currents', 'Currents']];
+  return `
+    <header class="head"><h2>Shape the land</h2><p class="sub">Drag on the map to paint. Right-drag or hold Space to pan, scroll to zoom. [ and ] resize the brush, Ctrl+Z undoes.</p></header>
+    <div class="setup">
+      <div class="brushes" role="group" aria-label="Brush">${BRUSHES.map((b) => `<button type="button" data-brush="${b.id}" aria-pressed="${b.id === ed.tool}" title="${esc(b.hint)}">${b.name}</button>`).join('')}</div>
+      <p class="sub">${esc(brush.hint)}</p>
+      ${num('e-size', 'Brush size (tiles)', ed.radius, 1, 40, 1)}
+      ${num('e-strength', 'Strength', ed.strength, 0.05, 1, 0.05)}
+      <div class="row">
+        <button type="button" id="e-undo" ${ed.canUndo() ? '' : 'disabled'}>Undo</button>
+        <button type="button" id="e-blank">Blank ocean</button>
+        <button type="button" id="e-random">Fresh random land</button>
+      </div>
+      <h3 class="mini-h">See</h3>
+      <div class="seg" role="group" aria-label="Editor view">${views.map(([k, n]) => `<button type="button" data-eview="${k}" aria-pressed="${ed.layer === k}">${n}</button>`).join('')}</div>
+      ${ed.layer !== 'terrain' ? `<p class="land-legend">${LAYER_LEGEND[ed.layer] ?? ''}</p>` : ''}
+      <h3 class="mini-h">Place on the globe</h3>
+      <div class="row">
+        ${num('e-latn', 'Top edge', c.latNorth ?? 90, -90, 90, 1)}
+        ${num('e-lats', 'Bottom edge', c.latSouth ?? -90, -90, 90, 1)}
+      </div>
+      ${num('e-tilt', 'Axial tilt', c.axialTilt ?? 23.5, 0, 60, 0.5, 'Earth: 23.5°.')}
+      <label class="toggle" for="e-currents"><input id="e-currents" type="checkbox" ${c.oceanCurrents !== false ? 'checked' : ''}> Ocean currents</label>
+      <div class="row">
+        <button type="button" id="e-use" class="primary">Use this world</button>
+        <button type="button" id="e-cancel">Cancel</button>
+      </div>
+      <p class="sub">Using the world starts a new history on this land, with the other Setup settings as they are.</p>
+    </div>`;
+}
+
+function wireEditor(ed: WorldEditor): void {
+  const redraw = () => {
+    drawMap();
+    renderPanel(true);
+  };
+  for (const b of panel.querySelectorAll<HTMLButtonElement>('[data-brush]')) b.addEventListener('click', () => {
+    ed.tool = b.dataset.brush as BrushTool;
+    renderPanel(true);
+  });
+  for (const b of panel.querySelectorAll<HTMLButtonElement>('[data-eview]')) b.addEventListener('click', () => {
+    ed.setLayer(b.dataset.eview as EditorView);
+    redraw();
+  });
+  const range = (id: string, set: (v: number) => void, live = true) => {
+    const inp = $<HTMLInputElement>(id);
+    inp.addEventListener('input', () => {
+      $(id + '-o').textContent = inp.value;
+      if (live) set(Number(inp.value));
+    });
+    if (!live) inp.addEventListener('change', () => set(Number(inp.value)));
+  };
+  range('e-size', (v) => (ed.radius = v));
+  range('e-strength', (v) => (ed.strength = v));
+  range('e-latn', (v) => { ed.setClimate({ latNorth: v }); drawMap(); }, false);
+  range('e-lats', (v) => { ed.setClimate({ latSouth: v }); drawMap(); }, false);
+  range('e-tilt', (v) => { ed.setClimate({ axialTilt: v }); drawMap(); }, false);
+  $<HTMLInputElement>('e-currents').addEventListener('change', (e) => {
+    ed.setClimate({ oceanCurrents: (e.target as HTMLInputElement).checked });
+    drawMap();
+  });
+  $('e-undo').addEventListener('click', () => {
+    if (ed.undo()) redraw();
+  });
+  $('e-blank').addEventListener('click', () => {
+    ed.blank();
+    redraw();
+  });
+  $('e-random').addEventListener('click', () => {
+    ed.generated(Math.floor(Math.random() * 1e6));
+    redraw();
+  });
+  $('e-cancel').addEventListener('click', closeEditor);
+  $('e-use').addEventListener('click', () => {
+    cfg = { ...ed.cfg, heightmap: ed.heightmap() };
     store.set('config', JSON.stringify(cfg));
+    editing = null;
+    canvas.classList.remove('painting');
+    showMapChrome(true);
     newWorld();
   });
 }
@@ -1042,6 +1267,13 @@ function newWorld(): void {
 
 function renderPanel(full: boolean): void {
   lastPanel = performance.now();
+  if (editing) {
+    if (full) {
+      panel.innerHTML = renderEditor(editing);
+      wireEditor(editing);
+    }
+    return;
+  }
   if (tab === 'setup') {
     if (full) {
       panel.innerHTML = renderSetup();
@@ -1078,6 +1310,10 @@ function frame(now: number): void {
   lastFrame = now;
   let years = pendingYears;
   let months = 0;
+  if (editing) {
+    requestAnimationFrame(frame);
+    return;
+  }
   if (playing && !realTime) {
     yearAcc += dt * speed;
     const n = Math.floor(yearAcc);

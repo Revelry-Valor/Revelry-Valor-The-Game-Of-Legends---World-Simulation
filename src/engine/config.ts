@@ -24,6 +24,10 @@ export function defaultConfig(overrides: Partial<WorldConfig> = {}): WorldConfig
     tribesPerHomeland: 3,
     settlementSpacing: 4,
     start: 'bands',
+    latNorth: 90,
+    latSouth: -90,
+    axialTilt: 23.5,
+    oceanCurrents: true,
     races: structuredClone(DEFAULT_RACES),
     ...overrides,
   };

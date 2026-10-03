@@ -22,15 +22,16 @@ export function isWaterBiome(b: number): boolean {
 
 /**
  * Generate terrain, climate, rivers, biomes and natural resources.
- * Pipeline: continents + ridged mountains → sea level by quantile → latitude/altitude temperature
- * → prevailing-wind rainfall with rain shadows → priority-flood drainage and river discharge
- * → lakes and salt flats → Whittaker-style biomes → geology-driven resource deposits.
+ * Pipeline: continents + ridged mountains (or land shaped by hand) → sea level by quantile
+ * → temperature by latitude, axial tilt and altitude → wind-driven ocean currents that turn along
+ * the coasts, carrying warm water poleward and cold water towards the equator → prevailing-wind
+ * rainfall with rain shadows → priority-flood drainage and river discharge → lakes and salt flats
+ * → Whittaker-style biomes → geology-driven resource deposits.
  */
 export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
   const w = cfg.width;
   const h = cfg.height;
   const size = w * h;
-  const aspect = w / h;
   const nElev = new Noise2D(rng.fork('elev'));
   const nRidge = new Noise2D(rng.fork('ridge'));
   const nTemp = new Noise2D(rng.fork('temp'));
@@ -38,61 +39,60 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
   const nRes = Array.from({ length: RES_COUNT }, (_, i) => new Noise2D(rng.fork('res' + i)));
 
   // --- Elevation ---------------------------------------------------------
-  const continents = Array.from({ length: rng.int(3, 6) }, () => ({
-    x: rng.range(0.15, 0.85),
-    y: rng.range(0.22, 0.78),
-    r: rng.range(0.16, 0.34),
-  }));
-  const raw = new Float32Array(size);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const nx = x / w;
-      const ny = y / h;
-      let c = -1;
-      for (const ce of continents) {
-        const dx = (nx - ce.x) * aspect;
-        const dy = ny - ce.y;
-        c = Math.max(c, 1 - Math.sqrt(dx * dx + dy * dy) / ce.r);
-      }
-      c = clamp(c, -1, 1);
-      let e = 0.55 * c + 0.55 * nElev.fbm(nx * 3 * aspect, ny * 3, 6);
-      const ridge = nRidge.ridged(nx * 4 * aspect + 50, ny * 4 + 50, 4);
-      e += 0.55 * Math.max(0, ridge - 0.55) * clamp(c + 0.6, 0, 1);
-      const bx = Math.min(x, w - 1 - x) / (w * 0.07);
-      const by = Math.min(y, h - 1 - y) / (h * 0.07);
-      e -= (1 - Math.min(1, bx, by)) * 0.9;
-      raw[y * w + x] = e;
-    }
-  }
-  const seaLevel = quantile(raw, 1 - cfg.landFraction);
-  let maxE = -Infinity;
-  let minE = Infinity;
-  for (let i = 0; i < size; i++) {
-    maxE = Math.max(maxE, raw[i]);
-    minE = Math.min(minE, raw[i]);
-  }
-  const elevation = new Float32Array(size);
-  for (let i = 0; i < size; i++) {
-    elevation[i] = raw[i] >= seaLevel ? (raw[i] - seaLevel) / (maxE - seaLevel + 1e-6) : (raw[i] - seaLevel) / (seaLevel - minE + 1e-6);
-    if (raw[i] >= seaLevel && elevation[i] === 0) elevation[i] = 1e-4;
-  }
+  const elevation = (cfg.heightmap && decodeHeights(cfg.heightmap, w, h)) || generateElevation(cfg, rng, nElev, nRidge);
+  const heights = Float32Array.from(elevation);
+  const wasLand = new Uint8Array(size);
+  for (let i = 0; i < size; i++) wasLand[i] = elevation[i] >= 0 ? 1 : 0;
 
-  // --- Temperature -------------------------------------------------------
-  const latOf = (y: number) => Math.abs(((y + 0.5) / h) * 2 - 1);
+  // --- Latitude & temperature -------------------------------------------
+  const latitude = latitudes(cfg, h);
+  const tilt = cfg.axialTilt ?? 23.5;
+  /** Distance from the equator as a share of the way to the pole (0..1). */
+  const latFrac = (y: number) => Math.min(1, Math.abs(latitude[y]) / 90);
+  const seaTemp = (y: number) => baseTemp(latFrac(y), tilt, cfg.temperature);
   const temperature = new Float32Array(size);
   for (let y = 0; y < h; y++) {
-    const lat = latOf(y);
+    const base = seaTemp(y);
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      temperature[i] = clamp(1.04 - lat * 1.0 - Math.max(0, elevation[i]) * 0.55 + nTemp.fbm(x * 0.04, y * 0.04, 3) * 0.1 + cfg.temperature, 0, 1);
+      temperature[i] = clamp(base - Math.max(0, elevation[i]) * 0.55 + nTemp.fbm(x * 0.04, y * 0.04, 3) * 0.1, 0, 1);
+    }
+  }
+
+  // --- Ocean currents ----------------------------------------------------
+  const currents = cfg.oceanCurrents === false
+    ? { u: new Float32Array(size), v: new Float32Array(size), anomaly: new Float32Array(size) }
+    : traceCurrents(w, h, elevation, latitude, seaTemp);
+  const seaAnomaly = currents.anomaly;
+  // How warm or cold the sea upwind of each land tile is, fading over a few tiles inland.
+  const coastAnomaly = new Float32Array(size);
+  if (cfg.oceanCurrents !== false) {
+    for (let y = 0; y < h; y++) {
+      const dir = windDir(latitude[y]);
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (elevation[i] < 0) {
+          temperature[i] = clamp(temperature[i] + seaAnomaly[i] * 0.6, 0, 1);
+          continue;
+        }
+        for (let d = 1; d <= 6; d++) {
+          const ux = x - dir * d;
+          if (ux < 0 || ux >= w) break;
+          const j = y * w + ux;
+          if (elevation[j] < 0) {
+            coastAnomaly[i] = seaAnomaly[j] * (1 - d / 7);
+            break;
+          }
+        }
+        temperature[i] = clamp(temperature[i] + coastAnomaly[i] * 0.5, 0, 1);
+      }
     }
   }
 
   // --- Rainfall: prevailing winds carry ocean moisture inland, mountains wring it out ---
   const rain = new Float32Array(size);
   for (let y = 0; y < h; y++) {
-    const lat = latOf(y);
-    const dir = lat < 0.33 || lat > 0.72 ? -1 : 1; // trade winds & polar easterlies vs westerlies
+    const dir = windDir(latitude[y]); // trade winds & polar easterlies vs westerlies
     let carrier = 0.5;
     for (let pass = 0; pass < 2; pass++) {
       for (let step = 0; step < w; step++) {
@@ -118,12 +118,15 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
   const rainNorm = quantile(landRain, 0.85) || 1;
   const moisture = new Float32Array(size);
   for (let y = 0; y < h; y++) {
-    const lat = latOf(y);
-    const hadley = 0.22 * Math.exp(-(((lat - 0.3) / 0.09) ** 2));
-    const itcz = 0.18 * Math.exp(-((lat / 0.12) ** 2));
+    const deg = Math.abs(latitude[y]);
+    // Dry belts under the subtropical highs, wet ones at the equator and along the polar front.
+    const hadley = 0.22 * Math.exp(-(((deg - 28) / 8) ** 2));
+    const itcz = 0.18 * Math.exp(-((deg / 11) ** 2));
+    const polarFront = 0.05 * Math.exp(-(((deg - 60) / 8) ** 2));
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      moisture[i] = clamp(Math.sqrt(rain[i] / rainNorm) * 0.72 + nMoist.fbm(x * 0.05, y * 0.05, 4) * 0.25 + 0.08 - hadley + itcz + cfg.moisture, 0, 1);
+      // Warm water offshore brings rain; cold upwelling water leaves the coast dry.
+      moisture[i] = clamp(Math.sqrt(rain[i] / rainNorm) * 0.72 + nMoist.fbm(x * 0.05, y * 0.05, 4) * 0.25 + 0.08 - hadley + itcz + polarFront + coastAnomaly[i] * 0.6 + cfg.moisture, 0, 1);
     }
   }
 
@@ -199,7 +202,7 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
   const biome = new Uint8Array(size);
   const lakeMask = new Uint8Array(size);
   for (let i = 0; i < size; i++) {
-    if (elevation[i] < 0 && elevation[i] > -0.03 && raw[i] >= seaLevel) lakeMask[i] = 1;
+    if (elevation[i] < 0 && elevation[i] > -0.03 && wasLand[i]) lakeMask[i] = 1;
   }
   for (let i = 0; i < size; i++) {
     const e = elevation[i];
@@ -322,6 +325,11 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     elevation,
     temperature,
     moisture,
+    heights,
+    latitude,
+    currentU: currents.u,
+    currentV: currents.v,
+    seaAnomaly,
     biome,
     relief,
     river,
@@ -380,4 +388,248 @@ function blur(a: Float32Array, w: number, h: number, passes: number): void {
     }
     a.set(tmp);
   }
+}
+
+/** Continents of noise with ridged mountain chains, sunk at the map's edges; sea level set so the configured share is land. */
+function generateElevation(cfg: WorldConfig, rng: Rng, nElev: Noise2D, nRidge: Noise2D): Float32Array {
+  const w = cfg.width;
+  const h = cfg.height;
+  const size = w * h;
+  const aspect = w / h;
+  const continents = Array.from({ length: rng.int(3, 6) }, () => ({
+    x: rng.range(0.15, 0.85),
+    y: rng.range(0.22, 0.78),
+    r: rng.range(0.16, 0.34),
+  }));
+  const raw = new Float32Array(size);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const nx = x / w;
+      const ny = y / h;
+      let c = -1;
+      for (const ce of continents) {
+        const dx = (nx - ce.x) * aspect;
+        const dy = ny - ce.y;
+        c = Math.max(c, 1 - Math.sqrt(dx * dx + dy * dy) / ce.r);
+      }
+      c = clamp(c, -1, 1);
+      let e = 0.55 * c + 0.55 * nElev.fbm(nx * 3 * aspect, ny * 3, 6);
+      const ridge = nRidge.ridged(nx * 4 * aspect + 50, ny * 4 + 50, 4);
+      e += 0.55 * Math.max(0, ridge - 0.55) * clamp(c + 0.6, 0, 1);
+      const bx = Math.min(x, w - 1 - x) / (w * 0.07);
+      const by = Math.min(y, h - 1 - y) / (h * 0.07);
+      e -= (1 - Math.min(1, bx, by)) * 0.9;
+      raw[y * w + x] = e;
+    }
+  }
+  const seaLevel = quantile(raw, 1 - cfg.landFraction);
+  let maxE = -Infinity;
+  let minE = Infinity;
+  for (let i = 0; i < size; i++) {
+    maxE = Math.max(maxE, raw[i]);
+    minE = Math.min(minE, raw[i]);
+  }
+  const elevation = new Float32Array(size);
+  for (let i = 0; i < size; i++) {
+    elevation[i] = raw[i] >= seaLevel ? (raw[i] - seaLevel) / (maxE - seaLevel + 1e-6) : (raw[i] - seaLevel) / (seaLevel - minE + 1e-6);
+    if (raw[i] >= seaLevel && elevation[i] === 0) elevation[i] = 1e-4;
+  }
+  return elevation;
+}
+
+/** Latitude of each row in degrees, running evenly from the top edge to the bottom. */
+export function latitudes(cfg: WorldConfig, h: number): Float32Array {
+  const north = clamp(cfg.latNorth ?? 90, -90, 90);
+  const south = clamp(cfg.latSouth ?? -90, -90, 90);
+  const lat = new Float32Array(h);
+  for (let y = 0; y < h; y++) lat[y] = north + (south - north) * ((y + 0.5) / h);
+  return lat;
+}
+
+/**
+ * Mean sea-level temperature (0 frozen .. 1 sweltering) at a distance from the equator given as a share
+ * of the way to the pole. A steeper axial tilt spreads the sun's warmth: milder poles, a slightly cooler equator.
+ */
+export function baseTemp(latFrac: number, tilt: number, offset: number): number {
+  return clamp(1.04 - latFrac + ((tilt - 23.5) / 90) * 0.35 * (latFrac - 0.4) + offset, 0, 1);
+}
+
+/** Direction of the prevailing wind at a latitude: -1 westward (trade winds, polar easterlies), +1 eastward (westerlies). */
+export function windDir(latDeg: number): number {
+  const a = Math.abs(latDeg);
+  return a < 30 || a > 60 ? -1 : 1;
+}
+
+/**
+ * Wind-driven surface currents, traced as drifting parcels of water. Each parcel runs with the
+ * prevailing wind until a coast stops it, then turns along the shore: poleward in the tropics
+ * (the warm western boundary currents), towards the equator under the westerlies (the cold
+ * eastern boundary currents), poleward again near the subpolar lows, and towards the equator
+ * under the polar easterlies. A parcel keeps the temperature of the latitude it came from,
+ * losing it slowly, so currents running poleward are warmer than the sea around them and
+ * those running towards the equator colder.
+ */
+function traceCurrents(w: number, h: number, elevation: Float32Array, latitude: Float32Array, seaTemp: (y: number) => number) {
+  const size = w * h;
+  const su = new Float32Array(size);
+  const sv = new Float32Array(size);
+  const sa = new Float32Array(size);
+  const count = new Float32Array(size);
+  // The ocean wraps east to west as on a globe; the top and bottom edges are shores.
+  const wrap = (x: number) => (x < 0 ? x + w : x >= w ? x - w : x);
+  const sea = (x: number, y: number) => y >= 0 && y < h && elevation[y * w + wrap(x)] < 0;
+  const degPerRow = Math.abs(latitude[h - 1] - latitude[0]) / Math.max(1, h - 1) || 1;
+  // Water forgets where it came from over about 25 degrees of travel.
+  const relax = 1 - Math.exp(-degPerRow / 25);
+  // Having run along a coast, a current carries on the same way for about 10 degrees before the wind turns it.
+  const momentum = Math.ceil(10 / degPerRow);
+  // Which way down the map is poleward at each row.
+  const southward = latitude[h - 1] < latitude[0] ? 1 : -1;
+  const poleward = (y: number) => (latitude[y] >= 0 ? -southward : southward);
+  const alongCoast = (y: number) => {
+    const a = Math.abs(latitude[y]);
+    const toPole = a < 30 || (a >= 48 && a < 60);
+    return toPole ? poleward(y) : -poleward(y);
+  };
+  const local = new Float32Array(h);
+  for (let y = 0; y < h; y++) local[y] = seaTemp(y);
+  let seed = 0x9e3779b9;
+  const rnd = () => {
+    seed = (Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0;
+    return seed / 4294967296;
+  };
+  for (let sy = 1; sy < h; sy += 3) {
+    for (let sx = 1; sx < w; sx += 3) {
+      if (!sea(sx, sy)) continue;
+      let x = sx;
+      let y = sy;
+      let t = local[y];
+      let vdir = 0;
+      let carry = 0;
+      for (let step = 0; step < 400; step++) {
+        const i = y * w + x;
+        t += (local[y] - t) * relax;
+        sa[i] += t - local[y];
+        count[i]++;
+        const dir = windDir(latitude[y]);
+        if (vdir !== 0 && carry > 0 && sea(x + dir, y) && sea(x, y + vdir)) {
+          carry--;
+          y += vdir;
+          sv[i] += vdir;
+          continue;
+        }
+        if (sea(x + dir, y)) {
+          x = wrap(x + dir);
+          su[i] += dir;
+          vdir = 0;
+          if ((step & 3) === 3) {
+            const r = rnd();
+            const dy = r < 0.25 ? -1 : r > 0.75 ? 1 : 0;
+            if (dy && sea(x, y + dy)) {
+              y += dy;
+              sv[i] += dy;
+            }
+          }
+          continue;
+        }
+        if (vdir === 0) vdir = alongCoast(y);
+        carry = momentum;
+        if (!sea(x, y + vdir)) vdir = -vdir;
+        if (!sea(x, y + vdir)) break;
+        y += vdir;
+        sv[i] += vdir;
+      }
+    }
+  }
+  for (let i = 0; i < size; i++) {
+    if (count[i] > 0) {
+      su[i] /= count[i];
+      sv[i] /= count[i];
+      sa[i] = clamp(sa[i] / count[i], -0.25, 0.25);
+    }
+  }
+  const seaMask = new Uint8Array(size);
+  for (let i = 0; i < size; i++) seaMask[i] = elevation[i] < 0 ? 1 : 0;
+  for (const a of [su, sv, sa]) maskedBlur(a, seaMask, w, h, 2);
+  return { u: su, v: sv, anomaly: sa };
+}
+
+/** Box blur over the tiles the mask marks, leaving the rest at zero. */
+function maskedBlur(a: Float32Array, mask: Uint8Array, w: number, h: number, passes: number): void {
+  const tmp = new Float32Array(a.length);
+  for (let p = 0; p < passes; p++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!mask[i]) {
+          tmp[i] = 0;
+          continue;
+        }
+        let s = 0;
+        let n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= h) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= w || !mask[ny * w + nx]) continue;
+            s += a[ny * w + nx];
+            n++;
+          }
+        }
+        tmp[i] = s / n;
+      }
+    }
+    a.set(tmp);
+  }
+}
+
+const HEIGHT_SCALE = 30000;
+
+/** Pack a height field (sea below 0, land 0..1) into a compact text code that can be saved with a world's settings. */
+export function encodeHeights(elevation: Float32Array, w: number, h: number): string {
+  const q = new Int16Array(w * h);
+  for (let i = 0; i < q.length; i++) q[i] = Math.round(clamp(elevation[i], -1, 1) * HEIGHT_SCALE);
+  const bytes = new Uint8Array(q.buffer);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `${w}x${h}:${btoa(bin)}`;
+}
+
+/** Unpack a height code, resampling it smoothly when the map is a different size. Returns null for a code that won't read. */
+export function decodeHeights(code: string, w: number, h: number): Float32Array | null {
+  const m = /^(\d+)x(\d+):(.*)$/s.exec(code);
+  if (!m) return null;
+  const sw = +m[1];
+  const sh = +m[2];
+  let bin: string;
+  try {
+    bin = atob(m[3]);
+  } catch {
+    return null;
+  }
+  if (bin.length !== sw * sh * 2) return null;
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const q = new Int16Array(bytes.buffer);
+  const src = new Float32Array(sw * sh);
+  for (let i = 0; i < src.length; i++) src[i] = q[i] / HEIGHT_SCALE;
+  if (sw === w && sh === h) return src;
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const fy = clamp(((y + 0.5) * sh) / h - 0.5, 0, sh - 1);
+    const y0 = Math.floor(fy);
+    const y1 = Math.min(sh - 1, y0 + 1);
+    const ty = fy - y0;
+    for (let x = 0; x < w; x++) {
+      const fx = clamp(((x + 0.5) * sw) / w - 0.5, 0, sw - 1);
+      const x0 = Math.floor(fx);
+      const x1 = Math.min(sw - 1, x0 + 1);
+      const tx = fx - x0;
+      const top = src[y0 * sw + x0] * (1 - tx) + src[y0 * sw + x1] * tx;
+      const bot = src[y1 * sw + x0] * (1 - tx) + src[y1 * sw + x1] * tx;
+      out[y * w + x] = top * (1 - ty) + bot * ty;
+    }
+  }
+  return out;
 }

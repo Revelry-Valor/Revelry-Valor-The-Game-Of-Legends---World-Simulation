@@ -107,6 +107,15 @@ export interface WorldConfig {
   settlementSpacing: number;
   /** How peoples begin: as wandering bands of hunters and gatherers, or already settled in villages. */
   start?: 'bands' | 'settlements';
+  /** Latitude of the map's top and bottom edges, in degrees (north positive). */
+  latNorth?: number;
+  latSouth?: number;
+  /** Tilt of the world's axis in degrees: more tilt, harsher seasons and milder poles. */
+  axialTilt?: number;
+  /** Wind-driven ocean currents carrying warm and cold water along the coasts. */
+  oceanCurrents?: boolean;
+  /** Land shaped by hand in the world editor: heights encoded with encodeHeights(); replaces the generated land. */
+  heightmap?: string;
   races: RaceDef[];
 }
 
@@ -118,6 +127,14 @@ export interface MapData {
   elevation: Float32Array;
   temperature: Float32Array;
   moisture: Float32Array;
+  /** The shape of the land before lakes were filled in: what the world editor works on. */
+  heights: Float32Array;
+  /** Latitude of each row, in degrees (north positive). */
+  latitude: Float32Array;
+  /** Surface ocean current at each sea tile (tiles per step, east and south positive), and how much warmer or colder than usual the water it brings is. */
+  currentU: Float32Array;
+  currentV: Float32Array;
+  seaAnomaly: Float32Array;
   biome: Uint8Array;
   relief: Uint8Array;
   /** Accumulated river discharge (0 when no river). */
