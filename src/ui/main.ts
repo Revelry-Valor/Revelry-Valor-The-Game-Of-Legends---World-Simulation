@@ -379,6 +379,11 @@ for (const [id, key] of [['t-routes', 'showRoutes'], ['t-labels', 'showLabels'],
     drawMap();
   });
 }
+$('create-world').addEventListener('click', () => {
+  if (editing) return;
+  setTab('setup');
+  openEditor(cfg);
+});
 const styleSel = $<HTMLSelectElement>('map-style');
 styleSel.value = view.style;
 const paperPane = () => document.querySelector('.map-pane')?.classList.toggle('parchment', view.style === 'parchment');

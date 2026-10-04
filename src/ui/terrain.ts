@@ -130,6 +130,7 @@ export class TerrainShader {
   private mtnAt: (fx: number, fy: number) => number;
   private hillAt: (fx: number, fy: number) => number;
   private iceAt: (fx: number, fy: number) => number;
+  private forestAt: (fx: number, fy: number) => number;
   private cavAt: (fx: number, fy: number) => number;
   private colR: (fx: number, fy: number) => number;
   private colG: (fx: number, fy: number) => number;
@@ -145,6 +146,7 @@ export class TerrainShader {
     const lake = new Float32Array(size);
     const mtn = new Float32Array(size);
     const ice = new Float32Array(size);
+    const forest = new Float32Array(size);
     const hill = new Float32Array(size);
     const r = new Float32Array(size);
     const g = new Float32Array(size);
@@ -152,6 +154,7 @@ export class TerrainShader {
     for (let i = 0; i < size; i++) {
       lake[i] = map.biome[i] === Biome.Lake ? 1 : 0;
       ice[i] = map.biome[i] === Biome.Ice ? 1 : 0;
+      forest[i] = map.biome[i] === Biome.TemperateForest || map.biome[i] === Biome.Taiga || map.biome[i] === Biome.TropicalForest ? 1 : 0;
       mtn[i] = map.relief[i] === Relief.Mountains ? 1 : 0;
       hill[i] = map.relief[i] === Relief.Hills ? 1 : 0;
       let key = BIOMES[map.biome[i]].key;
@@ -217,6 +220,7 @@ export class TerrainShader {
     this.slopeY = linear(sy, w, h);
     this.lakeAt = sampler(lake, w, h);
     this.iceAt = sampler(ice, w, h);
+    this.forestAt = sampler(forest, w, h);
     this.mtnAt = linear(mtn, w, h);
     this.hillAt = linear(hill, w, h);
     this.cavAt = linear(cav, w, h);
@@ -354,6 +358,14 @@ export class TerrainShader {
             r *= paper * sh;
             g *= paper * sh;
             b *= paper * sh * 0.98;
+            // Forests hatched in fine diagonal ink lines, as old maps mark woodland.
+            const jx = fx + edgeNoise.fbm(fx * 0.35, fy * 0.35, 4) * 0.7;
+            const jy = fy + edgeNoise.fbm(fx * 0.35 + 40, fy * 0.35 + 40, 4) * 0.7;
+            if (this.forestAt(jx, jy) > 0.5 && (px + py) % 5 === 0) {
+              r += (INK[0] - r) * 0.45;
+              g += (INK[1] - g) * 0.45;
+              b += (INK[2] - b) * 0.45;
+            }
             // The inked coastline, and the shores of lakes.
             const lk = this.lakeAt(lx, ly);
             if ((e >= 0 && e < (slope + 0.004) * sx * 1.4) || (lk > 0.38 && lk <= 0.5)) [r, g, b] = INK;
