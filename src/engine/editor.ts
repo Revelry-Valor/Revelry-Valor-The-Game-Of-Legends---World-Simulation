@@ -1,4 +1,5 @@
 import { Noise2D } from './noise';
+import { erodedHills } from './relief';
 import { Rng } from './rng';
 
 /** The world editor's brushes. */
@@ -117,13 +118,15 @@ export class TerrainEditor {
             break;
           case 'hills': {
             if (e < 0) break;
-            const target = 0.22 + 0.12 * n;
+            const rolling = erodedHills(this.detail, x * 0.15 + 3, y * 0.15 - 9, 4);
+            const target = 0.2 + 0.1 * n + 0.06 * rolling;
             if (e < target) v = e + (target - e) * soft * k * 0.5;
-            v += 0.012 * k * soft * n;
+            v += 0.012 * k * soft * rolling;
             break;
           }
           case 'mountains': {
             if (e < 0) break;
+            // Long ridges; the map draws the gullies and spurs that weather carves into them.
             const ridge = this.detail.ridged(x * 0.09 + 31, y * 0.09 + 17, 4);
             v = e + (0.02 + 0.07 * ridge * ridge) * k * soft;
             break;

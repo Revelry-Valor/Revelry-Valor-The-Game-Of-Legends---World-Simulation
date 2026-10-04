@@ -2,7 +2,7 @@ import { TRAVEL_SEASON } from '../calendar';
 import { roomToSettle } from './territory';
 import type { SettlerParty, Settlement } from '../types';
 import type { World } from '../world';
-import { releaseAll } from './land';
+import { releaseAll, ringRadius } from './land';
 import { siteScore } from './sites';
 
 /** How desirable a settlement looks to a would-be migrant. */
@@ -234,6 +234,18 @@ function found(world: World, p: SettlerParty): void {
     np.relations.set(pol.id, 0.4);
     pol.relations.set(np.id, 0.4);
     world.log('founding', 2, `Pioneers from ${from.name} crossed into the wilds and founded ${ns.name}, free of the ${pol.name}.`, { settlements: [ns.id, from.id], polities: [np.id, pol.id] });
+    // Pioneers who strike out on their own take the old nation's land around their new home with them.
+    const R = ringRadius(world);
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= map.width || yy >= map.height) continue;
+        const t = yy * map.width + xx;
+        const o = map.region[t];
+        if (o >= 0 && world.settlements[o].polityId === pol.id && world.settlements[o].tile !== t) map.region[t] = ns.id;
+      }
+    }
   }
 }
 

@@ -233,6 +233,8 @@ export function bandsMonth(world: World): void {
         budget -= Number.isFinite(c) ? c : 1;
         walked.push(b.path[b.step]);
       }
+      // Nobody makes camp in the middle of a lake: carry on to the far shore.
+      while (b.step < b.path.length - 1 && isWater(world, b.path[b.step])) b.step++;
       b.tile = b.path[b.step];
     } else walked.push(b.tile);
     claimAsTheyGo(world, b, walked);

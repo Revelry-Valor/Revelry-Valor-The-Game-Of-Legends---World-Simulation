@@ -1,8 +1,9 @@
-import { BIOMES, Biome } from '../engine/data/biomes';
+import { BIOMES, Biome, Relief } from '../engine/data/biomes';
 import { Noise2D } from '../engine/noise';
 import { Rng } from '../engine/rng';
 import type { MapData } from '../engine/types';
 import { riverNext, riverPoint, type Point } from '../engine/geometry';
+import { erodedHills, gullies } from '../engine/relief';
 
 /** Pixels per tile in the painted terrain: enough for smooth coasts and soft biome edges. */
 export const TERRAIN_SCALE = 4;
@@ -68,32 +69,183 @@ function linear(field: Float32Array, w: number, h: number) {
 const SEA_SHALLOW: [number, number, number] = [92, 150, 190];
 const SEA_DEEP: [number, number, number] = [30, 64, 112];
 
+export type MapStyle = 'satellite' | 'parchment';
+
+/** Ground colours as seen from orbit: muted, darker greens and dun browns rather than map-book colours. */
+const SATELLITE: Record<string, [number, number, number]> = {
+  ice: [236, 240, 244],
+  tundra: [132, 128, 108],
+  taiga: [44, 64, 48],
+  temperateForest: [50, 80, 42],
+  grassland: [108, 126, 70],
+  steppe: [142, 136, 102],
+  desert: [196, 174, 136],
+  savanna: [140, 132, 88],
+  tropicalForest: [30, 70, 36],
+  wetland: [62, 82, 56],
+  mountain: [116, 106, 94],
+};
+const ROCK: [number, number, number] = [112, 102, 92];
+const ALPINE: [number, number, number] = [128, 120, 100];
+const SNOW: [number, number, number] = [240, 242, 246];
+const SHELF: [number, number, number] = [44, 120, 128];
+const MIDSEA: [number, number, number] = [22, 70, 106];
+const DEEPSEA: [number, number, number] = [10, 34, 66];
+const LAKE: [number, number, number] = [40, 86, 106];
+const PAPER: [number, number, number] = [236, 223, 190];
+const PAPER_SEA: [number, number, number] = [212, 205, 178];
+const INK: [number, number, number] = [72, 54, 38];
+
+const reliefNoise = new Noise2D(new Rng(11).fork('relief-detail'));
+const smooth = (a: number, b: number, v: number) => {
+  const t = clamp((v - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+/** Light from the north-west, fairly low, as relief maps are lit. */
+const LIGHT = (() => {
+  const l = [-1, -1, 0.95];
+  const n = Math.hypot(l[0], l[1], l[2]);
+  return [l[0] / n, l[1] / n, l[2] / n];
+})();
+
 /**
- * Colours the land as one continuous surface rather than squares: heights are interpolated between
- * tile centres, coasts follow the smooth sea line, biomes meet along ragged natural edges, and the
- * relief is hill-shaded from the north-west. It can paint the whole map at a few pixels per tile,
- * or any small part of it at full screen resolution for close zoom.
+ * Paints the land as one continuous surface rather than squares, in either style.
+ *
+ * Satellite: heights are interpolated between tile centres and given fine, eroded-looking detail
+ * (sharp ridges and spurs in the mountains, rolling ground in the hills); coasts are fractal, broken
+ * up at every zoom; the ground is coloured by what covers it, blending between biomes, with bare
+ * rock on steep slopes and above the tree line and snow where it is cold enough; the relief is lit
+ * from the north-west and valleys sit in shadow; the sea runs from turquoise shallows to dark deeps.
+ *
+ * Parchment: the same land on old paper, with an inked coastline, ripple lines along the shore and
+ * soft sepia relief (mountains, hills and forests are drawn as symbols on top by the renderer).
+ *
+ * It can paint the whole map at a few pixels per tile, or any part of it at screen resolution.
  */
 export class TerrainShader {
   private elev: (fx: number, fy: number) => number;
   private temp: (fx: number, fy: number) => number;
-  private shadeAt: (fx: number, fy: number) => number;
   private lakeAt: (fx: number, fy: number) => number;
+  private mtnAt: (fx: number, fy: number) => number;
+  private hillAt: (fx: number, fy: number) => number;
+  private iceAt: (fx: number, fy: number) => number;
+  private cavAt: (fx: number, fy: number) => number;
+  private colR: (fx: number, fy: number) => number;
+  private colG: (fx: number, fy: number) => number;
+  private colB: (fx: number, fy: number) => number;
+  /** Slope of the land at tile scale (water counts as level ground), blended smoothly between tiles. */
+  private slopeX: (fx: number, fy: number) => number;
+  private slopeY: (fx: number, fy: number) => number;
 
-  constructor(private map: MapData) {
-    const { width: w, height: h } = map;
-    // Lakes blend between tiles too, so their shores are as smooth as the sea's.
-    const lake = new Float32Array(map.size);
-    for (let i = 0; i < map.size; i++) lake[i] = map.biome[i] === Biome.Lake ? 1 : 0;
-    this.lakeAt = sampler(lake, w, h);
+  constructor(private map: MapData, private style: MapStyle = 'satellite') {
+    const { width: w, height: h, size } = map;
     this.elev = sampler(map.elevation, w, h);
     this.temp = sampler(map.temperature, w, h);
-    this.shadeAt = linear(tileShade(map.elevation, w, h), w, h);
+    const lake = new Float32Array(size);
+    const mtn = new Float32Array(size);
+    const ice = new Float32Array(size);
+    const hill = new Float32Array(size);
+    const r = new Float32Array(size);
+    const g = new Float32Array(size);
+    const b = new Float32Array(size);
+    for (let i = 0; i < size; i++) {
+      lake[i] = map.biome[i] === Biome.Lake ? 1 : 0;
+      ice[i] = map.biome[i] === Biome.Ice ? 1 : 0;
+      mtn[i] = map.relief[i] === Relief.Mountains ? 1 : 0;
+      hill[i] = map.relief[i] === Relief.Hills ? 1 : 0;
+      let key = BIOMES[map.biome[i]].key;
+      if (BIOMES[map.biome[i]].water) key = 'grassland';
+      const c = SATELLITE[key] ?? BIOMES[map.biome[i]].color;
+      r[i] = c[0];
+      g[i] = c[1];
+      b[i] = c[2];
+    }
+    blurField(mtn, w, h);
+    blurField(hill, w, h);
+    // Hollows and valleys: lower than the land around them.
+    const cav = new Float32Array(size);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sum = 0;
+        let n = 0;
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const xx = x + dx;
+            const yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h || map.elevation[yy * w + xx] < 0) continue;
+            sum += map.elevation[yy * w + xx];
+            n++;
+          }
+        }
+        // Water (sea and lakes) is not a hollow in the land.
+        cav[y * w + x] = map.elevation[y * w + x] < 0 || n === 0 ? 0 : map.elevation[y * w + x] - sum / n;
+      }
+    }
+    const sx = new Float32Array(size);
+    const sy = new Float32Array(size);
+    // The surface: a lake lies level with its shores, the sea at zero.
+    const surface = new Float32Array(size);
+    for (let i = 0; i < size; i++) {
+      const e = map.elevation[i];
+      if (e >= 0) surface[i] = e;
+      else if (map.biome[i] === Biome.Lake) {
+        let sum = 0;
+        let n = 0;
+        const x = i % w;
+        const y = (i - x) / w;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            const yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h || map.elevation[yy * w + xx] < 0) continue;
+            sum += map.elevation[yy * w + xx];
+            n++;
+          }
+        }
+        surface[i] = n ? sum / n : 0;
+      }
+    }
+    const at = (x: number, y: number) => surface[clamp(y, 0, h - 1) * w + clamp(x, 0, w - 1)];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        sx[y * w + x] = (at(x + 1, y) - at(x - 1, y)) * 0.5;
+        sy[y * w + x] = (at(x, y + 1) - at(x, y - 1)) * 0.5;
+      }
+    }
+    this.slopeX = linear(sx, w, h);
+    this.slopeY = linear(sy, w, h);
+    this.lakeAt = sampler(lake, w, h);
+    this.iceAt = sampler(ice, w, h);
+    this.mtnAt = linear(mtn, w, h);
+    this.hillAt = linear(hill, w, h);
+    this.cavAt = linear(cav, w, h);
+    this.colR = linear(r, w, h);
+    this.colG = linear(g, w, h);
+    this.colB = linear(b, w, h);
+  }
+
+  /** The sea line, broken up at every scale so coasts look fractal however close you look. */
+  private coast(fx: number, fy: number, e: number): number {
+    const a = Math.abs(e);
+    if (a >= 0.06) return e;
+    const n = edgeNoise.fbm(fx * 0.9 + 13, fy * 0.9 - 7, 4) * 0.011 + edgeNoise.noise(fx * 3.7, fy * 3.7) * 0.004 + edgeNoise.noise(fx * 11, fy * 11) * 0.0015;
+    return e + n * (1 - a / 0.06);
+  }
+
+  /** Height of the ground at a point, with fine relief detail: ridges in the mountains, folds in the hills. */
+  /** Gentle relief everywhere: folds in the hills, a little unevenness on the plains. */
+  private detail(fx: number, fy: number): number {
+    let v = reliefNoise.noise(fx * 0.6, fy * 0.6) * 0.004;
+    const hl = this.hillAt(fx, fy);
+    if (hl > 0.02) v += hl * 0.03 * erodedHills(reliefNoise, fx * 0.3 - 11, fy * 0.3 + 4, 3);
+    return v;
   }
 
   /**
    * Paint a W×H pixel image of the map region starting at (x0, y0) in map coordinates, each pixel
-   * covering sx × sy of the map.
+   * covering sx × sy of the map. The optional mask is opaque over dry land (so realm colours can be
+   * clipped to the painted coast).
    */
   paint(img: ImageData, x0: number, y0: number, sx: number, sy: number, mask?: ImageData): void {
     const map = this.map;
@@ -102,9 +254,12 @@ export class TerrainShader {
     const W = img.width;
     const H = img.height;
     const d = img.data;
-    // The mask is opaque over dry land, with a soft edge at the shore, so realm colours stop at the coast.
     const md = mask?.data;
-    const { elev, temp, shadeAt, lakeAt } = this;
+    const parchment = this.style === 'parchment';
+    const eps = clamp(sx * 1.5, 0.03, 0.3);
+    // As much gully detail as the pixels can show: finer layers only when zoomed in.
+    const GULLY = 0.8;
+    const octaves = clamp(Math.floor(Math.log2(0.3 / (sx * GULLY))) + 1, 1, 6);
     for (let py = 0; py < H; py++) {
       // Sampling coordinates put tile centres on whole numbers.
       const fy = y0 + (py + 0.5) * sy - 0.5;
@@ -116,73 +271,161 @@ export class TerrainShader {
           if (md) md[o + 3] = 0;
           continue;
         }
-        const e = elev(fx, fy);
-        // Biome from the nearest tile after a noisy nudge, so neighbouring biomes interlock.
-        const jx = fx + edgeNoise.fbm(fx * 0.35, fy * 0.35, 4) * 1.1;
-        const jy = fy + edgeNoise.fbm(fx * 0.35 + 40, fy * 0.35 + 40, 4) * 1.1;
-        const ti = clamp(Math.round(jy), 0, h - 1) * w + clamp(Math.round(jx), 0, w - 1);
+        const e0 = this.elev(fx, fy);
+        const e = this.coast(fx, fy, e0);
+        // Lakes take their shape from the lake tiles, warped at two scales so the shore wanders.
+        const lx = fx + edgeNoise.noise(fx * 0.45 + 17, fy * 0.45) * 0.9 + edgeNoise.noise(fx * 1.6, fy * 1.6 + 5) * 0.15;
+        const ly = fy + edgeNoise.noise(fx * 0.45, fy * 0.45 + 17) * 0.9 + edgeNoise.noise(fx * 1.6 + 5, fy * 1.6) * 0.15;
+        const lake = this.lakeAt(lx, ly) > 0.5;
+        const sea = !lake && e < 0 && (this.lakeAt(fx, fy) <= 0.02 || e < -0.03);
+        if (md) {
+          md[o] = md[o + 1] = md[o + 2] = 255;
+          md[o + 3] = lake || sea ? 0 : e < 0 ? 255 : 255 * clamp(e / 0.004 + 0.75, 0, 1);
+        }
         let r: number;
         let g: number;
         let b: number;
-        // Lakes take their shape from the lake tiles, warped at two scales so the shore wanders and frays.
-        const lx = fx + edgeNoise.noise(fx * 0.45 + 17, fy * 0.45) * 0.9 + edgeNoise.noise(fx * 1.6, fy * 1.6 + 5) * 0.15;
-        const ly = fy + edgeNoise.noise(fx * 0.45, fy * 0.45 + 17) * 0.9 + edgeNoise.noise(fx * 1.6 + 5, fy * 1.6) * 0.15;
-        const lake = lakeAt(lx, ly);
-        const sea = e < 0 && (lakeAt(fx, fy) <= 0.02 || e < -0.03);
-        if (md) {
-          md[o] = md[o + 1] = md[o + 2] = 255;
-          md[o + 3] = lake > 0.5 || sea ? 0 : e < 0 ? 255 : 255 * clamp(e / 0.004 + 0.75, 0, 1);
-        }
-        if (lake > 0.5) [r, g, b] = BIOMES[Biome.Lake].color;
-        else if (sea) {
-          const depth = clamp(-e * 2.2, 0, 1);
-          r = SEA_SHALLOW[0] + (SEA_DEEP[0] - SEA_SHALLOW[0]) * depth;
-          g = SEA_SHALLOW[1] + (SEA_DEEP[1] - SEA_SHALLOW[1]) * depth;
-          b = SEA_SHALLOW[2] + (SEA_DEEP[2] - SEA_SHALLOW[2]) * depth;
-          // A pale fringe of surf along the shore.
-          if (e > -0.025) {
-            const k = 1 - -e / 0.025;
-            r += (205 - r) * k * 0.5;
-            g += (222 - g) * k * 0.5;
-            b += (226 - b) * k * 0.5;
-          }
-        } else {
-          let bi = map.biome[ti];
-          if (BIOMES[bi].water) bi = Biome.Grassland;
-          [r, g, b] = BIOMES[bi].color;
-          if (bi === Biome.Mountain) {
-            // Grey rock rising to bare stone, snow on the cold heights.
-            const t = temp(fx, fy);
-            if (t < 0.2 || e > 0.75) {
-              const k = clamp(Math.max((0.2 - t) / 0.08, (e - 0.75) / 0.1), 0, 1);
-              r += (240 - r) * k;
-              g += (242 - g) * k;
-              b += (246 - b) * k;
+        if (lake || sea) {
+          const depth = lake ? 0.05 : -e;
+          if (parchment) {
+            [r, g, b] = PAPER_SEA;
+            // Ripple lines following the shore, fading out to sea.
+            if (!lake && depth < 0.05) {
+              const phase = (depth / 0.011) % 1;
+              if (phase < 0.18) {
+                const k = 0.55 * (1 - depth / 0.05);
+                r += (INK[0] - r) * k * 0.6;
+                g += (INK[1] - g) * k * 0.6;
+                b += (INK[2] - b) * k * 0.6;
+              }
+            }
+            if (lake) [r, g, b] = [r * 0.94, g * 0.95, b * 0.97];
+          } else if (lake) [r, g, b] = LAKE;
+          else {
+            const k1 = smooth(0.0, 0.1, depth);
+            const k2 = smooth(0.1, 0.45, depth);
+            r = SHELF[0] + (MIDSEA[0] - SHELF[0]) * k1 + (DEEPSEA[0] - MIDSEA[0]) * k2;
+            g = SHELF[1] + (MIDSEA[1] - SHELF[1]) * k1 + (DEEPSEA[1] - MIDSEA[1]) * k2;
+            b = SHELF[2] + (MIDSEA[2] - SHELF[2]) * k1 + (DEEPSEA[2] - MIDSEA[2]) * k2;
+            const swell = 1 + edgeNoise.fbm(fx * 0.6, fy * 0.6, 3) * 0.06;
+            r *= swell;
+            g *= swell;
+            b *= swell;
+            // A thin line of surf and sand where the sea meets the land.
+            if (depth < 0.004) {
+              const k = 1 - depth / 0.004;
+              r += (196 - r) * k * 0.45;
+              g += (200 - g) * k * 0.45;
+              b += (186 - b) * k * 0.45;
             }
           }
-          // Hill-shading, with a faint grain so broad plains aren't flat colour.
-          const shade = shadeAt(fx, fy) * (1 + edgeNoise.noise(fx * 1.7, fy * 1.7) * 0.05);
-          const lift = 1 + Math.min(0.12, e * 0.15);
-          r *= shade * lift;
-          g *= shade * lift;
-          b *= shade * lift;
+        } else {
+          // The land's broad slope (smooth between tiles) plus the slope of the gentle relief.
+          const dv = this.detail(fx, fy);
+          let hh = Math.max(0.002, e) + dv;
+          let gx = this.slopeX(fx, fy) + (this.detail(fx + eps, fy) - dv) / eps;
+          let gy = this.slopeY(fx, fy) + (this.detail(fx, fy + eps) - dv) / eps;
+          // Gullies cut down the slopes of mountains and hills, branching like veins.
+          const rough = this.mtnAt(fx, fy) + this.hillAt(fx, fy) * 0.35;
+          if (!parchment && rough > 0.02) {
+            const [gv, gdx, gdy] = gullies(fx * GULLY, fy * GULLY, gx, gy, octaves, 28);
+            const depth = 0.06 * rough;
+            hh += gv * depth;
+            gx += gdx * GULLY * depth;
+            gy += gdy * GULLY * depth;
+          }
+          const slope = Math.hypot(gx, gy);
+          // Lit from the north-west: brightness against flat ground.
+          const Z = 4;
+          const nx = -gx * Z;
+          const ny = -gy * Z;
+          const nl = Math.hypot(nx, ny, 1);
+          const lambert = (nx * LIGHT[0] + ny * LIGHT[1] + LIGHT[2]) / nl;
+          const shade = clamp(lambert / LIGHT[2], 0.35, 1.45);
+          const ao = clamp(1 + this.cavAt(fx, fy) * 2.2, 0.72, 1.06);
+          if (parchment) {
+            const paper = 1 + edgeNoise.fbm(fx * 1.5 + 40, fy * 1.5, 3) * 0.04 + edgeNoise.noise(fx * 6, fy * 6) * 0.015;
+            const m = this.mtnAt(fx, fy);
+            [r, g, b] = PAPER;
+            r += (205 - r) * m * 0.35;
+            g += (186 - g) * m * 0.35;
+            b += (150 - b) * m * 0.35;
+            const sh = 1 + (shade - 1) * 0.4;
+            r *= paper * sh;
+            g *= paper * sh;
+            b *= paper * sh * 0.98;
+            // The inked coastline, and the shores of lakes.
+            const lk = this.lakeAt(lx, ly);
+            if ((e >= 0 && e < (slope + 0.004) * sx * 1.4) || (lk > 0.38 && lk <= 0.5)) [r, g, b] = INK;
+          } else {
+            // Ground cover, blended between neighbouring biomes along a ragged line.
+            const jx = fx + edgeNoise.fbm(fx * 0.35, fy * 0.35, 4) * 0.7;
+            const jy = fy + edgeNoise.fbm(fx * 0.35 + 40, fy * 0.35 + 40, 4) * 0.7;
+            r = this.colR(jx, jy);
+            g = this.colG(jx, jy);
+            b = this.colB(jx, jy);
+            const t = this.temp(fx, fy);
+            // Bare rock above the tree line and on steep slopes.
+            const alpine = smooth(0.5, 0.68, hh) * (t < 0.6 ? 1 : 0.5);
+            r += (ALPINE[0] - r) * alpine;
+            g += (ALPINE[1] - g) * alpine;
+            b += (ALPINE[2] - b) * alpine;
+            const steep = smooth(0.35, 0.95, slope);
+            r += (ROCK[0] - r) * steep;
+            g += (ROCK[1] - g) * steep;
+            b += (ROCK[2] - b) * steep;
+            // Snow where it is cold enough, thinner on the steepest faces.
+            const tp = t - Math.max(0, hh - Math.max(0, e0)) * 0.4;
+            const glacier = smooth(0.3, 0.6, this.iceAt(jx, jy));
+            const snow = Math.max(glacier, smooth(0.17, 0.08, tp)) * (1 - 0.55 * smooth(0.7, 1.4, slope));
+            r += (SNOW[0] - r) * snow;
+            g += (SNOW[1] - g) * snow;
+            b += (SNOW[2] - b) * snow;
+            // Fine texture so nothing is one flat colour.
+            const tex = 1 + edgeNoise.fbm(fx * 2.3, fy * 2.3, 3) * 0.07 + edgeNoise.noise(fx * 9, fy * 9) * 0.03;
+            const k = shade * ao * tex;
+            r *= k;
+            g *= k;
+            b *= k;
+          }
         }
-        d[o] = r > 255 ? 255 : r;
-        d[o + 1] = g > 255 ? 255 : g;
-        d[o + 2] = b > 255 ? 255 : b;
+        d[o] = r > 255 ? 255 : r < 0 ? 0 : r;
+        d[o + 1] = g > 255 ? 255 : g < 0 ? 0 : g;
+        d[o + 2] = b > 255 ? 255 : b < 0 ? 0 : b;
         d[o + 3] = 255;
       }
     }
   }
 }
 
+function blurField(a: Float32Array, w: number, h: number): void {
+  const t = new Float32Array(a.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          const yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          s += a[yy * w + xx];
+          n++;
+        }
+      }
+      t[y * w + x] = s / n;
+    }
+  }
+  a.set(t);
+}
+
 /** Paint the whole map at `scale` pixels per tile, optionally with its rivers. */
-export function paintTerrain(map: MapData, canvas: HTMLCanvasElement = document.createElement('canvas'), scale = TERRAIN_SCALE, rivers = true): HTMLCanvasElement {
+export function paintTerrain(map: MapData, canvas: HTMLCanvasElement = document.createElement('canvas'), scale = TERRAIN_SCALE, rivers = true, style: MapStyle = 'satellite'): HTMLCanvasElement {
   canvas.width = map.width * scale;
   canvas.height = map.height * scale;
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(canvas.width, canvas.height);
-  new TerrainShader(map).paint(img, 0, 0, 1 / scale, 1 / scale);
+  new TerrainShader(map, style).paint(img, 0, 0, 1 / scale, 1 / scale);
   ctx.putImageData(img, 0, 0);
   if (rivers) drawRiverCurves(ctx, riverCurves(map), { zoom: scale, ox: 0, oy: 0 });
   return canvas;
@@ -234,11 +477,11 @@ export function riverCurves(map: MapData): Float32Array {
 }
 
 /** Draw river curves for a view (zoom = screen pixels per tile, ox/oy = map point at the top-left). */
-export function drawRiverCurves(ctx: CanvasRenderingContext2D, curves: Float32Array, view: { zoom: number; ox: number; oy: number }, bounds?: { x0: number; y0: number; x1: number; y1: number }): void {
+export function drawRiverCurves(ctx: CanvasRenderingContext2D, curves: Float32Array, view: { zoom: number; ox: number; oy: number }, bounds?: { x0: number; y0: number; x1: number; y1: number }, color = 'rgb(46, 92, 128)'): void {
   const z = view.zoom;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = 'rgb(62, 120, 178)';
+  ctx.strokeStyle = color;
   // Batched by width so a few strokes draw them all.
   const BINS = 6;
   for (let bin = 0; bin < BINS; bin++) {

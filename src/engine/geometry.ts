@@ -121,7 +121,8 @@ export function siteOf(map: MapData, tile: number, salt = 0): Point {
       const px = tx + 0.5 + a * 0.1;
       const py = ty + 0.5 + b * 0.1;
       const e = sampleField(E, w, h, px, py);
-      if (e < 0.004) continue; // in the water
+      // In the water, or so close to it that the broken coast drawn on the map could put it there.
+      if (e < 0.014) continue;
       let score = -0.5 * Math.hypot(a, b) * 0.1;
       if (segs.length) {
         let dr = Infinity;
@@ -129,7 +130,7 @@ export function siteOf(map: MapData, tile: number, salt = 0): Point {
         if (dr < 0.07) continue; // in the river itself
         score += 1.5 * Math.exp(-(((dr - 0.15) / 0.1) ** 2));
       }
-      if (water) score += 1.2 * Math.exp(-(((e - 0.012) / 0.012) ** 2));
+      if (water) score += 1.2 * Math.exp(-(((e - 0.024) / 0.012) ** 2));
       const gx = sampleField(E, w, h, px + 0.1, py) - sampleField(E, w, h, px - 0.1, py);
       const gy = sampleField(E, w, h, px, py + 0.1) - sampleField(E, w, h, px, py - 0.1);
       score -= Math.hypot(gx, gy) * 6;

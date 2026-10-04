@@ -80,6 +80,7 @@ let spaceHeld = false;
 
 const view: ViewState = {
   layer: 'political',
+  style: store.get('style') === 'parchment' ? 'parchment' : 'satellite',
   resource: Res.Iron,
   showRoutes: true,
   showLabels: true,
@@ -378,6 +379,16 @@ for (const [id, key] of [['t-routes', 'showRoutes'], ['t-labels', 'showLabels'],
     drawMap();
   });
 }
+const styleSel = $<HTMLSelectElement>('map-style');
+styleSel.value = view.style;
+const paperPane = () => document.querySelector('.map-pane')?.classList.toggle('parchment', view.style === 'parchment');
+paperPane();
+styleSel.addEventListener('change', () => {
+  view.style = styleSel.value === 'parchment' ? 'parchment' : 'satellite';
+  store.set('style', view.style);
+  paperPane();
+  drawMap();
+});
 $('fit').addEventListener('click', () => {
   autoFit = true;
   fitView();

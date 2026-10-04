@@ -1154,3 +1154,8 @@ table.market td {
   vertical-align: middle;
   border: 1px solid rgba(0, 0, 0, 0.3);
 }
+
+/* parchment map style */
+.map-pane.parchment {
+  background: #d4cdb2;
+}

@@ -2,8 +2,10 @@ import { Res } from '../engine/data/economy';
 import type { MapData } from '../engine/types';
 import type { World } from '../engine/world';
 import { LAND_USE_COLORS } from '../engine/data/settlements';
+import { BIOMES, Relief } from '../engine/data/biomes';
 import { friendly } from '../engine/systems/diplomacy';
-import { TERRAIN_SCALE, TerrainShader, drawRiverCurves, riverCurves } from './terrain';
+import { TERRAIN_SCALE, TerrainShader, drawRiverCurves, riverCurves, type MapStyle } from './terrain';
+import { hash01 } from '../engine/geometry';
 import { paintOutline, paintRegions, pixelLabels, warpLabels } from './regions';
 import { sideColor } from '../engine/systems/landwars';
 import { pointAlong, waypoint, type Point } from '../engine/geometry';
@@ -22,6 +24,8 @@ export type MapLayer = 'terrain' | 'political' | 'nations' | 'culture' | 'race' 
 
 export interface ViewState {
   layer: MapLayer;
+  /** How the land is painted: as seen from orbit, or as an old map on parchment. */
+  style: MapStyle;
   resource: Res;
   showRoutes: boolean;
   showLabels: boolean;
@@ -179,6 +183,93 @@ function sameLabels(a: Int32Array, b: Int32Array): boolean {
   return true;
 }
 
+const FORESTS = new Set(['temperateForest', 'taiga', 'tropicalForest']);
+
+/**
+ * Parchment map symbols, drawn by hand as an old cartographer would: little peaks shaded on their
+ * far side for mountains, low humps for hills, and clumps of trees for forests. Their density
+ * follows the zoom so the map never turns to clutter.
+ */
+function drawMapSymbols(ctx: CanvasRenderingContext2D, map: MapData, view: { zoom: number; ox: number; oy: number }, cw: number, ch: number): void {
+  const z = view.zoom;
+  const w = map.width;
+  const x0 = Math.max(0, Math.floor(view.ox) - 1);
+  const y0 = Math.max(0, Math.floor(view.oy) - 1);
+  const x1 = Math.min(w, Math.ceil(view.ox + cw / z) + 1);
+  const y1 = Math.min(map.height, Math.ceil(view.oy + ch / z) + 1);
+  // Symbols keep a few pixels apart: at low zoom only some tiles carry one.
+  const share = (spacing: number) => Math.min(1, (z / spacing) ** 2);
+  const ink = 'rgba(70, 52, 36, 0.9)';
+  const shadow = 'rgba(110, 84, 56, 0.35)';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const t = y * w + x;
+      if (map.elevation[t] < 0) continue;
+      const relief = map.relief[t];
+      const key = BIOMES[map.biome[t]].key;
+      const jx = (hash01(t, 21) - 0.5) * 0.5;
+      const jy = (hash01(t, 22) - 0.5) * 0.5;
+      const X = (x + 0.5 + jx - view.ox) * z;
+      const Y = (y + 0.5 + jy - view.oy) * z;
+      if (relief === Relief.Mountains) {
+        const s = Math.max(5, Math.min(24, z * 0.7)) * (0.8 + hash01(t, 24) * 0.5);
+        // Close in, peaks are drawn bigger than a tile, so fewer of them.
+        const room = Math.min(1, (z / (1.5 * s)) ** 2);
+        if (hash01(t, 23) > share(12) * room) continue;
+        const peak = X + (hash01(t, 25) - 0.5) * s * 0.3;
+        // The shaded far side, then the outline.
+        ctx.beginPath();
+        ctx.moveTo(peak, Y - s * 0.75);
+        ctx.lineTo(X + s, Y + s * 0.45);
+        ctx.lineTo(peak + s * 0.1, Y + s * 0.45);
+        ctx.closePath();
+        ctx.fillStyle = shadow;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(X - s, Y + s * 0.45);
+        ctx.lineTo(peak, Y - s * 0.75);
+        ctx.lineTo(X + s, Y + s * 0.45);
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = Math.max(1, s * 0.08);
+        ctx.stroke();
+      } else if (relief === Relief.Hills) {
+        if (hash01(t, 26) > share(16)) continue;
+        const s = Math.max(4, Math.min(18, z * 0.6));
+        ctx.beginPath();
+        ctx.arc(X, Y + s * 0.35, s * 0.6, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = Math.max(1, s * 0.09);
+        ctx.stroke();
+      } else if (FORESTS.has(key)) {
+        if (hash01(t, 27) > share(20)) continue;
+        const s = Math.max(3, Math.min(12, z * 0.38));
+        for (let k = 0; k < 3; k++) {
+          const tx = X + (k - 1) * s * 0.9 + (hash01(t, 30 + k) - 0.5) * s * 0.4;
+          const ty = Y + (k === 1 ? -s * 0.3 : 0);
+          ctx.beginPath();
+          ctx.moveTo(tx, ty + s * 0.9);
+          ctx.lineTo(tx, ty + s * 0.3);
+          ctx.strokeStyle = ink;
+          ctx.lineWidth = Math.max(0.8, s * 0.12);
+          ctx.stroke();
+          ctx.beginPath();
+          if (key === 'taiga') {
+            ctx.moveTo(tx, ty - s * 0.6);
+            ctx.lineTo(tx + s * 0.4, ty + s * 0.35);
+            ctx.lineTo(tx - s * 0.4, ty + s * 0.35);
+            ctx.closePath();
+          } else ctx.arc(tx, ty, s * 0.4, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(120, 132, 92, 0.55)';
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    }
+  }
+}
+
 const colorCache = new Map<string, [number, number, number]>();
 
 /** Parse "#rrggbb" or "hsl(h s% l%)" to RGB. */
@@ -251,9 +342,20 @@ export class MapRenderer {
     this.paintBase();
   }
 
+  private style: MapStyle = 'satellite';
+
+  /** Switch between the satellite and parchment looks (repaints the land). */
+  setStyle(style: MapStyle): void {
+    if (style === this.style) return;
+    this.style = style;
+    this.detailKey = '';
+    this.paintBase();
+    this.invalidate();
+  }
+
   private paintBase(): void {
     const map = this.world.map;
-    this.shader = new TerrainShader(map);
+    this.shader = new TerrainShader(map, this.style);
     for (const c of [this.base, this.landMask]) {
       c.width = map.width * TERRAIN_SCALE;
       c.height = map.height * TERRAIN_SCALE;
@@ -289,7 +391,7 @@ export class MapRenderer {
       const img = ctx.createImageData(W, H);
       const mctx = this.detailMask.getContext('2d')!;
       const mask = mctx.createImageData(W, H);
-      this.shader ??= new TerrainShader(this.world.map);
+      this.shader ??= new TerrainShader(this.world.map, this.style);
       this.shader.paint(img, view.ox, view.oy, 1 / (view.zoom * res), 1 / (view.zoom * res), mask);
       ctx.putImageData(img, 0, 0);
       mctx.putImageData(mask, 0, 0);
@@ -595,9 +697,12 @@ export class MapRenderer {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.base, tx(0), ty(0), map.width * z, map.height * z);
+    this.setStyle(view.style);
     const detail = this.detailFor(view, cw, ch);
     if (detail) ctx.drawImage(detail, 0, 0, cw, ch);
-    drawRiverCurves(ctx, this.rivers, view, { x0: view.ox, y0: view.oy, x1: view.ox + cw / z, y1: view.oy + ch / z });
+    const parchment = view.style === 'parchment';
+    drawRiverCurves(ctx, this.rivers, view, { x0: view.ox, y0: view.oy, x1: view.ox + cw / z, y1: view.oy + ch / z }, parchment ? 'rgb(84, 98, 122)' : undefined);
+    if (parchment) drawMapSymbols(ctx, map, view, cw, ch);
     const selected = view.selectedPolity >= 0 && world.polities[view.selectedPolity]?.alive ? view.selectedPolity : -1;
     const bonded = selected >= 0 ? this.bondedTo(selected) : new Set<number>();
     if (view.layer === 'political' || view.layer === 'nations' || view.layer === 'culture' || view.layer === 'race') this.drawRegions(ctx, view, cw, ch);
