@@ -5,7 +5,7 @@ import { Rng } from './rng';
 export type BrushTool = 'raise' | 'lower' | 'flatten';
 
 export const BRUSHES: { id: BrushTool; name: string; hint: string }[] = [
-  { id: 'raise', name: 'Raise', hint: 'Lift the ground. Out of the sea it makes land; keep going over it and it builds hills, then a mountain range with a sharp crest and spurs running down to the valley floor. A wide brush gives a broad range, a narrow one a thin, sharp ridge.' },
+  { id: 'raise', name: 'Raise', hint: 'Lift the ground. Out of the sea it makes land; keep going over it and it builds hills, then a mountain range. When you let go, running water carves it: valleys cut up into the range and leave a sharp crest with spurs running down to the valley floor. A wide brush gives a broad range, a narrow one a thin ridge.' },
   { id: 'lower', name: 'Lower', hint: 'Sink the ground: cut valleys and passes, or drown land to make coves, inlets and seas.' },
   { id: 'flatten', name: 'Flatten', hint: 'Level the ground to the height where the stroke began: plateaus, mesas and table lands, with steep edges.' },
 ];
@@ -31,8 +31,8 @@ const STEP = 0.06;
 /**
  * Shapes a height field (sea below 0, land 0..1) with one terrain tool that raises, lowers or
  * flattens. Raising builds a rounded rise under the brush; going over it again builds it higher,
- * so strokes along a line make a range whose width is the brush's. The map draws the crest and
- * spurs. Edges are roughened a little with noise so coasts and ranges don't come out round.
+ * so strokes along a line make a range whose width is the brush's. The map carves the range with
+ * running water (see erodeRelief), which leaves the crest and spurs. Edges are roughened a little with noise so coasts and ranges don't come out round.
  */
 export class TerrainEditor {
   private rough: Noise2D;
@@ -97,7 +97,7 @@ export class TerrainEditor {
         } else {
           // A rounded rise (or hollow) under the brush, highest at its middle.
           const t = 1 - d * d;
-          const lift = STEP * k * t * t * (1 + 0.15 * this.detail.noise(x * 0.3, y * 0.3));
+          const lift = STEP * k * t * t;
           v = b.tool === 'raise' ? e + lift : e - lift;
         }
         H[i] = Math.max(-1, Math.min(1, v));

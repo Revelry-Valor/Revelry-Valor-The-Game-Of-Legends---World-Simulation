@@ -260,9 +260,27 @@ function reassignUses(world: World, s: Settlement, v: Valuer): void {
     const gain = val - curV * INERTIA;
     if (u !== cur && gain > 0) options.push({ t, u, gain });
   }
+  // A settlement always keeps some land that feeds it: a hungry one with none turns its best
+  // ground back to food, and the last food land is never given over to anything else.
+  const feeds = (u: LandUse) => USE_IDX[u].some(([k]) => EXTRACTION_SECTORS[k].output === Good.Food);
+  let foodTiles = s.territory.filter((t) => feeds(map.landUse[t] as LandUse)).length;
+  if (!foodTiles && hungry) {
+    let pick: { t: number; u: LandUse; gain: number } | null = null;
+    for (const t of s.territory) {
+      if (map.landUse[t] === LandUse.City) continue;
+      for (const u of WORKABLE) {
+        if (!feeds(u)) continue;
+        const val = useValue(world, v, t, u);
+        if (val > 0 && (!pick || val > pick.gain)) pick = { t, u, gain: val };
+      }
+    }
+    if (pick) options.unshift({ ...pick, gain: Infinity });
+  }
   options.sort((a, b) => b.gain - a.gain);
   for (const { t, u } of options.slice(0, changes)) {
     const cur = map.landUse[t] as LandUse;
+    if (feeds(cur) && !feeds(u) && foodTiles <= 1) continue;
+    if (feeds(cur) !== feeds(u)) foodTiles += feeds(u) ? 1 : -1;
     // Felling the woods to clear the fields brings in their timber.
     if (u === LandUse.Fields && (cur === LandUse.Forestry || cur === LandUse.Hunting)) s.stock[Good.Timber] += map.resources[Res.Timber][t] * 140 * 0.6;
     map.landUse[t] = u;

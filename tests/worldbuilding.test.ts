@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '../src/engine/config';
 import { TerrainEditor, strokeLevel } from '../src/engine/editor';
+import { erodeRelief } from '../src/engine/erosion';
 import { Rng } from '../src/engine/rng';
 import { decodeHeights, encodeHeights, generateMap } from '../src/engine/worldgen';
 import { World } from '../src/engine/world';
@@ -123,6 +124,40 @@ describe('world building', () => {
     // However often the tool passes, the top settles level: a plateau.
     expect(hts[50 * W + 70]).toBeCloseTo(level, 2);
     expect(hts[50 * W + 69]).toBeCloseTo(level, 2);
+  });
+
+  it('carves a range into ridges and valleys, leaving the water alone', () => {
+    // A ridge running east-west, with sea all round.
+    const w = 40;
+    const h = 30;
+    const surface = new Float32Array(w * h);
+    const water = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const land = x > 3 && x < w - 4 && y > 3 && y < h - 4;
+        water[i] = land ? 0 : 1;
+        surface[i] = land ? Math.max(0.01, 0.7 - Math.abs(y - h / 2) * 0.07) : 0;
+      }
+    }
+    const a = erodeRelief(surface, water, w, h, { scale: 3, seed: 2 });
+    const b = erodeRelief(surface, water, w, h, { scale: 3, seed: 2 });
+    expect(a.width).toBe(w * 3);
+    expect(Array.from(a.heights)).toEqual(Array.from(b.heights));
+    // The sea is untouched and the land stays above it.
+    expect(a.heights[0]).toBe(0);
+    let lowest = Infinity;
+    for (let Y = 15; Y < 75; Y++) for (let X = 15; X < 105; X++) lowest = Math.min(lowest, a.heights[Y * a.width + X]);
+    expect(lowest).toBeGreaterThan(0);
+    // Along the flank, valleys have been cut between spurs: the height across it is no longer even.
+    const row = 45 + 12;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let X = 20; X < 100; X++) {
+      lo = Math.min(lo, a.heights[row * a.width + X]);
+      hi = Math.max(hi, a.heights[row * a.width + X]);
+    }
+    expect(hi - lo).toBeGreaterThan(0.05);
   });
 
   it('runs a history on hand-shaped land', () => {

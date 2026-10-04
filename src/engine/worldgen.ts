@@ -183,9 +183,19 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
 
   // Lakes in wet depressions, salt flats in dry ones.
   const saltFlat = new Uint8Array(size);
+  const hollow = (i: number) => filled[i] - elevation[i] > 0.012;
   for (const i of order) {
     const depth = filled[i] - elevation[i];
-    if (depth > 0.012) {
+    // A lone hollow a tile across is filled in, not made a pond: lakes need a basin.
+    let around = 0;
+    const x = i % w;
+    const y = (i / w) | 0;
+    for (let d = 0; d < 8; d++) {
+      const nx = x + DX[d];
+      const ny = y + DY[d];
+      if (nx >= 0 && ny >= 0 && nx < w && ny < h && hollow(ny * w + nx)) around++;
+    }
+    if (depth > 0.012 && (around >= 2 || depth > 0.05)) {
       if (moisture[i] > 0.38) {
         elevation[i] = -0.02;
         river[i] = 0;

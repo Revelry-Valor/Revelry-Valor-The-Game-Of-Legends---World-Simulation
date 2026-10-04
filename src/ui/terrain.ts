@@ -3,7 +3,7 @@ import { Noise2D } from '../engine/noise';
 import { Rng } from '../engine/rng';
 import type { MapData } from '../engine/types';
 import { riverNext, riverPoint, type Point } from '../engine/geometry';
-import { stripes } from '../engine/relief';
+import { erodeRelief, type ReliefField } from '../engine/erosion';
 
 /** Pixels per tile in the painted terrain: enough for smooth coasts and soft biome edges. */
 export const TERRAIN_SCALE = 4;
@@ -133,7 +133,6 @@ const DRAWN_SHADOW: [number, number, number] = [100, 90, 84];
 const PAPER_SEA: [number, number, number] = [212, 205, 178];
 const INK: [number, number, number] = [72, 54, 38];
 
-const reliefNoise = new Noise2D(new Rng(11).fork('relief-detail'));
 const smooth = (a: number, b: number, v: number) => {
   const t = clamp((v - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
@@ -146,17 +145,20 @@ const LIGHT = (() => {
   return [l[0] / n, l[1] / n, l[2] / n];
 })();
 
+/** Each map's land is carved once, however many times (and in whatever style) it is painted. */
+const carved = new WeakMap<MapData, ReliefField>();
+
 /**
- * Paints the land as one continuous surface rather than squares, in either style.
+ * Paints the land as one continuous surface rather than squares, in any of the map styles.
  *
- * Satellite: heights are interpolated between tile centres and given fine, eroded-looking detail
- * (sharp ridges and spurs in the mountains, rolling ground in the hills); coasts are fractal, broken
- * up at every zoom; the ground is coloured by what covers it, blending between biomes, with bare
- * rock on steep slopes and above the tree line and snow where it is cold enough; the relief is lit
- * from the north-west and valleys sit in shadow; the sea runs from turquoise shallows to dark deeps.
+ * Every style is shaded from the same carved land: the tile heights laid out on a finer grid and
+ * eroded by running water (see erodeRelief), so ranges stand as sharp crests with spurs and valleys
+ * running down from them, lit from the north-west. Coasts are fractal, broken up at every zoom.
  *
- * Parchment: the same land on old paper, with an inked coastline, ripple lines along the shore and
- * soft sepia relief (mountains, hills and forests are drawn as symbols on top by the renderer).
+ * Drawn map: watercolour washes for each kind of ground on cream paper, browning with height, snow,
+ * an inked coastline and blue seas with ripple lines. Parchment: the same land on old paper in sepia,
+ * forests hatched. Satellite: ground coloured by what covers it, bare rock and snow up high, and
+ * the sea from turquoise shallows to dark deeps.
  *
  * It can paint the whole map at a few pixels per tile, or any part of it at screen resolution.
  */
@@ -172,15 +174,13 @@ export class TerrainShader {
   private colR: (fx: number, fy: number) => number;
   private colG: (fx: number, fy: number) => number;
   private colB: (fx: number, fy: number) => number;
-  /** Slope of the land at tile scale (water counts as level ground), with no kinks between tiles. */
-  private slopeX: (fx: number, fy: number) => number;
-  private slopeY: (fx: number, fy: number) => number;
-  /** The surface, smoothly interpolated with continuous slopes (no grid in the shading). */
-  private surfAt: (fx: number, fy: number) => number;
-  /** The lowest and highest ground around each point, and how much relief there is (0 flat .. 1 mountains). */
-  private footAt: (fx: number, fy: number) => number;
-  private topAt: (fx: number, fy: number) => number;
-  private reliefAt: (fx: number, fy: number) => number;
+  /**
+   * The land as water has carved it (see erodeRelief), on a grid finer than the tiles and smoothly
+   * interpolated: the height every style is shaded from.
+   */
+  private reliefH: (fx: number, fy: number) => number;
+  /** How rugged the land is around each point (0 flat .. 1 mountains), for tinting. */
+  private ruggedAt: (fx: number, fy: number) => number;
   /** Ground colours of the drawn map. */
   private paperR: (fx: number, fy: number) => number;
   private paperG: (fx: number, fy: number) => number;
@@ -228,8 +228,6 @@ export class TerrainShader {
         cav[y * w + x] = map.elevation[y * w + x] < 0 || n === 0 ? 0 : map.elevation[y * w + x] - sum / n;
       }
     }
-    const sx = new Float32Array(size);
-    const sy = new Float32Array(size);
     // The surface: a lake lies level with its shores, the sea at zero.
     const surface = new Float32Array(size);
     for (let i = 0; i < size; i++) {
@@ -253,43 +251,35 @@ export class TerrainShader {
       }
     }
     const at = (x: number, y: number) => surface[clamp(y, 0, h - 1) * w + clamp(x, 0, w - 1)];
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        sx[y * w + x] = (at(x + 1, y) - at(x - 1, y)) * 0.5;
-        sy[y * w + x] = (at(x, y + 1) - at(x, y - 1)) * 0.5;
-      }
+    // Carve the land with running water, on a grid finer than the tiles (kept to a few hundred
+    // thousand cells so even big maps carve in about a second).
+    const water = new Uint8Array(size);
+    for (let i = 0; i < size; i++) water[i] = map.elevation[i] < 0 ? 1 : 0;
+    let relief = carved.get(map);
+    if (!relief) {
+      relief = erodeRelief(surface, water, w, h, { scale: clamp(Math.floor(Math.sqrt(400000 / size)), 2, 4), seed: w * 7919 + h });
+      carved.set(map, relief);
     }
-    this.slopeX = cubic(sx, w, h);
-    this.slopeY = cubic(sy, w, h);
-    // The lowest and highest ground within a few tiles: the foot and the crest of any range.
-    const foot = new Float32Array(size);
-    const top = new Float32Array(size);
-    const rel = new Float32Array(size);
+    const scale = relief.scale;
+    const rel = cubic(relief.heights, relief.width, relief.height);
+    this.reliefH = (fx, fy) => rel((fx + 0.5) * scale - 0.5, (fy + 0.5) * scale - 0.5);
+    const rug = new Float32Array(size);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         let lo = Infinity;
         let hi = -Infinity;
-        for (let dy = -4; dy <= 4; dy++) {
-          for (let dx = -4; dx <= 4; dx++) {
-            if (dx * dx + dy * dy > 17) continue;
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
             const v = at(x + dx, y + dy);
             if (v < lo) lo = v;
             if (v > hi) hi = v;
           }
         }
-        const i = y * w + x;
-        foot[i] = lo;
-        top[i] = hi;
-        rel[i] = clamp((hi - lo - 0.06) / 0.18, 0, 1);
+        rug[y * w + x] = clamp((hi - lo - 0.04) / 0.2, 0, 1);
       }
     }
-    // Smoothed only a little: the crest height must not sink below the crest, or the top flattens.
-    blurField(foot, w, h);
-    blurField(rel, w, h);
-    this.footAt = linear(foot, w, h);
-    this.topAt = linear(top, w, h);
-    this.reliefAt = linear(rel, w, h);
-    this.surfAt = cubic(surface, w, h);
+    blurField(rug, w, h);
+    this.ruggedAt = linear(rug, w, h);
     const pr = new Float32Array(size);
     const pg = new Float32Array(size);
     const pb = new Float32Array(size);
@@ -323,47 +313,6 @@ export class TerrainShader {
   }
 
   /**
-   * The drawn shape of the land where it rises into hills and mountains, as a cartographer draws a
-   * range: one sharp crest along the spine (the rounded top of the land is turned into a knife edge),
-   * with spurs running down both flanks to the valley floor, and smaller spurs branching off those
-   * low down. Wide ranges get long spurs, narrow ones short; flat-topped land (plateaus) stays flat.
-   */
-  private ranges(fx: number, fy: number, fine: boolean): number {
-    const S = this.surfAt(fx, fy);
-    const rw = this.reliefAt(fx, fy);
-    const foot = Math.min(S, this.footAt(fx, fy));
-    const span = Math.max(S + 0.002, this.topAt(fx, fy)) - foot;
-    if (rw <= 0.01 || span < 0.02) return S;
-    const hn = clamp((S - foot) / span, 0, 1);
-    // Smooth slopes here: any kink in them between tiles would show as a grid in the shading.
-    const gx = this.slopeX(fx, fy);
-    const gy = this.slopeY(fx, fy);
-    const gl = Math.hypot(gx, gy);
-    // A knife-edge crest. The slope falls to nothing along the spine, so taking away a share of it
-    // leaves the spine standing and pulls the shoulders down: the rounded top becomes a sharp ridge.
-    // Only high on the range, so valley floors stay rounded.
-    let v = S - 1.3 * rw * smooth(0.35, 0.8, hn) * gl;
-    // Spurs: a few long ridges running straight down each flank from the crest to the floor, with
-    // V-shaped valleys between. Only on real ranges, not on every bump.
-    const sp = smooth(0.4, 0.8, rw);
-    if (sp <= 0) return v;
-    if (gl > 1e-5) {
-      const dx = gy / gl;
-      const dy = -gx / gl;
-      // Strong on the flanks, fading out at the crest (so it stays one clean line) and at the foot.
-      const flank = smooth(0.0, 0.25, hn) * smooth(0.97, 0.75, hn);
-      // Straight-sided spurs: the stripes turned into a sawtooth of sharp ridges and V-shaped valleys.
-      const ridge = (t: number) => 1 - Math.acos(clamp(t * 0.97, -1, 1)) / Math.PI;
-      // Faded out where the ground levels off (peaks, saddles), where the spurs have no way to run.
-      const depth = sp * span * 0.22 * flank * smooth(0.004, 0.03, gl);
-      v -= depth * (1 - ridge(stripes(fx * 0.42, fy * 0.42, dx * 0.85, dy * 0.85)));
-      // Smaller spurs branching off low down, only when close in.
-      if (fine) v -= depth * 0.25 * smooth(0.6, 0.2, hn) * (1 - ridge(stripes(fx * 1.1 + 7, fy * 1.1 - 3, dx * 0.9, dy * 0.9)));
-    }
-    return v;
-  }
-
-  /**
    * Paint a W×H pixel image of the map region starting at (x0, y0) in map coordinates, each pixel
    * covering sx × sy of the map. The optional mask is opaque over dry land (so realm colours can be
    * clipped to the painted coast).
@@ -378,7 +327,6 @@ export class TerrainShader {
     const md = mask?.data;
     const parchment = this.style === 'parchment';
     const drawn = this.style === 'drawn';
-    const eps = clamp(sx * 1.5, 0.03, 0.3);
     for (let py = 0; py < H; py++) {
       // Sampling coordinates put tile centres on whole numbers.
       const fy = y0 + (py + 0.5) * sy - 0.5;
@@ -455,27 +403,15 @@ export class TerrainShader {
             }
           }
         } else {
-          // Plains: the land's broad slope, smooth between tiles, with a little unevenness.
-          const nv = reliefNoise.noise(fx * 0.6, fy * 0.6) * 0.004;
-          let hh = Math.max(0.002, e) + nv;
-          let gx = this.slopeX(fx, fy) + (reliefNoise.noise((fx + eps) * 0.6, fy * 0.6) * 0.004 - nv) / eps;
-          let gy = this.slopeY(fx, fy) + (reliefNoise.noise(fx * 0.6, (fy + eps) * 0.6) * 0.004 - nv) / eps;
-          // Hills and mountains: crests and spurs, shaded from their own shape.
-          const rw = this.reliefAt(fx, fy);
-          if (rw > 0.01) {
-            const pe = clamp(sx * 0.9, 0.02, 0.25);
-            const fine = sx < 0.2;
-            const r0 = this.ranges(fx, fy, fine);
-            const rgx = (this.ranges(fx + pe, fy, fine) - r0) / pe;
-            const rgy = (this.ranges(fx, fy + pe, fine) - r0) / pe;
-            const k = smooth(0.01, 0.12, rw);
-            gx += (rgx - gx) * k;
-            gy += (rgy - gy) * k;
-            hh += (Math.max(0.002, r0) - hh) * k;
-          }
+          // The carved land: its height, and its slope from a step either side (a step of about a
+          // pixel, so close in the finest gullies show and far out they don't shimmer).
+          const pe = clamp(sx * 0.7, 0.03, 0.3);
+          const hh = Math.max(0.002, this.reliefH(fx, fy));
+          const gx = (this.reliefH(fx + pe, fy) - this.reliefH(fx - pe, fy)) / (2 * pe);
+          const gy = (this.reliefH(fx, fy + pe) - this.reliefH(fx, fy - pe)) / (2 * pe);
           const slope = Math.hypot(gx, gy);
           // Lit from the north-west: brightness against flat ground.
-          const Z = 4;
+          const Z = 6;
           const nx = -gx * Z;
           const ny = -gy * Z;
           const nl = Math.hypot(nx, ny, 1);
@@ -515,7 +451,7 @@ export class TerrainShader {
             if ((e >= 0 && e < (slope + 0.004) * sx * 1.4 && this.oceanAt(fx, fy) > 0.02) || (lk > 0.38 && lk <= 0.5)) [r, g, b] = DRAWN_INK;
           } else if (parchment) {
             const paper = 1 + edgeNoise.fbm(fx * 1.5 + 40, fy * 1.5, 3) * 0.04 + edgeNoise.noise(fx * 6, fy * 6) * 0.015;
-            const m = this.reliefAt(fx, fy);
+            const m = this.ruggedAt(fx, fy);
             [r, g, b] = PAPER;
             r += (205 - r) * m * 0.35;
             g += (186 - g) * m * 0.35;
