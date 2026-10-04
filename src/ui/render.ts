@@ -4,7 +4,8 @@ import type { World } from '../engine/world';
 import { LAND_USE_COLORS } from '../engine/data/settlements';
 import { friendly } from '../engine/systems/diplomacy';
 import { TERRAIN_SCALE, TerrainShader, drawRiverCurves, riverCurves } from './terrain';
-import { scaleShapes, traceRegions, warpLabels, type BorderSegment } from './borders';
+import { paintOutline, paintRegions, pixelLabels, warpLabels } from './regions';
+import { sideColor } from '../engine/systems/landwars';
 import { pointAlong, waypoint, type Point } from '../engine/geometry';
 import { DX, DY } from '../engine/worldgen';
 
@@ -159,25 +160,23 @@ type RegionKind = 'polity' | 'culture' | 'race';
 
 /** Region labels from here up are clans' hunting grounds (clan id + CLAN_BASE) rather than nations. */
 const CLAN_BASE = 1 << 20;
+/** Finer grid the borders are read from (cells per tile each way). */
+const FINE = 3;
 
-interface RegionPaths {
-  /** Each region's outline as a fillable shape, in map coordinates. */
-  fills: Map<number, Path2D>;
-  /** Every border between two different regions, each drawn once. */
-  borders: Path2D;
-  edges: BorderSegment[];
+interface RegionGrid {
+  key: string;
+  /** Who holds each tile, and who holds it in fact (an occupier, in a war), as labels. */
+  held: Int32Array;
+  control: Int32Array;
+  fineHeld: Int32Array;
+  fineControl: Int32Array;
+  version: number;
 }
 
 function sameLabels(a: Int32Array, b: Int32Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
-}
-
-function addLoop(p: Path2D, loop: Point[]): void {
-  p.moveTo(loop[0][0], loop[0][1]);
-  for (let k = 1; k < loop.length; k++) p.lineTo(loop[k][0], loop[k][1]);
-  p.closePath();
 }
 
 const colorCache = new Map<string, [number, number, number]>();
@@ -223,12 +222,16 @@ export class MapRenderer {
   /** Screen-sized scratch canvas the realm layers are drawn on before clipping to the land. */
   private regionCanvas = document.createElement('canvas');
   private outlineCanvas = document.createElement('canvas');
+  private focusCanvas = document.createElement('canvas');
   /** What each scratch canvas last showed: redrawn only when the view, the layer or the borders change. */
   private regionDrawn = '';
   private outlineDrawn = '';
-  /** Bumped whenever any region outlines are rebuilt. */
+  private focusDrawn = '';
+  /** Bumped whenever any region grid changes. */
   private regionVersion = 0;
-  private regionCache = new Map<RegionKind, { key: string; labels: Int32Array; paths: RegionPaths }>();
+  private regionCache = new Map<RegionKind, RegionGrid>();
+  /** Labels at every pixel of the current view, per kind of region. */
+  private pixelCache = new Map<RegionKind, { key: string; held: Int32Array; control: Int32Array }>();
   private shapes: NationShapes | null = null;
   private shapesKey = '';
   private rivers: Float32Array = new Float32Array(0);
@@ -338,22 +341,24 @@ export class MapRenderer {
   invalidate(): void {
     this.overlayKey = '';
     this.regionCache.clear();
+    this.pixelCache.clear();
     this.regionDrawn = '';
     this.outlineDrawn = '';
+    this.focusDrawn = '';
   }
 
-  /** What each tile of the realms belongs to, for a kind of region (-1: nobody's). */
-  private labelsFor(kind: RegionKind): Int32Array {
+  /** What each tile of the realms belongs to, for a kind of region (-1: nobody's), and who holds it in fact. */
+  private labelsFor(kind: RegionKind): { held: Int32Array; control: Int32Array } {
     const world = this.world;
     const map = world.map;
-    const labels = new Int32Array(map.size).fill(-1);
+    const held = new Int32Array(map.size).fill(-1);
     const raceIndex = new Map(world.races.map((r, k) => [r.id, k]));
     const bySettlement = new Int32Array(world.settlements.length).fill(-1);
     for (const s of world.settlements) {
       if (!s.alive) continue;
       bySettlement[s.id] = kind === 'polity' ? s.polityId : kind === 'culture' ? s.cultureId : raceIndex.get(world.majorityRaceId(s)) ?? -1;
     }
-    // A clan's hunting grounds, outside any realm: its own region (its own colour, under the realms).
+    // A clan's hunting grounds: its own region (its own colour, alongside the realms).
     const byClan = new Int32Array(world.tribes.length).fill(-1);
     for (const t of world.tribes) {
       const culture = world.cultures[t.cultureId];
@@ -361,41 +366,51 @@ export class MapRenderer {
     }
     for (let i = 0; i < map.size; i++) {
       const o = map.region[i];
-      if (o >= 0) labels[i] = bySettlement[o];
-      else if (map.claim[i] >= 0) labels[i] = byClan[map.claim[i]];
+      if (o >= 0) held[i] = bySettlement[o];
+      else if (map.claim[i] >= 0) held[i] = byClan[map.claim[i]];
     }
-    return labels;
+    if (kind !== 'polity') return { held, control: held };
+    // Land held by force in a war still being fought.
+    const control = Int32Array.from(held);
+    for (let i = 0; i < map.size; i++) {
+      const occ = map.occupier[i];
+      if (occ !== -1 && held[i] !== -1) control[i] = occ >= 0 ? occ : CLAN_BASE + (-occ - 2);
+    }
+    return { held, control };
   }
 
-  /** Smooth outlines of every nation, culture or people, rebuilt only when the map of them changes. */
-  private regions(kind: RegionKind): RegionPaths {
+  /** The finer, warped grids the borders are read from, rebuilt only when the land changes hands. */
+  private regions(kind: RegionKind): RegionGrid {
     const world = this.world;
     const key = `${world.monthIndex}:${world.settlements.length}:${world.polities.length}`;
     const hit = this.regionCache.get(kind);
-    if (hit && hit.key === key) return hit.paths;
-    const labels = this.labelsFor(kind);
-    if (hit && sameLabels(hit.labels, labels)) {
+    if (hit && hit.key === key) return hit;
+    const { held, control } = this.labelsFor(kind);
+    if (hit && sameLabels(hit.held, held) && sameLabels(hit.control, control)) {
       hit.key = key;
-      return hit.paths;
+      return hit;
     }
-    // Traced on a finer, gently warped grid so borders wander like real ones rather than step from tile to tile.
-    const F = 3;
     const { width: w, height: h } = world.map;
-    const shapes = scaleShapes(traceRegions(warpLabels(labels, w, h, F), w * F, h * F, 3), 1 / F);
-    const paths: RegionPaths = { fills: new Map(), borders: new Path2D(), edges: shapes.segments };
-    for (const [label, loops] of shapes.loops) {
-      const p = new Path2D();
-      for (const loop of loops) addLoop(p, loop);
-      paths.fills.set(label, p);
-    }
-    for (const seg of shapes.segments) {
-      if (seg.a === seg.b) continue;
-      paths.borders.moveTo(seg.pts[0][0], seg.pts[0][1]);
-      for (let k = 1; k < seg.pts.length; k++) paths.borders.lineTo(seg.pts[k][0], seg.pts[k][1]);
-    }
-    this.regionCache.set(kind, { key, labels, paths });
-    this.regionVersion++;
-    return paths;
+    const grid: RegionGrid = {
+      key, held, control, fineHeld: warpLabels(held, w, h, FINE), fineControl: control === held ? warpLabels(held, w, h, FINE) : warpLabels(control, w, h, FINE), version: ++this.regionVersion,
+    };
+    this.regionCache.set(kind, grid);
+    return grid;
+  }
+
+  /** Labels at every pixel of the view. */
+  private pixels(kind: RegionKind, view: ViewState, W: number, H: number, res: number): { held: Int32Array; control: Int32Array } {
+    const grid = this.regions(kind);
+    const key = `${grid.version}:${view.zoom}:${view.ox}:${view.oy}:${W}:${H}`;
+    const hit = this.pixelCache.get(kind);
+    if (hit && hit.key === key) return hit;
+    const { width: w, height: h } = this.world.map;
+    const step = 1 / (view.zoom * res);
+    const held = pixelLabels(grid.fineHeld, w * FINE, h * FINE, FINE, view.ox, view.oy, step, W, H, hit?.held.length === W * H ? hit.held : undefined);
+    const control = grid.fineControl === grid.fineHeld ? held : pixelLabels(grid.fineControl, w * FINE, h * FINE, FINE, view.ox, view.oy, step, W, H, hit && hit.control !== hit.held && hit.control.length === W * H ? hit.control : undefined);
+    const out = { key, held, control };
+    this.pixelCache.set(kind, out);
+    return out;
   }
 
   private colorOf(kind: RegionKind, label: number): string {
@@ -404,132 +419,125 @@ export class MapRenderer {
     return kind === 'polity' ? world.polities[label].color : kind === 'culture' ? world.cultures[label].color : world.races[label].color;
   }
 
-  /**
-   * The realm layers: each nation, culture or people filled as one smooth shape with curved borders,
-   * clipped to the land so the colour stops at the painted coast. The selected nation gets a bright
-   * outline, drawn the same way.
-   */
-  private drawRegions(ctx: CanvasRenderingContext2D, view: ViewState, cw: number, ch: number, selected: number, bonded: Set<number>): void {
-    const layer = view.layer;
-    // Called twice: once for the layer's fills (no selection), once later for the selected nation's outline.
-    const kind: RegionKind | null = selected >= 0 ? null : layer === 'political' || layer === 'nations' ? 'polity' : layer === 'culture' ? 'culture' : layer === 'race' ? 'race' : null;
-    if (!kind && selected < 0) return;
+  /** A screen-sized scratch canvas at the resolution regions are painted at. */
+  private scratch(c: HTMLCanvasElement, cw: number, ch: number): { W: number; H: number; res: number } {
+    const res = Math.min(1.5, window.devicePixelRatio || 1);
+    const W = Math.ceil(cw * res);
+    const H = Math.ceil(ch * res);
+    if (c.width !== W || c.height !== H) {
+      c.width = W;
+      c.height = H;
+    }
+    return { W, H, res };
+  }
+
+  /** Keep only what lies over dry land, so colours and borders stop at the painted coast. */
+  private clipToLand(c: HTMLCanvasElement, view: ViewState, cw: number, ch: number, res: number): void {
+    const o = c.getContext('2d')!;
     const map = this.world.map;
-    const dpr = window.devicePixelRatio || 1;
-    const rc = selected >= 0 ? this.outlineCanvas : this.regionCanvas;
-    const W = Math.ceil(cw * dpr);
-    const H = Math.ceil(ch * dpr);
-    // Make sure the outlines are current before deciding whether the cached picture still holds.
-    if (kind) this.regions(kind);
-    if (selected >= 0) this.regions('polity');
-    const detailed = this.detailFor(view, cw, ch) !== null;
-    const drawn = `${layer}:${selected}:${[...bonded].join(',')}:${this.regionVersion}:${view.zoom}:${view.ox}:${view.oy}:${W}:${H}:${detailed}`;
-    if (drawn === (selected >= 0 ? this.outlineDrawn : this.regionDrawn)) {
-      ctx.drawImage(rc, 0, 0, cw, ch);
-      return;
-    }
-    if (selected >= 0) this.outlineDrawn = drawn;
-    else this.regionDrawn = drawn;
-    if (rc.width !== W || rc.height !== H) {
-      rc.width = W;
-      rc.height = H;
-    }
-    const o = rc.getContext('2d')!;
-    o.setTransform(1, 0, 0, 1, 0, 0);
-    o.globalCompositeOperation = 'source-over';
-    o.clearRect(0, 0, W, H);
-    const z = view.zoom;
-    const s = dpr * z;
-    o.setTransform(s, 0, 0, s, -view.ox * s, -view.oy * s);
-    o.lineJoin = 'round';
-    o.lineCap = 'round';
-    if (kind) {
-      const paths = this.regions(kind);
-      if (layer === 'nations') {
-        // Unclaimed wilds washed pale so the nations read clearly.
-        o.fillStyle = 'rgba(236, 232, 222, 0.5)';
-        o.fillRect(0, 0, map.width, map.height);
-      }
-      for (const [label, path] of paths.fills) {
-        // Clans' hunting grounds are washed paler than settled realms.
-        const clan = label >= CLAN_BASE;
-        o.fillStyle = this.colorOf(kind, label);
-        o.globalAlpha = layer === 'nations' ? (clan ? 0.45 : 0.8) : clan ? 0.28 : 0.45;
-        o.fill(path);
-      }
-      o.globalAlpha = 1;
-      o.strokeStyle = layer === 'nations' ? 'rgba(24, 20, 16, 0.9)' : 'rgba(30, 24, 18, 0.65)';
-      o.lineWidth = (layer === 'nations' ? 2 : 1.4) / z;
-      o.stroke(paths.borders);
-    }
-    if (selected >= 0) {
-      // A bright double outline round the selected nation; dashed lines round the nations bound to it.
-      const edges = this.regions('polity').edges;
-      const own = new Path2D();
-      const ties = new Map<number, Path2D>();
-      for (const seg of edges) {
-        if (seg.a === seg.b) continue;
-        const target = seg.a === selected || seg.b === selected ? own : null;
-        const tie = bonded.has(seg.a) ? seg.a : bonded.has(seg.b) ? seg.b : -1;
-        const add = (p: Path2D) => {
-          p.moveTo(seg.pts[0][0], seg.pts[0][1]);
-          for (let k = 1; k < seg.pts.length; k++) p.lineTo(seg.pts[k][0], seg.pts[k][1]);
-        };
-        if (target) add(target);
-        else if (tie >= 0) {
-          if (!ties.has(tie)) ties.set(tie, new Path2D());
-          add(ties.get(tie)!);
-        }
-      }
-      for (const [b, p] of ties) {
-        o.strokeStyle = this.world.polities[b].color;
-        o.lineWidth = Math.max(1.5, Math.min(3, z * 0.3)) / z;
-        o.setLineDash([6 / z, 4 / z]);
-        o.stroke(p);
-      }
-      o.setLineDash([]);
-      o.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-      o.lineWidth = Math.max(3, Math.min(6, z * 0.6)) / z;
-      o.stroke(own);
-      o.strokeStyle = this.world.polities[selected].color;
-      o.lineWidth = Math.max(1.5, Math.min(3, z * 0.3)) / z;
-      o.stroke(own);
-    }
-    // Keep only what lies over dry land.
     o.setTransform(1, 0, 0, 1, 0, 0);
     o.globalCompositeOperation = 'destination-in';
     o.imageSmoothingEnabled = true;
-    if (detailed) o.drawImage(this.detailMask, 0, 0, W, H);
+    const s = view.zoom * res;
+    if (this.detailFor(view, cw, ch)) o.drawImage(this.detailMask, 0, 0, c.width, c.height);
     else o.drawImage(this.landMask, -view.ox * s, -view.oy * s, map.width * s, map.height * s);
     o.globalCompositeOperation = 'source-over';
+  }
+
+  /**
+   * The realm layers: every pixel of the view belongs to one nation, clan, culture or people (or to
+   * nobody), so borders are simply where one meets another, smooth and never crossing themselves.
+   * Borders between holders are solid; land taken in a war still being fought is striped with the
+   * occupier's colour inside a dotted line, which turns solid if the peace hands it over.
+   */
+  private drawRegions(ctx: CanvasRenderingContext2D, view: ViewState, cw: number, ch: number): void {
+    const layer = view.layer;
+    const kind: RegionKind = layer === 'culture' ? 'culture' : layer === 'race' ? 'race' : 'polity';
+    const rc = this.regionCanvas;
+    const { W, H, res } = this.scratch(rc, cw, ch);
+    const grid = this.regions(kind);
+    const detailed = this.detailFor(view, cw, ch) !== null;
+    const drawn = `${layer}:${grid.version}:${view.zoom}:${view.ox}:${view.oy}:${W}:${H}:${detailed}`;
+    if (drawn !== this.regionDrawn) {
+      this.regionDrawn = drawn;
+      const { held, control } = this.pixels(kind, view, W, H, res);
+      const o = rc.getContext('2d')!;
+      const img = o.createImageData(W, H);
+      const nations = layer === 'nations';
+      paintRegions(img, held, control, {
+        fill: (label) => {
+          const [r, g, b] = toRgb(this.colorOf(kind, label));
+          // Clans' hunting grounds are washed paler than settled realms.
+          const clan = label >= CLAN_BASE;
+          return [r, g, b, Math.round(255 * (nations ? (clan ? 0.45 : 0.8) : clan ? 0.28 : 0.45))];
+        },
+        border: nations ? [24, 20, 16, 235] : [30, 24, 18, 170],
+        width: Math.max(1, Math.round((nations ? 2 : 1.4) * res)),
+      });
+      if (nations) {
+        // Unclaimed wilds washed pale so the nations read clearly.
+        const d = img.data;
+        for (let i = 0; i < W * H; i++) {
+          if (held[i] !== -1 || d[i * 4 + 3] !== 0) continue;
+          d[i * 4] = 236;
+          d[i * 4 + 1] = 232;
+          d[i * 4 + 2] = 222;
+          d[i * 4 + 3] = 128;
+        }
+      }
+      o.setTransform(1, 0, 0, 1, 0, 0);
+      o.putImageData(img, 0, 0);
+      this.clipToLand(rc, view, cw, ch, res);
+    }
+    ctx.drawImage(rc, 0, 0, cw, ch);
+  }
+
+  /** The selected nation's outline: a bright band round its land; dashed lines round the nations bound to it. */
+  private drawOutline(ctx: CanvasRenderingContext2D, view: ViewState, cw: number, ch: number, selected: number, bonded: Set<number>): void {
+    const rc = this.outlineCanvas;
+    const { W, H, res } = this.scratch(rc, cw, ch);
+    const grid = this.regions('polity');
+    const detailed = this.detailFor(view, cw, ch) !== null;
+    const drawn = `${selected}:${[...bonded].join(',')}:${grid.version}:${view.zoom}:${view.ox}:${view.oy}:${W}:${H}:${detailed}`;
+    if (drawn !== this.outlineDrawn) {
+      this.outlineDrawn = drawn;
+      const { held } = this.pixels('polity', view, W, H, res);
+      const o = rc.getContext('2d')!;
+      const img = o.createImageData(W, H);
+      for (const b of bonded) paintOutline(img, held, b, toRgb(this.world.polities[b].color), Math.max(1, Math.round(res)), true);
+      paintOutline(img, held, selected, [255, 255, 255], Math.max(2, Math.round(2 * res)));
+      paintOutline(img, held, selected, toRgb(this.world.polities[selected].color), Math.max(1, Math.round(res)));
+      o.setTransform(1, 0, 0, 1, 0, 0);
+      o.putImageData(img, 0, 0);
+      this.clipToLand(rc, view, cw, ch, res);
+    }
     ctx.drawImage(rc, 0, 0, cw, ch);
   }
 
   /** Dim everything outside the selected nation; the nations bound to it stay half-lit. */
   private drawFocus(ctx: CanvasRenderingContext2D, view: ViewState, cw: number, ch: number, selected: number, bonded: Set<number>): void {
-    const fills = this.regions('polity').fills;
-    const own = fills.get(selected);
-    if (!own) return;
-    const z = view.zoom;
-    const dpr = window.devicePixelRatio || 1;
-    ctx.save();
-    ctx.setTransform(dpr * z, 0, 0, dpr * z, -view.ox * z * dpr, -view.oy * z * dpr);
-    const rect = (p: Path2D) => p.rect(view.ox - 1, view.oy - 1, cw / z + 2, ch / z + 2);
-    const outside = new Path2D();
-    rect(outside);
-    outside.addPath(own);
-    const tied = new Path2D();
-    for (const b of bonded) {
-      const f = fills.get(b);
-      if (!f) continue;
-      outside.addPath(f);
-      tied.addPath(f);
+    const rc = this.focusCanvas;
+    const { W, H, res } = this.scratch(rc, cw, ch);
+    const grid = this.regions('polity');
+    const drawn = `${selected}:${[...bonded].join(',')}:${grid.version}:${view.zoom}:${view.ox}:${view.oy}:${W}:${H}`;
+    if (drawn !== this.focusDrawn) {
+      this.focusDrawn = drawn;
+      const { held } = this.pixels('polity', view, W, H, res);
+      const o = rc.getContext('2d')!;
+      const img = o.createImageData(W, H);
+      const d = img.data;
+      for (let i = 0; i < W * H; i++) {
+        const l = held[i];
+        if (l === selected) continue;
+        d[i * 4] = 12;
+        d[i * 4 + 1] = 16;
+        d[i * 4 + 2] = 24;
+        d[i * 4 + 3] = bonded.has(l) ? 80 : 170;
+      }
+      o.setTransform(1, 0, 0, 1, 0, 0);
+      o.putImageData(img, 0, 0);
     }
-    ctx.fillStyle = 'rgba(12, 16, 24, 0.67)';
-    ctx.fill(outside, 'evenodd');
-    ctx.fillStyle = 'rgba(12, 16, 24, 0.31)';
-    ctx.fill(tied);
-    ctx.restore();
+    ctx.drawImage(rc, 0, 0, cw, ch);
   }
 
   /** Tile counts, centres and outline segments of every nation, rebuilt when borders may have moved. */
@@ -592,7 +600,7 @@ export class MapRenderer {
     drawRiverCurves(ctx, this.rivers, view, { x0: view.ox, y0: view.oy, x1: view.ox + cw / z, y1: view.oy + ch / z });
     const selected = view.selectedPolity >= 0 && world.polities[view.selectedPolity]?.alive ? view.selectedPolity : -1;
     const bonded = selected >= 0 ? this.bondedTo(selected) : new Set<number>();
-    if (view.layer === 'political' || view.layer === 'nations' || view.layer === 'culture' || view.layer === 'race') this.drawRegions(ctx, view, cw, ch, -1, bonded);
+    if (view.layer === 'political' || view.layer === 'nations' || view.layer === 'culture' || view.layer === 'race') this.drawRegions(ctx, view, cw, ch);
     else {
       this.paintOverlay(view);
       // Climate and resource layers are smooth fields.
@@ -821,6 +829,50 @@ export class MapRenderer {
           ctx.fillText(label, X + s + 3, Y + s * 0.4);
         }
       }
+      // Warbands: a clan's or an early settlement's fighters, out to take or hold land, and coming home.
+      for (const wb of world.warbands) {
+        if (!wb.alive) continue;
+        const color = sideColor(world, wb.side);
+        const to = Math.min(wb.step, Math.max(0, wb.path.length - 1));
+        const [X, Y] = wb.path.length > 1 ? along(wb.path, Math.min(wb.prevStep, to), to) : wp(wb.tile);
+        if (!wb.homeward && wb.path.length > to + 1) {
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.6;
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([2, 3]);
+          ctx.beginPath();
+          traceSmooth(ctx, [[X, Y], ...wb.path.slice(to + 1).map(wp)]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.globalAlpha = wb.homeward ? 0.55 : 1;
+        const r = Math.max(3.5, Math.min(8, 2 + Math.sqrt(wb.size) * 0.45)) * Math.max(0.8, Math.min(1.4, z / 5));
+        // Two crossed spears over a shield in the side's colour.
+        ctx.beginPath();
+        ctx.arc(X, Y, r * 0.75, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 1.3;
+        ctx.strokeStyle = '#1b1b1b';
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(X - r, Y - r);
+        ctx.lineTo(X + r, Y + r);
+        ctx.moveTo(X + r, Y - r);
+        ctx.lineTo(X - r, Y + r);
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        if (view.showLabels && z >= 6) {
+          const label = `${wb.name.charAt(0).toUpperCase() + wb.name.slice(1)} (${Math.round(wb.size)})${wb.homeward ? ' — going home' : ''}`;
+          ctx.font = `600 11px "Alegreya Sans", system-ui, sans-serif`;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = ink.halo;
+          ctx.strokeText(label, X + r + 3, Y + r * 0.4);
+          ctx.fillStyle = ink.text;
+          ctx.fillText(label, X + r + 3, Y + r * 0.4);
+        }
+        ctx.globalAlpha = 1;
+      }
       // Recent battles flare and fade; captured towns ring red.
       for (const m of world.battleMarks) {
         const age = world.monthIndex - m.at + (1 - frac);
@@ -894,7 +946,7 @@ export class MapRenderer {
       }
       for (const pid of order) if (pid !== selected) nameNation(pid, false);
     }
-    if (selected >= 0) this.drawRegions(ctx, view, cw, ch, selected, bonded);
+    if (selected >= 0) this.drawOutline(ctx, view, cw, ch, selected, bonded);
 
     // A red ring marks towns cut off from their capital.
     ctx.strokeStyle = 'rgba(220, 60, 50, 0.9)';

@@ -20,9 +20,10 @@ import { claimTile } from './systems/land';
 import { LandUse, tierIndex } from './data/settlements';
 import { runTechnology } from './systems/technology';
 import { updateTerritory } from './systems/territory';
+import { warbandsMonth } from './systems/landwars';
 import { assignMarkets, buildHubLinks, buildMarketLinks, buildTradeLinks, runTrade, runTribute, updateExportPrices } from './systems/trade';
 import type {
-  Army, Band, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, MapData, Polity, RaceDef, Ruler,
+  Army, Band, Caravan, Confederation, Culture, CultureValues, EventKind, Government, HistoryEvent, LandWar, MapData, Polity, RaceDef, Ruler, Warband,
   NobleHouse, Pact, Settlement, SettlerParty, TradeAgreement, Tribe, TradeLink, TradeRoute, TradingHouse, War, WorldConfig, YearStats,
 } from './types';
 import { VALUE_KEYS } from './types';
@@ -74,6 +75,12 @@ export class World {
   tribes: Tribe[] = [];
   bands: Band[] = [];
   nextBandId = 0;
+  /** Wars over land involving clans, and the warbands out fighting them. */
+  landWars: LandWar[] = [];
+  warbands: Warband[] = [];
+  nextWarbandId = 0;
+  /** Truces after land wars: pair key of the two sides' codes -> year it ends. */
+  landTruces = new Map<string, number>();
   nextSettlerId = 0;
   agreements: TradeAgreement[] = [];
   nextCaravanId = 0;
@@ -134,6 +141,7 @@ export class World {
     if (this.month === SPRING_MUSTER) raiseArmies(this);
     settlersMonth(this);
     militaryMonth(this);
+    warbandsMonth(this);
     caravansMonth(this);
     this.month++;
     if (this.month === 12) {
@@ -173,6 +181,8 @@ export class World {
     bandsYear(this);
     runCulture(this);
     runPolitics(this);
+    // Towns that changed hands this year trade through a market of their new nation.
+    assignMarkets(this);
     runTechnology(this);
     planCaravans(this);
     this.recordStats();

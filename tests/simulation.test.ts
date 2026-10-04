@@ -86,7 +86,8 @@ describe('simulation', () => {
   it('accepts a custom roster of peoples', () => {
     const giants = { ...DEFAULT_RACES[2], id: 'giant', name: 'Giant', plural: 'Giants', growth: 0.01 };
     const w = new World(small({ races: [DEFAULT_RACES[0], giants], tribesPerHomeland: 2 }));
-    w.run(50);
+    // Slow-growing giants take a few generations to settle down.
+    w.run(100);
     const raceIds = new Set(w.settlements.flatMap((s) => Object.keys(s.races)));
     expect([...raceIds].sort()).toEqual(['giant', 'human']);
   });

@@ -5,11 +5,34 @@ import type { World } from '../world';
 import { TRAVEL_SEASON } from '../calendar';
 import { captureSettlement, controllerOf, killPop, spreadLosses } from './politics';
 import { settlementValue } from './warAims';
+import { passThrough } from './landwars';
 
 /** Terrain cost an army marches in a year; it covers a twelfth of it each month. */
 const MARCH = 22;
 const ORDINALS = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
-const HOST_WORDS: Record<string, string> = { human: 'Legion', elf: 'Host', dwarf: 'Hammerhost', orc: 'Warband', halfling: 'Muster', lizardfolk: 'Swarm' };
+/** What a levy is called among each people. */
+const LEVY_WORDS: Record<string, string> = { human: 'Levy', elf: 'Host', dwarf: 'Hammerhost', orc: 'Horde', halfling: 'Muster', lizardfolk: 'Swarm' };
+const PRO_WORDS: Record<string, string> = { human: 'Legion', elf: 'Guard', dwarf: 'Ironguard', orc: 'Warhost', halfling: 'Company', lizardfolk: 'Brood' };
+
+export type ArmyStage = 'warband' | 'levy' | 'professional';
+
+/**
+ * How a nation fights, following history. Tribes and chiefdoms, and anyone without bronze, send out
+ * warbands: every able fighter, gone home when the raid is done. Kingdoms and city-states keep a small
+ * retinue of professional fighters and call out a levy of farmers in time of war, hiring hunters as
+ * archers; levies are raised for the campaigning season and go home for the winter. Standing,
+ * professional armies come late (gunpowder), with the exceptions of drilled empires and republics
+ * (the warrior code), as the Romans were.
+ */
+export function armyStage(p: Polity): ArmyStage {
+  if (!p.techs.has('bronze_working') || p.government === 'tribe' || p.government === 'chiefdom') return 'warband';
+  if (p.techs.has('gunpowder') || (p.techs.has('warrior_code') && (p.government === 'empire' || p.government === 'republic'))) return 'professional';
+  return 'levy';
+}
+
+const STAGE_QUALITY: Record<ArmyStage, number> = { warband: 0.85, levy: 1, professional: 1.25 };
+/** Month the campaigning season ends and warbands and levies go home. */
+const SEASON_END = 10;
 
 /** Soldiers a polity can put in the field. */
 export function levy(world: World, p: Polity): number {
@@ -73,9 +96,11 @@ function raise(world: World, war: War, p: Polity, attacking: boolean): void {
   const race = world.majorityRaceId(world.settlements[p.capitalId]);
   const count = world.armiesRaised.get(p.id) ?? 0;
   world.armiesRaised.set(p.id, count + 1);
+  const stage = armyStage(p);
+  const word = stage === 'warband' ? 'Warband' : stage === 'levy' ? LEVY_WORDS[race] ?? 'Host' : PRO_WORDS[race] ?? 'Legion';
   const army: Army = {
     id: world.nextArmyId++,
-    name: `${ORDINALS[count % ORDINALS.length]} ${HOST_WORDS[race] ?? 'Host'} of ${p.baseName}`,
+    name: `${ORDINALS[count % ORDINALS.length]} ${word} of ${p.baseName}`,
     polityId: p.id, warId: war.id, size, raised: size, tile: staging.tile, prevTile: staging.tile,
     targetSettlement: -1, targetArmy: -1, path: [], step: 0, siege: 0, victories: 0, fought: -99, alive: true,
   };
@@ -89,6 +114,14 @@ function raise(world: World, war: War, p: Polity, attacking: boolean): void {
  * and desertion, worst in harsh country.
  */
 export function militaryMonth(world: World): void {
+  // The campaigning season ends: warbands and levies go home to their fields; standing armies stay out.
+  if (world.month === SEASON_END) {
+    for (const a of world.armies) {
+      if (!a.alive || armyStage(world.polities[a.polityId]) === 'professional') continue;
+      a.alive = false;
+      if (a.size > 1500) world.log('army', 1, `With the campaigning season over, the ${a.name} went home for the winter.`, { polities: [a.polityId], tile: a.tile });
+    }
+  }
   const alive = world.armies.filter((a) => a.alive);
   for (const army of alive) {
     army.prevTile = army.tile;
@@ -180,6 +213,8 @@ function march(world: World, army: Army): void {
     budget -= Number.isFinite(c) ? c : 2;
     army.step++;
     army.tile = next;
+    // Enemy land the army passes through is held by force until the peace.
+    if (world.map.elevation[next] >= 0) passThrough(world, p.id, enemyOf(world, war, p).id, next);
     if (world.armies.some((e) => e.alive && e.polityId !== p.id && world.atWar(e.polityId, p.id) && dist(world, e.tile, next) <= 1.5)) break;
   }
 }
@@ -215,8 +250,8 @@ function engage(world: World, army: Army): void {
     const q = world.polities[foe.polityId];
     const ownLand = (a: Army) => world.map.region[a.tile] >= 0 && world.settlements[world.map.region[a.tile]].polityId === a.polityId;
     const terrain = world.map.relief[foe.tile] === Relief.Hills ? 1.15 : world.map.relief[foe.tile] === Relief.Mountains ? 1.3 : 1;
-    const sa = army.size * soldierQuality(world, p) * (ownLand(army) ? 1.1 : 1) * rng.range(0.7, 1.3);
-    const sb = foe.size * soldierQuality(world, q) * (ownLand(foe) ? 1.1 : 1) * terrain * rng.range(0.7, 1.3);
+    const sa = army.size * soldierQuality(world, p) * STAGE_QUALITY[armyStage(p)] * (ownLand(army) ? 1.1 : 1) * rng.range(0.7, 1.3);
+    const sb = foe.size * soldierQuality(world, q) * STAGE_QUALITY[armyStage(q)] * (ownLand(foe) ? 1.1 : 1) * terrain * rng.range(0.7, 1.3);
     const aWins = rng.chance((sa * sa) / (sa * sa + sb * sb));
     const [win, lose] = aWins ? [army, foe] : [foe, army];
     const winP = world.polities[win.polityId];

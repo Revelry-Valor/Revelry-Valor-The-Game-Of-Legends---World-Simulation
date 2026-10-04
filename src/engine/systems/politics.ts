@@ -1,5 +1,6 @@
 import { GOOD_COUNT, Good } from '../data/economy';
 import { adjectiveOf } from '../names';
+import { settleOccupiedLand } from './landwars';
 import type { Government, Polity, Settlement, War } from '../types';
 import { pairKey, type World } from '../world';
 import { controlRange } from './migration';
@@ -391,6 +392,8 @@ function endWar(world: World, war: War, outcome: string): void {
   B.relations.set(A.id, -0.25);
   for (const army of world.armies) if (army.warId === war.id) army.alive = false;
   world.armies = world.armies.filter((a) => a.alive);
+  // Land the armies hold goes to the winner of the war, or back to its owner.
+  settleOccupiedLand(world, A.id, B.id, war.winner !== undefined && war.winner >= 0 ? war.winner : !A.alive ? B.id : !B.alive ? A.id : null);
   // Whatever the peace did not hand over goes back to its owner; a town whose owner is gone stays with its occupier.
   for (const s of world.aliveSettlements()) {
     const pair = (s.occupiedBy === A.id && s.polityId === B.id) || (s.occupiedBy === B.id && s.polityId === A.id);
@@ -479,6 +482,7 @@ export function captureSettlement(world: World, war: War, att: Polity, def: Poli
   if (owner.id === def.id && def.settlementIds.every((id) => world.settlements[id].occupiedBy === att.id)) {
     const towns = def.settlementIds.map((id) => world.settlements[id]);
     for (const s of towns) transferSettlement(world, s, def, att, 0.2);
+    war.winner = att.id;
     endWar(world, war, `the ${att.name} conquered the ${def.name}`);
     dissolve(world, def, `The ${def.name} fell to the ${att.name}.`);
   }
@@ -538,6 +542,7 @@ function resolveWars(world: World): void {
       else outcome = 'neither side gained ground';
       if (gained + lost > ceded.length) outcome += '; the other occupied towns were handed back';
       if (war.parent === undefined) outcome += peaceTerms(world, war, winner, loser);
+      war.winner = winner ? winner.id : -1;
       endWar(world, war, outcome);
       A.warExhaustion *= 0.5;
       B.warExhaustion *= 0.5;

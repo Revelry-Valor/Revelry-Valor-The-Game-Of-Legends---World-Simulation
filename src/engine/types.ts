@@ -137,9 +137,10 @@ export interface MapData {
   seaAnomaly: Float32Array;
   biome: Uint8Array;
   relief: Uint8Array;
-  /** Clan (tribe id) whose hunting grounds each tile is, -1 if unclaimed; and the year a tribe of that clan last used it. */
+  /** Clan (tribe id) whose hunting grounds each tile is, -1 if unclaimed. */
   claim: Int32Array;
-  claimSeen: Float32Array;
+  /** Who holds each tile by force in a war still being fought: a nation id, a clan as clanCode (-2 and below), or -1. */
+  occupier: Int32Array;
   /** Accumulated river discharge (0 when no river). */
   river: Float32Array;
   landmass: Int32Array;
@@ -284,6 +285,65 @@ export interface Band {
   searching: number;
   /** Year it made its home range. */
   homeSince: number;
+  /** Whether its clan's land around home is too little to feed it, so it claims more as it goes. */
+  landHungry: boolean;
+}
+
+/**
+ * A war over land between two powers, at least one of them a clan (wars between nations are Wars).
+ * Sides are written as a nation id, or a clan as clanCode (-2 and below).
+ */
+export interface LandWar {
+  id: number;
+  name: string;
+  attacker: number;
+  defender: number;
+  /** Month it was declared (year * 12 + month), and when it ended. */
+  start: number;
+  end: number | null;
+  /** Centre of the land fought over. */
+  aim: number;
+  battles: number;
+  attackerWins: number;
+  defenderWins: number;
+  attackerLosses: number;
+  defenderLosses: number;
+  /** Warbands each side has sent out. */
+  raisedA: number;
+  raisedB: number;
+  outcome: string | null;
+}
+
+/** Where a warband's fighters came from, so the survivors go home to the right place. */
+export interface WarbandSource {
+  kind: 'band' | 'settlement';
+  id: number;
+  /** The clan a tribe belongs to, so survivors can join kin if their own tribe is gone. */
+  clan: number;
+  n: number;
+}
+
+/** A warband: the fighters of a clan's tribes or of an early settlement, out to take or hold land. */
+export interface Warband {
+  id: number;
+  name: string;
+  warId: number;
+  /** Side it fights for (nation id, or clanCode). */
+  side: number;
+  size: number;
+  raised: number;
+  sources: WarbandSource[];
+  /** Where it set out from and goes back to. */
+  home: number;
+  tile: number;
+  target: number;
+  path: number[];
+  step: number;
+  prevStep: number;
+  /** Out to fight, or going home. */
+  homeward: boolean;
+  months: number;
+  alive: boolean;
 }
 
 /** A column of settlers on its way to found a new settlement. */
@@ -660,6 +720,8 @@ export interface War {
   conquered: number[];
   /** Set when this war was joined to honour an alliance. */
   parent?: number;
+  /** Who won (-1 for neither), set at the peace. */
+  winner?: number;
   /** Settlement the war is chiefly fought over, and why. */
   goal?: number;
   cause?: string;

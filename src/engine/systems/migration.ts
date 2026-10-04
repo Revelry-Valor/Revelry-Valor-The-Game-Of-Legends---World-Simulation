@@ -1,4 +1,5 @@
 import { TRAVEL_SEASON } from '../calendar';
+import { roomToSettle } from './territory';
 import type { SettlerParty, Settlement } from '../types';
 import type { World } from '../world';
 import { releaseAll } from './land';
@@ -139,6 +140,7 @@ function colonize(world: World, s: Settlement): void {
     if (world.settlers.some((p) => Math.hypot((p.targetTile % map.width) - x, Math.floor(p.targetTile / map.width) - y) < spacing)) continue;
     const owner = map.region[t];
     if (owner >= 0 && world.settlements[owner].polityId !== s.polityId) continue;
+    if (!roomToSettle(world, t, s.polityId, founderClan(world, s.polityId))) continue;
     let score = siteScore(map, race, t, culture.traitEffects.habitat);
     if (score === -Infinity) continue;
     score -= dist * 0.12;
@@ -214,7 +216,8 @@ function found(world: World, p: SettlerParty): void {
   const owner = map.region[tile];
   const taken = owner >= 0 && world.settlements[owner].alive && world.settlements[owner].polityId !== p.polityId;
   const crowded = [...world.aliveSettlements()].some((o) => Math.hypot(o.x - x, o.y - y) < spacing);
-  if (!pol.alive || taken || crowded || map.settlementAt[tile] >= 0) {
+  const hemmed = !roomToSettle(world, tile, p.polityId, founderClan(world, p.polityId));
+  if (!pol.alive || taken || crowded || hemmed || map.settlementAt[tile] >= 0) {
     settleNearest(world, p, 'found the land taken');
     return;
   }
@@ -254,6 +257,11 @@ function settleNearest(world: World, p: SettlerParty, why: string): void {
   for (const r in p.races) best.races[r] = (best.races[r] ?? 0) + p.races[r];
   best.pop += p.people;
   if (p.people > 300) world.log('migration', 1, `Settlers from ${world.settlements[p.fromId].name} ${why} and made their home in ${best.name} instead.`, { settlements: [best.id, p.fromId] });
+}
+
+/** The clan whose people founded a nation (-1 if none). */
+function founderClan(world: World, polityId: number): number {
+  return world.tribes.find((t) => t.polityId === polityId)?.id ?? -1;
 }
 
 /** Distance (tiles) over which a polity can govern effectively. */

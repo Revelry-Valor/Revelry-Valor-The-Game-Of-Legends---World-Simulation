@@ -342,7 +342,7 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     pressure: new Float32Array(size),
     region: new Int32Array(size).fill(-1),
     claim: new Int32Array(size).fill(-1),
-    claimSeen: new Float32Array(size),
+    occupier: new Int32Array(size).fill(-1),
     settlementAt: new Int32Array(size).fill(-1),
     road: new Float32Array(size),
     traffic: new Float32Array(size),

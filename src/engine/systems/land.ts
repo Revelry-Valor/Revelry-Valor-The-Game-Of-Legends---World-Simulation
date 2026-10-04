@@ -158,7 +158,11 @@ function assignRings(world: World, alive: Settlement[]): void {
   const R = ringRadius(world);
   const best = new Float32Array(map.size).fill(Infinity);
   const owner = new Int32Array(map.size).fill(-1);
+  // Land another nation or a clan holds can't be worked: only war moves it.
+  const founders = new Map<number, number>();
+  for (const tr of world.tribes) if (tr.polityId >= 0) founders.set(tr.polityId, tr.id);
   for (const s of alive) {
+    const clan = founders.get(s.polityId) ?? -2;
     for (let dy = -R; dy <= R; dy++) {
       for (let dx = -R; dx <= R; dx++) {
         const x = s.x + dx;
@@ -168,6 +172,9 @@ function assignRings(world: World, alive: Settlement[]): void {
         const b = map.biome[t];
         if (b === Biome.DeepOcean || b === Biome.Ice) continue;
         if (!isWater(world, t) && map.landmass[t] !== s.landmass) continue;
+        const held = map.region[t];
+        if (held >= 0 && world.settlements[held].polityId !== s.polityId && t !== s.tile) continue;
+        if (map.claim[t] >= 0 && map.claim[t] !== clan && t !== s.tile) continue;
         // Distance from where the settlement really stands, so the land it works follows its true position.
         const d = dx === 0 && dy === 0 ? -1 : Math.hypot(x + 0.5 - s.px, y + 0.5 - s.py);
         if (d < best[t] - 1e-6) {
