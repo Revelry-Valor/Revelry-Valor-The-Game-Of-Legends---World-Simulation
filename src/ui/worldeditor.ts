@@ -18,6 +18,10 @@ export class WorldEditor {
   tool: BrushTool = 'land';
   radius = 6;
   strength = 0.5;
+  /** Brush dynamics, as in Photoshop's splatter brushes. */
+  scatter = 0.5;
+  sizeJitter = 0.6;
+  angleJitter = 0.6;
   layer: EditorView = 'terrain';
   /** Pointer position in tiles, for the brush outline. */
   cursor: { x: number; y: number } | null = null;
@@ -129,7 +133,7 @@ export class WorldEditor {
   }
 
   private brush() {
-    return { tool: this.tool, radius: this.radius, strength: this.strength, level: this.stroke?.level };
+    return { tool: this.tool, radius: this.radius, strength: this.strength, level: this.stroke?.level, scatter: this.scatter, sizeJitter: this.sizeJitter, angleJitter: this.angleJitter };
   }
 
   draw(canvas: HTMLCanvasElement, view: { zoom: number; ox: number; oy: number }): void {

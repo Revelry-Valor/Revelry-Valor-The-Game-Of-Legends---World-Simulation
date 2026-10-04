@@ -2,7 +2,7 @@ import { BIOMES, Biome, Relief } from '../engine/data/biomes';
 import { Noise2D } from '../engine/noise';
 import { Rng } from '../engine/rng';
 import type { MapData } from '../engine/types';
-import { riverNext, riverPoint, type Point } from '../engine/geometry';
+import { hash01, riverNext, riverPoint, type Point } from '../engine/geometry';
 import { erodedHills, gullies } from '../engine/relief';
 
 /** Pixels per tile in the painted terrain: enough for smooth coasts and soft biome edges. */
@@ -96,6 +96,8 @@ const PAPER: [number, number, number] = [236, 223, 190];
 const PAPER_SEA: [number, number, number] = [212, 205, 178];
 const INK: [number, number, number] = [72, 54, 38];
 
+const PEAKS = 2;
+const PEAK_FIELDS = 8;
 const reliefNoise = new Noise2D(new Rng(11).fork('relief-detail'));
 const smooth = (a: number, b: number, v: number) => {
   const t = clamp((v - a) / (b - a), 0, 1);
@@ -138,6 +140,8 @@ export class TerrainShader {
   /** Slope of the land at tile scale (water counts as level ground), blended smoothly between tiles. */
   private slopeX: (fx: number, fy: number) => number;
   private slopeY: (fx: number, fy: number) => number;
+  /** Peaks drawn on mountain and hill tiles: per tile up to PEAKS stamps of PEAK_FIELDS numbers each. */
+  private peaks: Float32Array;
 
   constructor(private map: MapData, private style: MapStyle = 'satellite') {
     const { width: w, height: h, size } = map;
@@ -218,6 +222,37 @@ export class TerrainShader {
     }
     this.slopeX = linear(sx, w, h);
     this.slopeY = linear(sy, w, h);
+    // Each mountain tile is drawn as a few sharp peaks, as a splatter brush would lay them down: thrown
+    // about the tile, of jittered size, a little longer than wide and laid along the range (across the
+    // slope), each turned by a random angle. Where neighbouring peaks meet they form a crisp ridge.
+    // Hills get one low, broad rise each.
+    this.peaks = new Float32Array(size * PEAKS * PEAK_FIELDS);
+    for (let i = 0; i < size; i++) {
+      const mountain = map.relief[i] === Relief.Mountains;
+      if ((!mountain && map.relief[i] !== Relief.Hills) || map.elevation[i] < 0) continue;
+      const x = i % w;
+      const y = (i - x) / w;
+      const gl = Math.hypot(sx[i], sy[i]);
+      const a0 = gl > 1e-4 ? Math.atan2(sx[i], -sy[i]) : hash01(i, 40) * Math.PI;
+      // Mountains: one main peak and a smaller shoulder; hills: one low rise.
+      const count = mountain ? PEAKS : 1;
+      for (let k = 0; k < count; k++) {
+        const o = (i * PEAKS + k) * PEAK_FIELDS;
+        const hsh = (salt: number) => hash01(i * 7 + k, salt);
+        const main = k === 0;
+        const ang = a0 + (hsh(41) - 0.5) * Math.PI * 0.6;
+        this.peaks[o] = x + (hsh(42) - 0.5) * 0.9;
+        this.peaks[o + 1] = y + (hsh(43) - 0.5) * 0.9;
+        this.peaks[o + 2] = mountain ? (main ? 1.2 + 0.7 * hsh(44) : 0.7 + 0.4 * hsh(44)) : 1.2 + 0.5 * hsh(44);
+        this.peaks[o + 3] = Math.cos(ang);
+        this.peaks[o + 4] = Math.sin(ang);
+        this.peaks[o + 5] = mountain ? 1.3 + 0.5 * hsh(45) : 1.3;
+        // Height above the ground around it.
+        this.peaks[o + 6] = mountain ? (main ? 0.1 + 0.18 * hsh(46) : 0.05 + 0.07 * hsh(46)) : 0.012 + 0.015 * hsh(46);
+        // How pointed: mountains sharp, hills rounded.
+        this.peaks[o + 7] = mountain ? 1.5 : 2.2;
+      }
+    }
     this.lakeAt = sampler(lake, w, h);
     this.iceAt = sampler(ice, w, h);
     this.forestAt = sampler(forest, w, h);
@@ -238,6 +273,40 @@ export class TerrainShader {
   }
 
   /** Height of the ground at a point, with fine relief detail: ridges in the mountains, folds in the hills. */
+  /** How far the drawn peaks rise above the ground at a point (0 where there are none). */
+  private peakHeight(fx: number, fy: number): number {
+    const map = this.map;
+    const w = map.width;
+    const h = map.height;
+    const P = this.peaks;
+    const tx = Math.round(fx);
+    const ty = Math.round(fy);
+    let best = 0;
+    for (let y = ty - 2; y <= ty + 2; y++) {
+      if (y < 0 || y >= h) continue;
+      for (let x = tx - 2; x <= tx + 2; x++) {
+        if (x < 0 || x >= w) continue;
+        const base = (y * w + x) * PEAKS * PEAK_FIELDS;
+        for (let k = 0; k < PEAKS; k++) {
+          const o = base + k * PEAK_FIELDS;
+          const r = P[o + 2];
+          if (r === 0) break;
+          const ox = fx - P[o];
+          const oy = fy - P[o + 1];
+          const along = (ox * P[o + 3] + oy * P[o + 4]) / P[o + 5];
+          const across = -ox * P[o + 4] + oy * P[o + 3];
+          const d = Math.sqrt(along * along + across * across) / r;
+          if (d >= 1) continue;
+          // Concave flanks rising from the ground to a summit: pointed for mountains, rounded for hills.
+          const t = 1 - d;
+          const v = P[o + 6] * (P[o + 7] > 2 ? t * t * (3 - 2 * t) : Math.pow(t, P[o + 7]));
+          if (v > best) best = v;
+        }
+      }
+    }
+    return best;
+  }
+
   /** Gentle relief everywhere: folds in the hills, a little unevenness on the plains. */
   private detail(fx: number, fy: number): number {
     let v = reliefNoise.noise(fx * 0.6, fy * 0.6) * 0.004;
@@ -329,11 +398,23 @@ export class TerrainShader {
           let hh = Math.max(0.002, e) + dv;
           let gx = this.slopeX(fx, fy) + (this.detail(fx + eps, fy) - dv) / eps;
           let gy = this.slopeY(fx, fy) + (this.detail(fx, fy + eps) - dv) / eps;
-          // Gullies cut down the slopes of mountains and hills, branching like veins.
+          // Mountains and hills drawn as distinct peaks: where a peak rises above the ground, its
+          // own sharp faces and crests take over.
           const rough = this.mtnAt(fx, fy) + this.hillAt(fx, fy) * 0.35;
+          if (rough > 0.02) {
+            const p0 = this.peakHeight(fx, fy);
+            if (p0 > 0) {
+              // A small step, so crests stay sharp.
+              const pe = clamp(sx * 0.8, 0.02, 0.2);
+              gx += (this.peakHeight(fx + pe, fy) - p0) / pe;
+              gy += (this.peakHeight(fx, fy + pe) - p0) / pe;
+              hh += p0;
+            }
+          }
+          // Fine gullies down the faces, for texture.
           if (!parchment && rough > 0.02) {
             const [gv, gdx, gdy] = gullies(fx * GULLY, fy * GULLY, gx, gy, octaves, 28);
-            const depth = 0.06 * rough;
+            const depth = 0.025 * rough;
             hh += gv * depth;
             gx += gdx * GULLY * depth;
             gy += gdy * GULLY * depth;

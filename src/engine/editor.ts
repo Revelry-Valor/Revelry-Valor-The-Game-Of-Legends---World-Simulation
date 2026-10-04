@@ -27,6 +27,14 @@ export interface Brush {
   strength: number;
   /** Height the flatten brush levels towards, or the cliff brush lifts its plateau to (set where the stroke began). */
   level?: number;
+  /**
+   * Brush dynamics, as in Photoshop's splatter brushes (each 0..1): scatter splits every dab into
+   * several smaller dabs thrown around the brush; size jitter varies their size; angle jitter turns
+   * each one (dabs are a little longer than wide, laid along the stroke) by a random amount.
+   */
+  scatter?: number;
+  sizeJitter?: number;
+  angleJitter?: number;
 }
 
 /** The level a stroke works to, from the height where it began: flatten keeps it, cliffs rise well above it. */
@@ -77,13 +85,50 @@ export class TerrainEditor {
     return this.heights[ty * this.width + tx];
   }
 
-  /** Apply one dab of the brush centred at (cx, cy) in tile coordinates. Returns the changed area. */
-  dab(cx: number, cy: number, b: Brush): { x0: number; y0: number; x1: number; y1: number } {
+  private seq = 0;
+
+  /** A fresh pseudo-random number in [0, 1) for the brush dynamics. */
+  private rand(): number {
+    let h = Math.imul(++this.seq ^ 0x9e3779b9, 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+
+  /**
+   * Apply one dab of the brush centred at (cx, cy) in tile coordinates, heading in direction `dir`
+   * (radians). With scatter or jitter it becomes a splatter of smaller, irregular dabs. Returns the
+   * changed area.
+   */
+  dab(cx: number, cy: number, b: Brush, dir = 0): { x0: number; y0: number; x1: number; y1: number } {
+    const scatter = b.scatter ?? 0;
+    const sizeJ = b.sizeJitter ?? 0;
+    const angleJ = b.angleJitter ?? 0;
+    const r = Math.max(0.5, b.radius);
+    const elong = 1 + 0.7 * angleJ;
+    if (scatter <= 0 && sizeJ <= 0 && angleJ <= 0) return this.stamp(cx, cy, b, r, dir, 1);
+    const n = 1 + Math.round(scatter * 4);
+    let box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    for (let k = 0; k < n; k++) {
+      const a = this.rand() * Math.PI * 2;
+      const dist = Math.sqrt(this.rand()) * r * scatter * 0.8;
+      const size = Math.max(0.5, r * (n > 1 ? 0.65 : 1) * (1 - sizeJ * 0.7 * this.rand()));
+      const ang = dir + (this.rand() - 0.5) * Math.PI * angleJ;
+      const q = this.stamp(cx + Math.cos(a) * dist, cy + Math.sin(a) * dist, b, size, ang, elong);
+      box = { x0: Math.min(box.x0, q.x0), y0: Math.min(box.y0, q.y0), x1: Math.max(box.x1, q.x1), y1: Math.max(box.y1, q.y1) };
+    }
+    return box;
+  }
+
+  /** One elliptical dab: radius r across, r * elong along the angle `ang`. */
+  private stamp(cx: number, cy: number, b: Brush, r: number, ang: number, elong: number): { x0: number; y0: number; x1: number; y1: number } {
     const w = this.width;
     const h = this.height;
     const H = this.heights;
-    const r = Math.max(0.5, b.radius);
-    const reach = r * 1.3;
+    const ca = Math.cos(ang);
+    const sa = Math.sin(ang);
+    const reach = r * 1.3 * elong;
     const x0 = Math.max(0, Math.floor(cx - reach));
     const y0 = Math.max(0, Math.floor(cy - reach));
     const x1 = Math.min(w - 1, Math.ceil(cx + reach));
@@ -92,8 +137,11 @@ export class TerrainEditor {
     const src = b.tool === 'smooth' ? Float32Array.from(H) : H;
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
-        const dx = x + 0.5 - cx;
-        const dy = y + 0.5 - cy;
+        const ox = x + 0.5 - cx;
+        const oy = y + 0.5 - cy;
+        // Into the dab's own frame: along its angle, and across.
+        const dx = (ox * ca + oy * sa) / elong;
+        const dy = -ox * sa + oy * ca;
         // Distance as a share of the radius, wobbled by noise for a natural edge.
         const wobble = this.rough.fbm(x * 0.18, y * 0.18, 3) * 0.35;
         const d = Math.sqrt(dx * dx + dy * dy) / r + wobble;
@@ -185,7 +233,7 @@ export class TerrainEditor {
     let box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     for (let s = 1; s <= steps; s++) {
       const t = s / steps;
-      const r = this.dab(ax + (bx - ax) * t, ay + (by - ay) * t, b);
+      const r = this.dab(ax + (bx - ax) * t, ay + (by - ay) * t, b, Math.atan2(by - ay, bx - ax));
       box = { x0: Math.min(box.x0, r.x0), y0: Math.min(box.y0, r.y0), x1: Math.max(box.x1, r.x1), y1: Math.max(box.y1, r.y1) };
     }
     return box;

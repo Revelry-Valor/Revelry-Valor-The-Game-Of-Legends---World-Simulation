@@ -1201,6 +1201,13 @@ function renderEditor(ed: WorldEditor): string {
       <p class="sub">${esc(brush.hint)}</p>
       ${num('e-size', 'Brush size (tiles)', ed.radius, 1, 40, 1)}
       ${num('e-strength', 'Strength', ed.strength, 0.05, 1, 0.05)}
+      <h3 class="mini-h">Brush dynamics</h3>
+      ${num('e-scatter', 'Scatter', ed.scatter, 0, 1, 0.05, 'Splits each dab into several smaller ones thrown around the brush, like a splatter brush.')}
+      <div class="row">
+        ${num('e-sizej', 'Size jitter', ed.sizeJitter, 0, 1, 0.05)}
+        ${num('e-anglej', 'Angle jitter', ed.angleJitter, 0, 1, 0.05)}
+      </div>
+      <small class="muted">Set all three to 0 for a smooth, round brush.</small>
       <div class="row">
         <button type="button" id="e-undo" ${ed.canUndo() ? '' : 'disabled'}>Undo</button>
         <button type="button" id="e-blank">Blank ocean</button>
@@ -1247,6 +1254,9 @@ function wireEditor(ed: WorldEditor): void {
   };
   range('e-size', (v) => (ed.radius = v));
   range('e-strength', (v) => (ed.strength = v));
+  range('e-scatter', (v) => (ed.scatter = v));
+  range('e-sizej', (v) => (ed.sizeJitter = v));
+  range('e-anglej', (v) => (ed.angleJitter = v));
   range('e-latn', (v) => { ed.setClimate({ latNorth: v }); drawMap(); }, false);
   range('e-lats', (v) => { ed.setClimate({ latSouth: v }); drawMap(); }, false);
   range('e-tilt', (v) => { ed.setClimate({ axialTilt: v }); drawMap(); }, false);
