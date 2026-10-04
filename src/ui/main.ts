@@ -80,7 +80,7 @@ let spaceHeld = false;
 
 const view: ViewState = {
   layer: 'political',
-  style: store.get('style') === 'parchment' ? 'parchment' : 'satellite',
+  style: (['drawn', 'parchment', 'satellite'] as const).find((k) => k === store.get('style')) ?? 'drawn',
   resource: Res.Iron,
   showRoutes: true,
   showLabels: true,
@@ -386,10 +386,14 @@ $('create-world').addEventListener('click', () => {
 });
 const styleSel = $<HTMLSelectElement>('map-style');
 styleSel.value = view.style;
-const paperPane = () => document.querySelector('.map-pane')?.classList.toggle('parchment', view.style === 'parchment');
+const paperPane = () => {
+  const pane = document.querySelector('.map-pane');
+  pane?.classList.toggle('parchment', view.style === 'parchment');
+  pane?.classList.toggle('drawn', view.style === 'drawn');
+};
 paperPane();
 styleSel.addEventListener('change', () => {
-  view.style = styleSel.value === 'parchment' ? 'parchment' : 'satellite';
+  view.style = styleSel.value === 'parchment' ? 'parchment' : styleSel.value === 'satellite' ? 'satellite' : 'drawn';
   store.set('style', view.style);
   paperPane();
   drawMap();
@@ -1195,19 +1199,13 @@ function renderEditor(ed: WorldEditor): string {
     `<label class="field" for="${id}"><span>${label} <output id="${id}-o">${v}</output></span><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${v}">${hint ? `<small>${hint}</small>` : ''}</label>`;
   const views: [EditorView, string][] = [['terrain', 'Terrain'], ['temperature', 'Temperature'], ['rainfall', 'Rainfall'], ['currents', 'Currents']];
   return `
-    <header class="head"><h2>Shape the land</h2><p class="sub">Drag on the map to paint. Right-drag or hold Space to pan, scroll to zoom. [ and ] resize the brush, Ctrl+Z undoes.</p></header>
+    <header class="head"><h2>Shape the land</h2><p class="sub">One terrain tool: drag on the map to raise, lower or flatten the land. Raise out of the sea for land, keep raising for hills and mountain ranges. Right-drag or hold Space to pan, scroll to zoom. [ and ] change the width, Ctrl+Z undoes.</p></header>
     <div class="setup">
-      <div class="brushes" role="group" aria-label="Brush">${BRUSHES.map((b) => `<button type="button" data-brush="${b.id}" aria-pressed="${b.id === ed.tool}" title="${esc(b.hint)}">${b.name}</button>`).join('')}</div>
+      <div class="seg" role="group" aria-label="Terrain tool">${BRUSHES.map((b) => `<button type="button" data-brush="${b.id}" aria-pressed="${b.id === ed.tool}" title="${esc(b.hint)}">${b.name}</button>`).join('')}</div>
       <p class="sub">${esc(brush.hint)}</p>
-      ${num('e-size', 'Brush size (tiles)', ed.radius, 1, 40, 1)}
+      ${num('e-size', 'Width (tiles)', ed.radius, 1, 40, 1, 'Wide for broad ranges and big landmasses, narrow for thin, sharp ridges.')}
       ${num('e-strength', 'Strength', ed.strength, 0.05, 1, 0.05)}
-      <h3 class="mini-h">Brush dynamics</h3>
-      ${num('e-scatter', 'Scatter', ed.scatter, 0, 1, 0.05, 'Splits each dab into several smaller ones thrown around the brush, like a splatter brush.')}
-      <div class="row">
-        ${num('e-sizej', 'Size jitter', ed.sizeJitter, 0, 1, 0.05)}
-        ${num('e-anglej', 'Angle jitter', ed.angleJitter, 0, 1, 0.05)}
-      </div>
-      <small class="muted">Set all three to 0 for a smooth, round brush.</small>
+
       <div class="row">
         <button type="button" id="e-undo" ${ed.canUndo() ? '' : 'disabled'}>Undo</button>
         <button type="button" id="e-blank">Blank ocean</button>
@@ -1254,9 +1252,7 @@ function wireEditor(ed: WorldEditor): void {
   };
   range('e-size', (v) => (ed.radius = v));
   range('e-strength', (v) => (ed.strength = v));
-  range('e-scatter', (v) => (ed.scatter = v));
-  range('e-sizej', (v) => (ed.sizeJitter = v));
-  range('e-anglej', (v) => (ed.angleJitter = v));
+
   range('e-latn', (v) => { ed.setClimate({ latNorth: v }); drawMap(); }, false);
   range('e-lats', (v) => { ed.setClimate({ latSouth: v }); drawMap(); }, false);
   range('e-tilt', (v) => { ed.setClimate({ axialTilt: v }); drawMap(); }, false);

@@ -95,27 +95,34 @@ describe('world building', () => {
     expect(calm.seaAnomaly.every((v) => v === 0)).toBe(true);
   });
 
-  it('paints land and sea, raises cliffs with flat tops, and undoes strokes', () => {
-    const hts = new Float32Array(W * H).fill(-0.3);
+  it('raises land and ranges, lowers it again, flattens plateaus, and undoes strokes', () => {
+    const hts = new Float32Array(W * H).fill(-0.2);
     const ed = new TerrainEditor(hts, W, H, 1);
+    const raise = { tool: 'raise' as const, radius: 8, strength: 1 };
     ed.beginStroke();
-    ed.line(60, 50, 100, 50, { tool: 'land', radius: 8, strength: 1 });
+    for (let k = 0; k < 2; k++) ed.line(60, 50, 100, 50, raise);
     expect(hts[50 * W + 80]).toBeGreaterThanOrEqual(0);
     expect(hts[10 * W + 10]).toBeLessThan(0);
+    // The middle of the stroke rises most: a range is highest along its spine.
+    expect(hts[50 * W + 80]).toBeGreaterThan(hts[55 * W + 80]);
     ed.beginStroke();
-    ed.dab(80, 50, { tool: 'sea', radius: 3, strength: 1 });
+    for (let k = 0; k < 6; k++) ed.dab(80, 50, { tool: 'lower', radius: 3, strength: 1 });
     expect(hts[50 * W + 80]).toBeLessThan(0);
     ed.undoStroke();
     expect(hts[50 * W + 80]).toBeGreaterThanOrEqual(0);
+    // A narrow brush makes a narrower rise than a wide one.
     ed.beginStroke();
-    const level = strokeLevel('cliffs', ed.heightAt(70, 50), 1)!;
-    for (let k = 0; k < 5; k++) ed.dab(70, 50, { tool: 'cliffs', radius: 4, strength: 1, level });
-    // However often the brush passes, the top stays level: a plateau with a sheer edge.
-    expect(hts[50 * W + 70]).toBeCloseTo(level, 5);
-    expect(hts[50 * W + 69]).toBeCloseTo(level, 5);
+    for (let k = 0; k < 4; k++) ed.dab(30, 20, { tool: 'raise', radius: 2, strength: 1 });
+    expect(hts[20 * W + 30]).toBeGreaterThan(-0.1);
+    expect(hts[20 * W + 34]).toBeCloseTo(-0.2, 5);
     ed.beginStroke();
-    for (let k = 0; k < 6; k++) ed.dab(90, 50, { tool: 'mountains', radius: 4, strength: 1 });
-    expect(hts[50 * W + 90]).toBeGreaterThan(0.1);
+    for (let k = 0; k < 6; k++) ed.dab(70, 50, raise);
+    const level = strokeLevel('flatten', ed.heightAt(70, 50))!;
+    expect(strokeLevel('raise', 0.5)).toBeUndefined();
+    for (let k = 0; k < 5; k++) ed.dab(70, 50, { tool: 'flatten', radius: 4, strength: 1, level });
+    // However often the tool passes, the top settles level: a plateau.
+    expect(hts[50 * W + 70]).toBeCloseTo(level, 2);
+    expect(hts[50 * W + 69]).toBeCloseTo(level, 2);
   });
 
   it('runs a history on hand-shaped land', () => {

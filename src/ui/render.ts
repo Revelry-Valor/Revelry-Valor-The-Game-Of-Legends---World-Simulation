@@ -253,7 +253,7 @@ export class MapRenderer {
     this.paintBase();
   }
 
-  private style: MapStyle = 'satellite';
+  private style: MapStyle = 'drawn';
 
   /** Switch between the satellite and parchment looks (repaints the land). */
   setStyle(style: MapStyle): void {
@@ -611,8 +611,8 @@ export class MapRenderer {
     this.setStyle(view.style);
     const detail = this.detailFor(view, cw, ch);
     if (detail) ctx.drawImage(detail, 0, 0, cw, ch);
-    const parchment = view.style === 'parchment';
-    drawRiverCurves(ctx, this.rivers, view, { x0: view.ox, y0: view.oy, x1: view.ox + cw / z, y1: view.oy + ch / z }, parchment ? 'rgb(84, 98, 122)' : undefined);
+    const riverInk = view.style === 'parchment' ? 'rgb(84, 98, 122)' : view.style === 'drawn' ? 'rgb(84, 128, 160)' : undefined;
+    drawRiverCurves(ctx, this.rivers, view, { x0: view.ox, y0: view.oy, x1: view.ox + cw / z, y1: view.oy + ch / z }, riverInk);
     const selected = view.selectedPolity >= 0 && world.polities[view.selectedPolity]?.alive ? view.selectedPolity : -1;
     const bonded = selected >= 0 ? this.bondedTo(selected) : new Set<number>();
     if (view.layer === 'political' || view.layer === 'nations' || view.layer === 'culture' || view.layer === 'race') this.drawRegions(ctx, view, cw, ch);

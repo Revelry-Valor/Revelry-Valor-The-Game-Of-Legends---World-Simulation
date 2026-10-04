@@ -1159,3 +1159,6 @@ table.market td {
 .map-pane.parchment {
   background: #d4cdb2;
 }
+.map-pane.drawn {
+  background: #bcd5dc;
+}

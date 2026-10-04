@@ -19,16 +19,16 @@ CLI options: `--seed`, `--years`, `--size small|medium|large|huge`, `--magic 0|1
 
 - **Play** runs the world in **real time**, month by month, through the seasons (the top bar shows the year, month and season). Settlers trek to new land, armies muster in spring, march, fight and besiege, and caravans and convoys travel their routes, all moving smoothly between months. The speed slider sets months per second (0.2 to 12).
 - **+1 / +10 / +100 / +500** skip ahead whole years whenever you like. Turn **Real time** off to have Play advance in whole years instead (the slider then sets years per second).
-- **Map style:** **Satellite** (the default) or **Parchment**, chosen in the map bar.
-  - *Satellite* paints the land as seen from orbit:
-    - ground coloured by what covers it (dark forests, olive grassland, dun steppe, sand), blending between biomes;
-    - bare rock on steep slopes and above the tree line, and snow wherever it is cold enough (thinner on the steepest faces);
-    - fractal coastlines, broken up at every zoom;
-    - turquoise shallows over the shelf, darkening to deep ocean;
-    - relief lit from the north-west, with valleys in shadow.
-    
-    **Mountains are drawn as distinct peaks**, much as a splatter brush lays them down. Each mountain square gets a main summit and a smaller shoulder, thrown about the square, of jittered size and angle, and a little longer than wide along the line of the range. Where neighbouring peaks meet they form a crisp ridgeline, with sunlit north-west faces, shadowed south-east faces and snow on the highest summits. Hills get low, rounded rises. The peaks follow whatever land is there, generated or brushed. Fine **gullies** are carved down the faces as the map is drawn. Each layer of channels runs straight downhill and bends around the coarser ones, so they branch like the veins of a leaf, as rain cuts real mountainsides. This is a drawing effect only: the mountains themselves are shaped by the world generator or your brushes.
-  - *Parchment* draws the same land in the colours of an old map: paper, an inked coastline and lake shores, ripple lines along the shore, soft sepia relief, and forests hatched in fine diagonal ink lines. The two styles differ only in colouring, so switching costs nothing.
+- **Map style:** **Drawn map** (the default), **Parchment** or **Satellite**, chosen in the map bar. The styles differ only in colouring, so switching costs nothing.
+  - *Drawn map* looks like a coloured cartographer's map drawn on paper:
+    - soft watercolour washes for each kind of ground on cream paper, browning with height;
+    - snow where it is cold enough;
+    - an inked coastline and lake shores, with blue seas and ripple lines along the shore;
+    - relief lit from the north-west. The sunlit side stays close to the paper and the shadow side is laid on in a warm grey wash.
+
+    **Mountain ranges are drawn as a cartographer draws them.** One sharp crest runs along the spine, where the sunlit and shadowed sides meet. Spurs run straight down both flanks to the valley floor, with V-shaped valleys between them, and smaller spurs branch off low down when you zoom in. Broad ranges get long spurs and narrow ranges short ones. Flat-topped land (plateaus) stays flat, and plains stay smooth. This is a drawing effect only: the shape of the land comes from the world generator or the terrain tool.
+  - *Parchment* draws the same land in the colours of an old map: paper, an inked coastline and lake shores, ripple lines along the shore, soft sepia relief, and forests hatched in fine diagonal ink lines.
+  - *Satellite* paints the land as seen from orbit: ground coloured by what covers it, bare rock on steep slopes and above the tree line, snow, and turquoise shallows darkening to deep ocean.
 - **Map layers:** Terrain (rivers drawn as crisp winding lines that widen as they gather water; close in, the visible part is repainted at full screen resolution once the view settles), Realms (political borders), Nations (solid map-style fills with bold borders and each nation's name written across its lands), Cultures, Races (all four drawn as smooth shapes with natural, wandering borders that stop at the painted coastline), **Temperature** (yearly mean), **Rainfall**, **Currents** (arrows for the way the surface water flows; red where it runs warmer than usual for its latitude, blue where colder), and Resources (pick iron, tin, gold, ley lines and others). What each settlement does with its land shows in its Inspect panel, not on the map. Selecting a nation, or any settlement in it, dims the rest of the world, traces the nation's borders in a bright smooth outline and writes its name large. Nations bound to it by marriage, alliance, confederation or vassalage stay half-lit with dashed borders in their own colour. Towns cut off from their capital wear a red ring. Esc clears the selection. **Roads** are drawn by level: dotted trails, brown cart tracks, grey paved roads and dark highways. **Trade routes** (dashed) show only where free traders (gold) and state convoys (green) actually travel. Caravans are coloured by kind: gold merchants, purple trading families, orange nomad caravan tribes, and green squares for convoys. A diamond ◆ marks a capital, a triangle ▲ is an army on the march (its dashed line shows where it is heading), a white triangle △ is a column of settlers (its faint trail leads to the land they mean to settle), and gold dots ● are merchant caravans. A thick ring in an enemy's colour marks an occupied town.
 - **Market:** the market of the selected town. For each good it shows what the town holds and needs, what the good is worth there compared with the average market, and how the value has moved since last year. With no town selected, it shows the world market: where each good is cheapest and dearest, and how much trade is paid in coin versus barter.
 - **Nation view:** a full dossier on any nation. It shows its court (the ruling dynasty and every great house with its seat, fiefs, prestige and loyalty, flagging houses that are plotting), its diplomacy (marriages, alliances, confederation, overlord or vassals, war tribute, towns it claims, towns cut off), what the nation makes, what it needs and what it is short of, its internal, caravan and convoy trade, whether it uses coin or barter, its agreements, how it treats other nations' traders (and how they treat its own), embargoes, trading families, roads by level, tariff, armies and wars, research progress, peoples and cultures (with their survival traits), rulers, settlements, population history and chronicle.
@@ -74,20 +74,15 @@ Behind the scenes the simulation still keeps its books on a fine grid of small p
 
 ## Shaping the land
 
-**Create world** in the top bar (or **Setup → Shape the land…**) opens the world editor. Drag on the map to paint. Right-drag or hold Space to pan, and scroll to zoom. `[` and `]` resize the brush, and Ctrl+Z undoes a stroke.
+**Create world** in the top bar (or **Setup → Shape the land…**) opens the world editor. Shaping is done with one terrain tool. Drag on the map to use it. Right-drag or hold Space to pan, and scroll to zoom. `[` and `]` change the width, and Ctrl+Z undoes a stroke.
 
-| Brush | What it does |
+| Function | What it does |
 |---|---|
-| Land / Sea | Paint land out of the sea or drown it, with ragged natural shores: continents, islands, coves, inlets, straits and bays. |
-| Raise / Lower | Lift or sink the ground gently. Lowering stops at the shore, so it never floods land by accident. |
-| Hills | Rolling hill country. |
-| Mountains | Ridged ranges; drag along the line of the range. |
-| Peaks | Single tall summits. |
-| Cliffs | Sheer-sided plateaus and mesas. The top stays level however often the brush passes, so the rim is a wall. |
-| Valley | Cuts down through hills and mountains, staying above the sea. |
-| Smooth / Flatten | Soften slopes, or level the ground to the height where the stroke began. |
+| Raise | Lift the ground. Out of the sea it makes land. Keep going over it and it builds hills, then a mountain range, drawn with a sharp crest and spurs running down to the valley floor. Drag along the line you want the range to follow. |
+| Lower | Sink the ground: cut valleys and passes, or drown land to make coves, inlets and seas. |
+| Flatten | Level the ground to the height where the stroke began: plateaus, mesas and table lands, with steep edges. Raise a block first, then flatten its top. |
 
-**Brush dynamics** work like Photoshop's splatter brushes. **Scatter** splits each dab into several smaller ones thrown around the brush. **Size jitter** varies their size. **Angle jitter** turns each one by a random amount (dabs are a little longer than wide, laid along the stroke). Together they build ragged coasts and jagged, irregular ranges. Set all three to 0 for a smooth, round brush.
+**Width** sets how wide the tool is. Use a wide tool for broad ranges and big landmasses, and a narrow one for thin, sharp ridges. **Strength** sets how much each pass lifts, sinks or levels the ground.
 
 After every stroke the climate, rivers, lakes and biomes are rebuilt for the new land. The editor can show terrain, temperature, rainfall or currents, and it draws latitude lines every 15°. You can move the map on the globe or change the tilt and see the climate follow. Start from a blank ocean or freshly generated land. **Use this world** saves the land with the world's settings and starts a new history on it. The land is kept with the settings until you untick "Keep the hand-shaped land" in Setup. On a different map size, it is resampled to fit.
 
@@ -111,7 +106,7 @@ src/engine/            deterministic simulation; no DOM, runs in Node or the bro
   worldgen.ts          terrain, latitude & climate, ocean currents, rivers, biomes, resources; height codes for hand-shaped land
   systems/landwars.ts  land wars involving clans, warbands, occupation of land and the peace that settles it
   geometry.ts          continuous positions: settlement sites, river courses, waypoints, smooth paths
-  editor.ts            terrain brushes (land, sea, hills, mountains, peaks, cliffs, valley, smooth, flatten) with undo
+  editor.ts            the terrain tool (raise, lower, flatten) with undo
   data/                biomes, goods & production sectors, tech tree, races, culture traits (all plain data)
   systems/             territory, economy, trade, roads, caravans, access, agreements, migration, culture, politics, nobility,
                        diplomacy, cohesion, warAims, military, technology, events, setup

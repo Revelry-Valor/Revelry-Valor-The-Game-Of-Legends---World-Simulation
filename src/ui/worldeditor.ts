@@ -8,20 +8,16 @@ import { paintHeights, paintTerrain } from './terrain';
 export type EditorView = 'terrain' | ClimateLayer;
 
 /**
- * The world editor: paint land and sea, raise hills, mountains, peaks and cliffs, cut valleys, and
- * see the climate that follows (temperature, rainfall, ocean currents) after every stroke.
+ * The world editor: one terrain tool raises, lowers or flattens the land, and the climate that
+ * follows (temperature, rainfall, ocean currents) is shown after every stroke.
  */
 export class WorldEditor {
   cfg: WorldConfig;
   map!: MapData;
   editor: TerrainEditor;
-  tool: BrushTool = 'land';
+  tool: BrushTool = 'raise';
   radius = 6;
   strength = 0.5;
-  /** Brush dynamics, as in Photoshop's splatter brushes. */
-  scatter = 0.5;
-  sizeJitter = 0.6;
-  angleJitter = 0.6;
   layer: EditorView = 'terrain';
   /** Pointer position in tiles, for the brush outline. */
   cursor: { x: number; y: number } | null = null;
@@ -87,7 +83,7 @@ export class WorldEditor {
 
   begin(x: number, y: number): void {
     this.editor.beginStroke();
-    this.stroke = { x, y, level: strokeLevel(this.tool, this.editor.heightAt(x, y), this.strength) };
+    this.stroke = { x, y, level: strokeLevel(this.tool, this.editor.heightAt(x, y)) };
     const box = this.editor.dab(x, y, this.brush());
     paintHeights(this.editor.heights, this.map.width, this.map.height, this.terrain, box);
   }
@@ -133,7 +129,7 @@ export class WorldEditor {
   }
 
   private brush() {
-    return { tool: this.tool, radius: this.radius, strength: this.strength, level: this.stroke?.level, scatter: this.scatter, sizeJitter: this.sizeJitter, angleJitter: this.angleJitter };
+    return { tool: this.tool, radius: this.radius, strength: this.strength, level: this.stroke?.level };
   }
 
   draw(canvas: HTMLCanvasElement, view: { zoom: number; ox: number; oy: number }): void {
