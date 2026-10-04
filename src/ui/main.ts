@@ -1074,7 +1074,7 @@ function renderSetup(): string {
       ${num('s-tilt', 'Axial tilt', cfg.axialTilt ?? 23.5, 0, 60, 0.5, 'Degrees. Earth is 23.5. More tilt: harsher seasons, milder poles, a cooler equator.')}
       <label class="toggle" for="s-currents"><input id="s-currents" type="checkbox" ${cfg.oceanCurrents !== false ? 'checked' : ''}> Ocean currents <small>&nbsp;warm water carried poleward along eastern coasts, cold water towards the equator along western ones</small></label>
       <div class="shape-box">
-        <p>${cfg.heightmap ? 'This world’s land was <strong>shaped by hand</strong>.' : 'The land is generated from the seed.'} Paint coasts, raise hills, mountains, peaks and cliffs, and cut valleys.</p>
+        <p>${cfg.heightmap ? 'This world’s land was <strong>shaped by hand</strong>.' : 'The land is generated from the seed.'} Raise land and mountain ranges, lower it into seas and valleys, and flatten plateaus.</p>
         <div class="row">
           <button type="button" id="s-shape">Shape the land…</button>
           ${cfg.heightmap ? '<label class="toggle" for="s-keep"><input id="s-keep" type="checkbox" checked> Keep the hand-shaped land</label>' : ''}
