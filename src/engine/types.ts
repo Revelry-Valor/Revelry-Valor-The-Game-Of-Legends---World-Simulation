@@ -1,3 +1,4 @@
+import type { ReliefField } from './erosion';
 import type { BiomeKey } from './data/biomes';
 import type { SectorKey } from './data/economy';
 import type { TechCategory, TechEffects } from './data/techs';
@@ -116,6 +117,8 @@ export interface WorldConfig {
   oceanCurrents?: boolean;
   /** Land shaped by hand in the world editor: heights encoded with encodeHeights(); replaces the generated land. */
   heightmap?: string;
+  /** How the land is carved into terrain (see erodeRelief); unset settings take TERRAIN_DEFAULTS. */
+  terrain?: { mountains?: number; erosion?: number; softness?: number; downcutting?: number };
   races: RaceDef[];
 }
 
@@ -168,6 +171,10 @@ export interface MapData {
   /** Recent trade traffic (decaying). */
   traffic: Float32Array;
   riverThreshold: number;
+  /** The land as carved into terrain, finer than the tiles (what the map is painted from). */
+  carved?: ReliefField;
+  /** The rivers as smooth curves along the carved valleys (see traceRivers). */
+  riverCurves?: Float32Array;
 }
 
 export interface TradeLink {

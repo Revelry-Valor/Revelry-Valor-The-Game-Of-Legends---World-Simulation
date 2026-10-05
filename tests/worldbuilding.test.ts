@@ -189,6 +189,43 @@ describe('world building', () => {
     expect(Array.from(erodeRelief(surface, water, w, h, { scale: 3, stage: 'mountains', mountains: 0 }).heights)).toEqual(Array.from(layout.heights));
   });
 
+  it('runs rivers down the carved valleys, and the world lives by those rivers', () => {
+    const map = mapOf({ seed: 3 });
+    expect(map.carved).toBeDefined();
+    const curves = map.riverCurves!;
+    expect(curves.length).toBeGreaterThan(0);
+    expect(curves.length % 7).toBe(0);
+    let land = 0;
+    let wet = 0;
+    for (let i = 0; i < map.size; i++) {
+      if (map.elevation[i] < 0) {
+        expect(map.river[i]).toBe(0);
+        continue;
+      }
+      land++;
+      if (map.river[i] > 0) wet++;
+    }
+    // About as much of the land lies on a river as a map-maker would draw.
+    expect(wet / land).toBeGreaterThan(0.02);
+    expect(wet / land).toBeLessThan(0.15);
+    // Every river runs on the map, and the carved land under its course is low ground: the
+    // river sits in its valley, below the land on either side.
+    const c = map.carved!;
+    let lower = 0;
+    let total = 0;
+    for (let k = 0; k < curves.length; k += 7) {
+      for (const v of [curves[k], curves[k + 2], curves[k + 4]]) expect(v).toBeGreaterThanOrEqual(-0.5);
+      const x = Math.round((curves[k + 2] + 0.5) * c.scale - 0.5);
+      const y = Math.round((curves[k + 3] + 0.5) * c.scale - 0.5);
+      if (x < 3 || y < 3 || x >= c.width - 3 || y >= c.height - 3) continue;
+      const at = (xx: number, yy: number) => c.heights[yy * c.width + xx];
+      const around = (at(x + 3, y) + at(x - 3, y) + at(x, y + 3) + at(x, y - 3)) / 4;
+      total++;
+      if (at(x, y) <= around) lower++;
+    }
+    expect(lower / total).toBeGreaterThan(0.8);
+  });
+
   it('runs a history on hand-shaped land', () => {
     const world = new World(defaultConfig({ seed: 5, width: W, height: H, heightmap: encodeHeights(boxWorld(), W, H) }));
     for (let y = 0; y < 40; y++) world.tick();

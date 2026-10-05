@@ -1,6 +1,7 @@
 import { BIOMES, Biome, Relief } from './data/biomes';
 import { RES_COUNT, Res } from './data/economy';
 import { MinHeap } from './heap';
+import { erodeRelief, traceRivers } from './erosion';
 import { Noise2D } from './noise';
 import type { Rng } from './rng';
 import type { MapData, WorldConfig } from './types';
@@ -25,8 +26,8 @@ export function isWaterBiome(b: number): boolean {
  * Pipeline: continents + ridged mountains (or land shaped by hand) → sea level by quantile
  * → temperature by latitude, axial tilt and altitude → wind-driven ocean currents that turn along
  * the coasts, carrying warm water poleward and cold water towards the equator → prevailing-wind
- * rainfall with rain shadows → priority-flood drainage and river discharge → lakes and salt flats
- * → Whittaker-style biomes → geology-driven resource deposits.
+ * rainfall with rain shadows → priority-flood drainage → lakes and salt flats → the land carved
+ * into terrain (mountain shapes, erosion) and rivers traced along its valleys → Whittaker-style biomes → geology-driven resource deposits.
  */
 export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
   const w = cfg.width;
@@ -203,6 +204,52 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     }
   }
 
+  // --- Carved terrain, and the rivers that run in it ----------------------
+  // The land is carved as terrain programs do (mountain shapes, valleys cut by water, rain and
+  // scree), on a grid finer than the tiles; then the rivers are found where water gathers on the
+  // carved land, so they run in its valleys, and those are the rivers the world lives by.
+  const sea = new Uint8Array(size);
+  const lakeTile = new Uint8Array(size);
+  const surface = new Float32Array(size);
+  const rainOn = new Float32Array(size);
+  const waterTile = new Uint8Array(size);
+  for (let i = 0; i < size; i++) {
+    const e = elevation[i];
+    rainOn[i] = 0.05 + moisture[i];
+    if (e >= 0) {
+      surface[i] = e;
+      continue;
+    }
+    waterTile[i] = 1;
+    if (!(e > -0.03 && wasLand[i])) {
+      sea[i] = 1;
+      continue;
+    }
+    lakeTile[i] = 1;
+    // A lake lies level with its shores.
+    let sum = 0;
+    let k = 0;
+    const x = i % w;
+    const y = (i - x) / w;
+    for (let d = 0; d < 8; d++) {
+      const nx = x + DX[d];
+      const ny = y + DY[d];
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h || elevation[ny * w + nx] < 0) continue;
+      sum += elevation[ny * w + nx];
+      k++;
+    }
+    surface[i] = k ? sum / k : 0;
+  }
+  const carved = erodeRelief(surface, waterTile, w, h, {
+    scale: clamp(Math.floor(Math.sqrt(400000 / size)), 2, 4),
+    seed: cfg.seed,
+    ...cfg.terrain,
+  });
+  // Traced cell by cell, a stream wanders through more tiles than a tile-to-tile one, so it needs
+  // more water to count as a river: this keeps about as much of the land on a river as before.
+  const rivers = traceRivers(carved, sea, lakeTile, rainOn, w, h, riverThreshold * 2.2, cfg.seed);
+  river.set(rivers.river);
+
   // --- Relief & biomes ---------------------------------------------------
   const landElev: number[] = [];
   for (let i = 0; i < size; i++) if (elevation[i] >= 0) landElev.push(elevation[i]);
@@ -357,6 +404,8 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     road: new Float32Array(size),
     traffic: new Float32Array(size),
     riverThreshold,
+    carved,
+    riverCurves: rivers.curves,
   };
 }
 

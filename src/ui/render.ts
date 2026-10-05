@@ -241,6 +241,7 @@ export class MapRenderer {
   private detail = document.createElement('canvas');
   private detailKey = '';
   private detailTimer = 0;
+  private detailJob = 0;
   /** Called when a sharper painting of the view is ready to be drawn. */
   onDetail?: () => void;
 
@@ -290,24 +291,41 @@ export class MapRenderer {
     const key = `${view.zoom.toFixed(3)}:${view.ox.toFixed(3)}:${view.oy.toFixed(3)}:${cw}:${ch}`;
     if (key === this.detailKey) return this.detail;
     clearTimeout(this.detailTimer);
+    // Painted a slice at a time between frames, so the world keeps moving while it is done; a newer
+    // view abandons an unfinished one.
+    const job = ++this.detailJob;
     this.detailTimer = window.setTimeout(() => {
       const res = Math.min(1.5, window.devicePixelRatio || 1);
       const W = Math.ceil(cw * res);
       const H = Math.ceil(ch * res);
-      for (const c of [this.detail, this.detailMask]) {
-        c.width = W;
-        c.height = H;
-      }
-      const ctx = this.detail.getContext('2d')!;
-      const img = ctx.createImageData(W, H);
-      const mctx = this.detailMask.getContext('2d')!;
-      const mask = mctx.createImageData(W, H);
+      const img = new ImageData(W, H);
+      const mask = new ImageData(W, H);
       this.shader ??= new TerrainShader(this.world.map, this.style);
-      this.shader.paint(img, view.ox, view.oy, 1 / (view.zoom * res), 1 / (view.zoom * res), mask);
-      ctx.putImageData(img, 0, 0);
-      mctx.putImageData(mask, 0, 0);
-      this.detailKey = key;
-      this.onDetail?.();
+      const shader = this.shader;
+      const step = 1 / (view.zoom * res);
+      let row = 0;
+      const slice = () => {
+        if (job !== this.detailJob) return;
+        const t0 = performance.now();
+        while (row < H && performance.now() - t0 < 12) {
+          const next = Math.min(H, row + 8);
+          shader.paint(img, view.ox, view.oy, step, step, mask, row, next);
+          row = next;
+        }
+        if (row < H) {
+          this.detailTimer = window.setTimeout(slice, 0);
+          return;
+        }
+        for (const c of [this.detail, this.detailMask]) {
+          c.width = W;
+          c.height = H;
+        }
+        this.detail.getContext('2d')!.putImageData(img, 0, 0);
+        this.detailMask.getContext('2d')!.putImageData(mask, 0, 0);
+        this.detailKey = key;
+        this.onDetail?.();
+      };
+      slice();
     }, 140);
     return null;
   }
