@@ -339,8 +339,24 @@ export class TerrainShader {
   private coast(fx: number, fy: number, e: number): number {
     const a = Math.abs(e);
     if (a >= 0.06) return e;
-    const n = edgeNoise.fbm(fx * 0.9 + 13, fy * 0.9 - 7, 4) * 0.011 + edgeNoise.noise(fx * 3.7, fy * 3.7) * 0.004 + edgeNoise.noise(fx * 11, fy * 11) * 0.0015;
+    let n = edgeNoise.fbm(fx * 0.9 + 13, fy * 0.9 - 7, 4) * 0.011 + edgeNoise.noise(fx * 3.7, fy * 3.7) * 0.004 + edgeNoise.noise(fx * 11, fy * 11) * 0.0015;
+    // Out at sea the noise may only roughen the shore, not raise specks of land from open water.
+    if (e < 0 && n > 0) n *= smooth(-0.012, -0.002, e);
     return e + n * (1 - a / 0.06);
+  }
+
+  /**
+   * Whether a point of land lies on the inked shore: within about a pixel of the sea line, judged
+   * by how fast the coast's height changes there, so the line keeps one width on gentle and steep
+   * shores alike. Only the open sea's shores are inked here (lakes have their own line).
+   */
+  private onShore(fx: number, fy: number, e: number, sx: number): boolean {
+    if (e < 0 || e > 0.03 || this.oceanAt(fx, fy) <= 0.02) return false;
+    const d = sx;
+    const ex = this.coast(fx + d, fy, this.elev(fx + d, fy)) - this.coast(fx - d, fy, this.elev(fx - d, fy));
+    const ey = this.coast(fx, fy + d, this.elev(fx, fy + d)) - this.coast(fx, fy - d, this.elev(fx, fy - d));
+    const perPixel = Math.hypot(ex, ey) / 2;
+    return e < perPixel * 1.1;
   }
 
   /**
@@ -500,7 +516,7 @@ export class TerrainShader {
             b *= paper;
             // The inked coastline, and the shores of lakes.
             const lk = this.lakeAt(lx, ly);
-            if ((e >= 0 && e < (slope + 0.004) * sx * 1.4 && this.oceanAt(fx, fy) > 0.02) || (lk > 0.38 && lk <= 0.5)) [r, g, b] = DRAWN_INK;
+            if (this.onShore(fx, fy, e, sx) || (lk > 0.38 && lk <= 0.5)) [r, g, b] = DRAWN_INK;
           } else if (parchment) {
             const paper = 1 + edgeNoise.fbm(fx * 1.5 + 40, fy * 1.5, 3) * 0.04 + edgeNoise.noise(fx * 6, fy * 6) * 0.015;
             const m = this.ruggedAt(fx, fy);
@@ -522,7 +538,7 @@ export class TerrainShader {
             }
             // The inked coastline, and the shores of lakes.
             const lk = this.lakeAt(lx, ly);
-            if ((e >= 0 && e < (slope + 0.004) * sx * 1.4 && this.oceanAt(fx, fy) > 0.02) || (lk > 0.38 && lk <= 0.5)) [r, g, b] = INK;
+            if (this.onShore(fx, fy, e, sx) || (lk > 0.38 && lk <= 0.5)) [r, g, b] = INK;
           } else {
             // Ground cover, blended between neighbouring biomes along a ragged line.
             const jx = fx + edgeNoise.fbm(fx * 0.35, fy * 0.35, 4) * 0.7;
