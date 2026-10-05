@@ -1,13 +1,14 @@
 import { Noise2D } from './noise';
 import { Rng } from './rng';
 
-/** What the terrain tool does: lift the ground, sink it, or level it. */
-export type BrushTool = 'raise' | 'lower' | 'flatten';
+/** What the terrain tool does: lift the ground, sink it, or level it; or mark where a river rises. */
+export type BrushTool = 'raise' | 'lower' | 'flatten' | 'river';
 
 export const BRUSHES: { id: BrushTool; name: string; hint: string }[] = [
   { id: 'raise', name: 'Raise', hint: 'Lift the ground. Out of the sea it makes land; keep going over it and it builds hills, then a mountain range. When you let go, running water carves it: valleys cut up into the range and leave a sharp crest with spurs running down to the valley floor. A wide brush gives a broad range, a narrow one a thin ridge.' },
   { id: 'lower', name: 'Lower', hint: 'Sink the ground: cut valleys and passes, or drown land to make coves, inlets and seas.' },
   { id: 'flatten', name: 'Flatten', hint: 'Level the ground to the height where the stroke began: plateaus, mesas and table lands, with steep edges.' },
+  { id: 'river', name: 'River source', hint: 'Click (or drag) where a river should rise, as Gaea paints headwaters. Each runs downhill from there to the sea or a lake, joining any river it meets. Undo takes them away again.' },
 ];
 
 export interface Brush {
@@ -69,6 +70,7 @@ export class TerrainEditor {
 
   /** Apply one dab of the tool centred at (cx, cy) in tile coordinates. Returns the changed area. */
   dab(cx: number, cy: number, b: Brush): { x0: number; y0: number; x1: number; y1: number } {
+    if (b.tool === 'river') return { x0: 0, y0: 0, x1: -1, y1: -1 };
     const w = this.width;
     const h = this.height;
     const H = this.heights;

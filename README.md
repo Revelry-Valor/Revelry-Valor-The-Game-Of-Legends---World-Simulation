@@ -19,7 +19,9 @@ CLI options: `--seed`, `--years`, `--size small|medium|large|huge`, `--magic 0|1
 
 - **Play** runs the world in **real time**, month by month, through the seasons (the top bar shows the year, month and season). Settlers trek to new land, armies muster in spring, march, fight and besiege, and caravans and convoys travel their routes, all moving smoothly between months. The speed slider sets months per second (0.2 to 12).
 - **+1 / +10 / +100 / +500** skip ahead whole years whenever you like. Turn **Real time** off to have Play advance in whole years instead (the slider then sets years per second).
-- **Map style:** **Drawn map** (the default), **Parchment** or **Satellite**, chosen in the map bar. The styles differ only in colouring, so switching costs nothing.
+- **Map style:** **Drawn map** (the default), **Topographic**, **Parchment** or **Satellite**, chosen in the map bar. The styles differ only in colouring, so switching costs nothing.
+  - *Topographic* is a topographic map: layer tints by height (green lowlands, tan uplands, white summits), a light hill shade, and contour lines.
+  - **Contours** (a switch in the map bar) lays contour lines over any style: one every 250 ft, bold every 1,000 ft, each about a pixel wide at any zoom and thinned where they would crowd on steep ground. Close in, the bold lines are labelled with their height along the line. The land's highest ground stands about 15,000 ft; the Inspect panel gives a tile's height in feet.
   - *Drawn map* looks like a coloured cartographer's map drawn on paper:
     - soft watercolour washes for each kind of ground on cream paper, browning with height;
     - snow where it is cold enough;
@@ -31,7 +33,7 @@ CLI options: `--seed`, `--years`, `--size small|medium|large|huge`, `--magic 0|1
     2. **River valleys.** Water gathers into streams that cut down by how much they carry and how steep they run, so valleys branch up into the ranges and leave sharp crests between them.
     3. **Rain.** Raindrops run downhill one by one. Each scours soil where it speeds up and drops it where it slows, leaving gullies on the slopes and soil and gravel fans on the valley floors.
     4. **Crumbling slopes.** Slopes too steep to stand slump into scree at their foot.
-    5. **Rivers.** As Gaea's Rivers node does, rain is routed over the finished land, across lakes to their outlets and out to the sea. Wherever enough water gathers, a river runs in the very valley the erosion carved, with its bed cut a little into the land. These are the rivers the world lives by: towns, river trade, boats and floods all follow them.
+    5. **Rivers**, as Gaea's Rivers node makes them. Rain is routed over the finished land, across lakes to their outlets and out to the sea. **Headwaters** are spread over the uplands, where it is high and wet, a few tiles apart, plus any **river sources** you mark in the editor. From each, a river runs downhill the way the water goes, to the sea or a lake (and on out of the lake's outlet), or until it joins a river already there and becomes its tributary. Each grows with the water gathered above it, winds more on flat ground, and cuts its channel into the land, wider and deeper downstream. With **Downcutting** it cuts down through rises in its way, so it keeps falling to the sea. These are the rivers the world lives by: towns, river trade, boats and floods all follow them.
 
     Like Gaea, the erosion leaves three maps: **wear** (where the land was scoured), **deposits** (where the soil came to rest) and **flow** (where the water ran). The map colours the ground from them: bare rock where it wore away, pale scree and gravel below (soil, and greener, in the lowlands), and darker gullies along the streams. Coasts and lakes stay where they are. The land is carved once, when the world is made (a second or two; the editor carves again after each stroke), and every style is shaded from it. Nothing is carved while history runs. The default carving is mountain shape 1.3, erosion strength 1.4, rock softness 0.6 and downcutting 0.7.
   - *Parchment* draws the same land in the colours of an old map: paper, an inked coastline and lake shores, ripple lines along the shore, soft sepia relief, and forests hatched in fine diagonal ink lines.
@@ -88,8 +90,13 @@ Behind the scenes the simulation still keeps its books on a fine grid of small p
 | Raise | Lift the ground. Out of the sea it makes land. Keep going over it and it builds hills, then a mountain range. Drag along the line you want the range to follow. When you let go, the land is shaped into peaks and carved by water, leaving a sharp crest with spurs and valleys running down to the floor. |
 | Lower | Sink the ground: cut valleys and passes, or drown land to make coves, inlets and seas. |
 | Flatten | Level the ground to the height where the stroke began: plateaus, mesas and table lands, with steep edges. Raise a block first, then flatten its top. |
+| River source | Click (or drag) where a river should rise, as Gaea paints headwaters. Each runs downhill to the sea or a lake, joining any river it meets. Undo or **Clear river sources** takes them away. |
 
 **Width** sets how wide the tool is. Use a wide tool for broad ranges and big landmasses, and a narrow one for thin, sharp ridges. **Strength** sets how much each pass lifts, sinks or levels the ground.
+
+**You see the world as it will be while you draw**, the way Gaea previews a terrain. As you drag, the land is rebuilt a few times a second at a quicker preview resolution (carved, with its rivers, lakes, colours and contours, in the map style you choose in the editor). When you let go it is built again at full detail. The building runs on a background thread, so drawing never waits for it, and the panel says whether you are looking at a preview or full detail.
+
+**Terrain** sliders set how the land is carved: Mountain shape, Erosion strength, Rock softness and Downcutting (defaults 1.3, 1.4, 0.6, 0.7). **Rivers** sliders are Gaea's: Water (more water, more rivers), Width, Depth and Downcutting.
 
 After every stroke the climate, rivers, lakes and biomes are rebuilt for the new land. The editor can show terrain, temperature, rainfall or currents, and it draws latitude lines every 15°. You can move the map on the globe or change the tilt and see the climate follow. Start from a blank ocean or freshly generated land. **Use this world** saves the land with the world's settings and starts a new history on it. The land is kept with the settings until you untick "Keep the hand-shaped land" in Setup. On a different map size, it is resampled to fit.
 

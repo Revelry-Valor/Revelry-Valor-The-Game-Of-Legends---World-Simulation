@@ -118,7 +118,21 @@ export interface WorldConfig {
   /** Land shaped by hand in the world editor: heights encoded with encodeHeights(); replaces the generated land. */
   heightmap?: string;
   /** How the land is carved into terrain (see erodeRelief); unset settings take TERRAIN_DEFAULTS. */
-  terrain?: { mountains?: number; erosion?: number; softness?: number; downcutting?: number };
+  terrain?: {
+    mountains?: number;
+    erosion?: number;
+    softness?: number;
+    downcutting?: number;
+    /** Rivers, as Gaea's Rivers node (see RIVER_DEFAULTS). */
+    riverWater?: number;
+    riverWidth?: number;
+    riverDepth?: number;
+    riverDowncutting?: number;
+  };
+  /** Carve the land at the tiles' own resolution: a quick, coarser preview (the world editor while you draw). */
+  terrainPreview?: boolean;
+  /** Where rivers must rise, in tiles: painted with the world editor's River source tool. */
+  riverSources?: [number, number][];
   races: RaceDef[];
 }
 

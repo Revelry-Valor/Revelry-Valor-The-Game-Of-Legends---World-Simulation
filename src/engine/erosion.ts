@@ -469,10 +469,12 @@ export function erodeRelief(surface: Float32Array, water: Uint8Array, w: number,
   const cwear = new Float32Array(cn);
   const cdep = new Float32Array(cn);
   const cflow = new Float32Array(cn);
-  erodeGrid(coarse, cfixed, CW, CH, 30, K, 0.03, 0.5, rng.fork('valleys'));
+  // At the tiles' own resolution (a quick preview) there is only the one grid, worked a little less.
+  const quick = s === 1;
+  erodeGrid(coarse, cfixed, CW, CH, quick ? 18 : 30, K, 0.03, 0.5, rng.fork('valleys'));
   for (let i = 0; i < cn; i++) if (was[i] > coarse[i]) cwear[i] += (was[i] - coarse[i]) * 0.5;
   if (stage === 'full') {
-    rainfall(cg, rng.fork('rain'), cs, { drops: (opts.rain ?? 3) * strength, strength: Math.min(1.5, strength), softness, downcutting }, cwear, cdep, cflow);
+    rainfall(cg, rng.fork('rain'), cs, { drops: (opts.rain ?? (quick ? 1.5 : 3)) * strength, strength: Math.min(1.5, strength), softness, downcutting }, cwear, cdep, cflow);
     crumble(cg, cs, 3, cdep);
   }
   // Carry the change and the maps up to the full grid, smoothly.
@@ -515,7 +517,7 @@ export function erodeRelief(surface: Float32Array, water: Uint8Array, w: number,
     }
   }
   const before = Float32Array.from(hts);
-  erodeGrid(hts, fixed, W, H, 6, K, 0.02, 0.5, rng.fork('streams'));
+  if (!quick) erodeGrid(hts, fixed, W, H, 6, K, 0.02, 0.5, rng.fork('streams'));
   for (let i = 0; i < n; i++) if (!fixed[i] && before[i] > hts[i]) wear[i] += before[i] - hts[i];
   return finish(g, wear, deposits, flow, done);
 }
@@ -659,14 +661,37 @@ export interface RiverNet {
   curves: Float32Array;
 }
 
+/** Gaea's Rivers settings. */
+export interface RiverOptions {
+  /** How much water there is to make rivers: more headwaters, more rivers (0 none .. 1 normal .. 2). */
+  water?: number;
+  /** How wide rivers are drawn and carved (0.5 thin .. 1 normal .. 2 wide). */
+  width?: number;
+  /** How deep the channels are cut (0 .. 1 normal .. 2). */
+  depth?: number;
+  /** How far rivers cut down through whatever stands in their way, so they keep falling to the sea (0 .. 1). */
+  downcutting?: number;
+  /** Places, in tiles, where a river must rise (painted with the River source tool). */
+  sources?: [number, number][];
+}
+
+export const RIVER_DEFAULTS = { water: 1, width: 1, depth: 1, downcutting: 0.5 };
+
 /**
- * Find the rivers on carved land, as Gaea's Rivers node does: rain is routed over the finished
- * terrain cell by cell (across lakes to their outlets, out to the sea), and wherever enough water
- * gathers a river runs, in the very valley the erosion carved. Their beds are cut a little into the
- * land so they sit in a channel. `sea` and `lake` mark water tiles, `rain` the rain on each tile
- * (in the threshold's units per tile), `threshold` the water a stream needs to count as a river.
+ * Rivers made as Gaea's Rivers node makes them. Rain is routed over the carved land cell by cell
+ * (across lakes to their outlets, and out to the sea). Headwaters are spread over the uplands, where
+ * it is high and wet, at least a few tiles apart (more of them with more Water), and any painted
+ * river sources are added. From each, a river runs downhill along the way the water goes until it
+ * reaches the sea or a lake (flowing on out of the lake's outlet), or joins a river already there,
+ * becoming its tributary. Each river grows with the water gathered above it, winds more where the
+ * land is flat, and cuts its channel into the land: wider and deeper downstream, and with
+ * Downcutting, carved down through rises so it keeps falling all the way.
  */
-export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Array, rain: Float32Array, w: number, h: number, threshold: number, seed = 1): RiverNet {
+export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Array, rain: Float32Array, w: number, h: number, threshold: number, seed = 1, opts: RiverOptions = {}): RiverNet {
+  const water = opts.water ?? RIVER_DEFAULTS.water;
+  const widthK = opts.width ?? RIVER_DEFAULTS.width;
+  const depthK = opts.depth ?? RIVER_DEFAULTS.depth;
+  const downcut = opts.downcutting ?? RIVER_DEFAULTS.downcutting;
   const { width: W, height: H, scale: S } = relief;
   const n = W * H;
   const hts = relief.heights;
@@ -675,19 +700,18 @@ export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Arr
     const Y = (c - X) / W;
     return Math.min(h - 1, Math.floor(Y / S)) * w + Math.min(w - 1, Math.floor(X / S));
   };
-  // Sea cells take the water away; lake cells are part of the land's surface (level water the
-  // rivers run across to the outlet).
   const isSea = new Uint8Array(n);
   const isLake = new Uint8Array(n);
   for (let c = 0; c < n; c++) {
     if (!relief.water[c]) continue;
-    const t = tileOf(c);
-    if (lake[t]) isLake[c] = 1;
+    if (lake[tileOf(c)]) isLake[c] = 1;
     else isSea[c] = 1;
   }
   const rng = new Rng(seed);
   const jitter = new Float32Array(n);
   for (let i = 0; i < n; i++) jitter[i] = rng.next();
+
+  // --- Where the water goes: flood upward from the sea, then steepest way down. ---
   const fill = new Float32Array(n);
   const order = new Int32Array(n);
   const seen = new Uint8Array(n);
@@ -721,7 +745,6 @@ export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Arr
       heap.push(j, fill[j]);
     }
   }
-  // Each cell drains to its steepest neighbour on the filled surface.
   const recv = new Int32Array(n).fill(-1);
   for (let k = 0; k < count; k++) {
     const c = order[k];
@@ -741,7 +764,6 @@ export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Arr
       }
     }
   }
-  // Gather the rain, upstream first.
   const q = new Float32Array(n);
   const perCell = 1 / (S * S);
   for (let c = 0; c < n; c++) if (!isSea[c]) q[c] = rain[tileOf(c)] * perCell;
@@ -750,66 +772,162 @@ export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Arr
     const r = recv[c];
     if (r >= 0) q[r] += q[c];
   }
-  const isRiver = (c: number) => !isSea[c] && !isLake[c] && q[c] >= threshold;
 
-  // The sim's rivers: each land tile carries the biggest stream that runs through it.
-  const river = new Float32Array(w * h);
-  for (let c = 0; c < n; c++) {
-    if (!isRiver(c)) continue;
+  // --- Headwaters: high, wet ground, spread out; and any painted sources. ---
+  const heads: number[] = [];
+  const taken = new Uint8Array(w * h);
+  const spacing = 5; // tiles between headwaters
+  const claim = (c: number) => {
     const t = tileOf(c);
-    if (q[c] > river[t]) river[t] = q[c];
-  }
-
-  // Cut the beds a little into the land, deeper for bigger rivers.
-  for (let c = 0; c < n; c++) {
-    if (!isRiver(c)) continue;
-    const depth = Math.min(0.03, 0.006 * Math.sqrt(q[c] / threshold));
-    const X = c % W;
-    const Y = (c - X) / W;
-    hts[c] = Math.max(0.0005, hts[c] - depth);
-    for (let k = 0; k < 4; k++) {
-      const x = X + DX[k];
-      const y = Y + DY[k];
-      if (x < 0 || y < 0 || x >= W || y >= H) continue;
-      const j = y * W + x;
-      if (!relief.water[j] && !isRiver(j)) hts[j] = Math.max(0.0005, hts[j] - depth * 0.4);
-    }
-  }
-
-  // Trace each river as a line of cells: from its source down its main stream until it reaches
-  // the sea or a lake, or joins a bigger river. Each cell's main upstream is the biggest river
-  // flowing into it; a river flowing out of a lake starts afresh at the outlet.
-  const main = new Int32Array(n).fill(-1);
-  for (let c = 0; c < n; c++) {
-    if (!isRiver(c)) continue;
-    const d = recv[c];
-    if (d < 0 || !isRiver(d)) continue;
-    if (main[d] < 0 || q[c] > q[main[d]]) main[d] = c;
-  }
-  const pt = (c: number): [number, number] => [((c % W) + 0.5) / S - 0.5, (Math.floor(c / W) + 0.5) / S - 0.5];
-  const width = (v: number) => Math.min(0.28, Math.max(0.06, Math.sqrt(v / threshold) * 0.08));
-  const out: number[] = [];
-  for (let c = 0; c < n; c++) {
-    if (!isRiver(c) || main[c] >= 0) continue;
-    // A source: follow it down.
-    const pts: [number, number, number][] = [];
-    let cur = c;
-    for (;;) {
-      const [x, y] = pt(cur);
-      pts.push([x, y, q[cur]]);
-      const d = recv[cur];
-      if (d < 0) break;
-      if (!isRiver(d) || main[d] !== cur) {
-        // Into the sea or a lake (end on the water), or joining a bigger river (end on it).
-        const [dx, dy] = pt(d);
-        pts.push([dx, dy, q[cur]]);
-        break;
+    const tx = t % w;
+    const ty = (t - tx) / w;
+    for (let dy = -spacing; dy <= spacing; dy++) {
+      for (let dx = -spacing; dx <= spacing; dx++) {
+        const x = tx + dx;
+        const y = ty + dy;
+        if (x >= 0 && y >= 0 && x < w && y < h && dx * dx + dy * dy <= spacing * spacing) taken[y * w + x] = 1;
       }
-      cur = d;
     }
-    if (pts.length < 2) continue;
-    // Keep a point every tile or so, then round the corners (Chaikin), keeping both ends.
-    let line = pts.filter((_, i) => i === 0 || i === pts.length - 1 || i % Math.max(1, Math.round(S * 0.75)) === 0);
+  };
+  for (const [sx, sy] of opts.sources ?? []) {
+    const X = Math.round((sx + 0.5) * S - 0.5);
+    const Y = Math.round((sy + 0.5) * S - 0.5);
+    if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
+    const c = Y * W + X;
+    if (relief.water[c]) continue;
+    heads.push(c);
+  }
+  let land = 0;
+  let top = 0;
+  for (let c = 0; c < n; c++) {
+    if (relief.water[c]) continue;
+    land++;
+    if (hts[c] > top) top = hts[c];
+  }
+  const want = Math.round((land / (S * S)) * 0.0055 * water);
+  if (want > 0 && top > 0) {
+    // Candidates weighted by height and rain, drawn at random; too close to another, passed over.
+    const cand: number[] = [];
+    const weight: number[] = [];
+    for (let c = 0; c < n; c += 3) {
+      if (relief.water[c]) continue;
+      const hn = hts[c] / top;
+      const wgt = Math.pow(Math.max(0, hn - 0.12), 1.5) * rain[tileOf(c)];
+      if (wgt <= 0) continue;
+      cand.push(c);
+      weight.push(wgt);
+    }
+    // Weighted shuffle: each candidate keyed by random^(1/weight), best keys first.
+    const keyed = cand.map((c, i) => [Math.pow(rng.next(), 1 / weight[i]), c] as [number, number]).sort((a, b) => b[0] - a[0]);
+    for (const c of heads) claim(c);
+    let added = 0;
+    for (const [, c] of keyed) {
+      if (added >= want) break;
+      if (taken[tileOf(c)]) continue;
+      heads.push(c);
+      claim(c);
+      added++;
+    }
+  }
+
+  // --- Run each river down to the sea, a lake, or a river already there. ---
+  const onRiver = new Int32Array(n).fill(-1); // index of the river line a cell belongs to
+  const lines: number[][] = [];
+  // Big rivers first, so tributaries join them rather than the other way round.
+  heads.sort((a, b) => hts[b] - hts[a]);
+  for (const head of heads) {
+    if (onRiver[head] >= 0) continue;
+    const path: number[] = [];
+    let cur = head;
+    let guard = 0;
+    while (cur >= 0 && guard++ < n) {
+      path.push(cur);
+      if (isSea[cur]) break;
+      if (onRiver[cur] >= 0 && cur !== head) break;
+      onRiver[cur] = lines.length;
+      cur = recv[cur];
+    }
+    lines.push(path);
+  }
+
+  // --- Downcutting: each river keeps falling, cut down through any rise in its way. ---
+  if (downcut > 0) {
+    for (const path of lines) {
+      // From the mouth upward, each cell no lower than the one below it.
+      let floor = -Infinity;
+      for (let i = path.length - 1; i >= 0; i--) {
+        const c = path[i];
+        if (relief.water[c]) {
+          floor = hts[c];
+          continue;
+        }
+        if (hts[c] < floor) hts[c] = floor + 1e-5;
+        floor = hts[c];
+      }
+      // From the source downward, cut away rises so the bed only ever falls.
+      let ceiling = Infinity;
+      for (const c of path) {
+        if (relief.water[c]) {
+          ceiling = Infinity;
+          continue;
+        }
+        if (hts[c] > ceiling) hts[c] -= (hts[c] - ceiling) * downcut;
+        ceiling = Math.min(ceiling, hts[c]);
+      }
+    }
+  }
+
+  // --- Channels: cut into the land, wider and deeper as the river grows. ---
+  const size = (v: number) => Math.sqrt(Math.max(v, threshold * 0.2) / threshold);
+  const wid = (v: number) => Math.min(0.32, Math.max(0.05, size(v) * 0.07)) * widthK;
+  for (const path of lines) {
+    for (const c of path) {
+      if (relief.water[c]) continue;
+      const r = Math.max(1, wid(q[c]) * S * 1.5);
+      const depth = Math.min(0.035, 0.007 * size(q[c])) * depthK;
+      const X = c % W;
+      const Y = (c - X) / W;
+      const R = Math.ceil(r);
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const x = X + dx;
+          const y = Y + dy;
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          const j = y * W + x;
+          if (relief.water[j]) continue;
+          const d = Math.hypot(dx, dy) / r;
+          if (d >= 1) continue;
+          const target = hts[c] - depth * (1 - d * d);
+          if (target < hts[j]) hts[j] = Math.max(0.0005, hts[j] + (target - hts[j]) * (d === 0 ? 1 : 0.6));
+        }
+      }
+    }
+  }
+
+  // --- What the world lives by: the tiles each river runs through. ---
+  const river = new Float32Array(w * h);
+  for (const path of lines) {
+    for (const c of path) {
+      if (relief.water[c]) continue;
+      const t = tileOf(c);
+      const v = Math.max(q[c], threshold * 0.5);
+      if (v > river[t]) river[t] = v;
+    }
+  }
+
+  // --- The curves to draw: smooth, winding where the land is flat. ---
+  const meander = new Noise2D(rng.fork('meander'));
+  const pt = (c: number): [number, number] => [((c % W) + 0.5) / S - 0.5, (Math.floor(c / W) + 0.5) / S - 0.5];
+  const out: number[] = [];
+  const emit = (cells: number[], joinEnd: number) => {
+    if (cells.length < 2 && joinEnd < 0) return;
+    const pts: [number, number, number][] = cells.map((c) => [...pt(c), q[c]] as [number, number, number]);
+    if (joinEnd >= 0) {
+      const [x, y] = pt(joinEnd);
+      pts.push([x, y, q[cells[cells.length - 1]]]);
+    }
+    if (pts.length < 2) return;
+    let line = pts.filter((_, i) => i === 0 || i === pts.length - 1 || i % S === 0);
     for (let pass = 0; pass < 2; pass++) {
       if (line.length < 3) break;
       const next: [number, number, number][] = [line[0]];
@@ -822,11 +940,31 @@ export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Arr
       next.push(line[line.length - 1]);
       line = next;
     }
-    // As quadratic curves through the midpoints, each corner point the control.
+    // Meanders: a gentle sideways swing on flat ground, bigger for bigger rivers, never at the ends.
+    let along = 0;
+    for (let i = 1; i < line.length - 1; i++) {
+      const a = line[i - 1];
+      const b = line[i + 1];
+      const tx = b[0] - a[0];
+      const ty = b[1] - a[1];
+      const tl = Math.hypot(tx, ty) || 1;
+      along += Math.hypot(line[i][0] - a[0], line[i][1] - a[1]);
+      const hx = Math.round((line[i][0] + 0.5) * S - 0.5);
+      const hy = Math.round((line[i][1] + 0.5) * S - 0.5);
+      if (hx < 1 || hy < 1 || hx >= W - 1 || hy >= H - 1) continue;
+      const c = hy * W + hx;
+      const slope = Math.hypot(hts[c + 1] - hts[c - 1], hts[c + W] - hts[c - W]) * S;
+      const flat = Math.max(0, 1 - slope / 0.15);
+      const ends = Math.min(1, i / 4, (line.length - 1 - i) / 4);
+      const amp = Math.min(0.45, 0.12 + wid(line[i][2]) * 1.2) * flat * ends;
+      const off = meander.noise(along * 0.55, (cellsKey(cells) % 97) * 3.1) * amp;
+      line[i][0] += (-ty / tl) * off;
+      line[i][1] += (tx / tl) * off;
+    }
     if (line.length === 2) {
       const [a, b] = line;
-      out.push(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, b[0], b[1], width(a[2]));
-      continue;
+      out.push(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, b[0], b[1], wid(a[2]));
+      return;
     }
     for (let i = 1; i < line.length - 1; i++) {
       const a = line[i - 1];
@@ -836,7 +974,27 @@ export function traceRivers(relief: ReliefField, sea: Uint8Array, lake: Uint8Arr
       const sy = i === 1 ? a[1] : (a[1] + p[1]) / 2;
       const ex = i === line.length - 2 ? b[0] : (p[0] + b[0]) / 2;
       const ey = i === line.length - 2 ? b[1] : (p[1] + b[1]) / 2;
-      out.push(sx, sy, p[0], p[1], ex, ey, width(p[2]));
+      out.push(sx, sy, p[0], p[1], ex, ey, wid(p[2]));
+    }
+  };
+  const cellsKey = (cells: number[]) => cells[0];
+  for (const path of lines) {
+    // Drawn in runs over the land, broken where the river crosses a lake; each run ends on the
+    // water it flows into, or on the river it joins.
+    let run: number[] = [];
+    for (let i = 0; i < path.length; i++) {
+      const c = path[i];
+      if (relief.water[c]) {
+        if (run.length) emit(run, c);
+        run = [];
+        continue;
+      }
+      run.push(c);
+    }
+    if (run.length) {
+      const last = run[run.length - 1];
+      const d = recv[last];
+      emit(run, d >= 0 && onRiver[d] >= 0 && onRiver[d] !== onRiver[last] ? d : -1);
     }
   }
   return { river, curves: Float32Array.from(out) };

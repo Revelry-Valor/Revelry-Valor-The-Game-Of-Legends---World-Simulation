@@ -22,6 +22,7 @@ import { CARAVAN_COLOR, MapRenderer, type MapLayer, type ViewState } from './ren
 import { mountTechTree, techDetail } from './techtree';
 import { TRAITS, TRAIT_BY_ID } from '../engine/data/traits';
 import { BRUSHES, type BrushTool } from '../engine/editor';
+import { RIVER_DEFAULTS, TERRAIN_DEFAULTS } from '../engine/erosion';
 import { WorldEditor, type EditorView } from './worldeditor';
 
 type Tab = 'inspect' | 'market' | 'realms' | 'peoples' | 'chronicle' | 'charts' | 'setup';
@@ -1177,7 +1178,22 @@ function readSetup(): WorldConfig | null {
 function openEditor(base: WorldConfig): void {
   playing = false;
   closeOverlay();
-  editing = new WorldEditor(base);
+  editing = new WorldEditor(base, view.style, view.contours);
+  const ed = editing;
+  ed.onChange = () => {
+    if (editing !== ed) return;
+    drawMap();
+    const st = document.getElementById('e-status');
+    if (st) st.textContent = editorStatus(ed);
+    const undo = document.getElementById('e-undo') as HTMLButtonElement | null;
+    if (undo) undo.disabled = !ed.canUndo();
+    const clear = document.getElementById('e-clear-sources') as HTMLButtonElement | null;
+    if (clear) clear.disabled = !ed.sources.length;
+  };
+  ed.onStatus = () => {
+    const st = document.getElementById('e-status');
+    if (st && editing === ed) st.textContent = editorStatus(ed);
+  };
   autoFit = true;
   fitView();
   canvas.classList.add('painting');
@@ -1193,6 +1209,7 @@ function showMapChrome(on: boolean): void {
 }
 
 function closeEditor(): void {
+  editing?.dispose();
   editing = null;
   canvas.classList.remove('painting');
   showMapChrome(true);
@@ -1202,14 +1219,20 @@ function closeEditor(): void {
   renderPanel(true);
 }
 
+function editorStatus(ed: WorldEditor): string {
+  if (ed.working) return ed.painting ? 'Live preview…' : 'Building full detail…';
+  return ed.shown === 'full' ? 'Full detail' : 'Preview';
+}
+
 function renderEditor(ed: WorldEditor): string {
   const c = ed.cfg;
+  const tr = c.terrain ?? {};
   const brush = BRUSHES.find((b) => b.id === ed.tool)!;
   const num = (id: string, label: string, v: number, min: number, max: number, step: number, hint = '') =>
     `<label class="field" for="${id}"><span>${label} <output id="${id}-o">${v}</output></span><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${v}">${hint ? `<small>${hint}</small>` : ''}</label>`;
   const views: [EditorView, string][] = [['terrain', 'Terrain'], ['temperature', 'Temperature'], ['rainfall', 'Rainfall'], ['currents', 'Currents']];
   return `
-    <header class="head"><h2>Shape the land</h2><p class="sub">One terrain tool: drag on the map to raise, lower or flatten the land. Raise out of the sea for land, keep raising for hills and mountain ranges. Right-drag or hold Space to pan, scroll to zoom. [ and ] change the width, Ctrl+Z undoes.</p></header>
+    <header class="head"><h2>Shape the land</h2><p class="sub">Drag on the map to raise, lower or flatten the land, or to mark where rivers rise. The world updates as you draw, as a quick preview, and sharpens to full detail when you let go. Right-drag or hold Space to pan, scroll to zoom. [ and ] change the width, Ctrl+Z undoes.</p><p class="sub" id="e-status" role="status">${editorStatus(ed)}</p></header>
     <div class="setup">
       <div class="seg" role="group" aria-label="Terrain tool">${BRUSHES.map((b) => `<button type="button" data-brush="${b.id}" aria-pressed="${b.id === ed.tool}" title="${esc(b.hint)}">${b.name}</button>`).join('')}</div>
       <p class="sub">${esc(brush.hint)}</p>
@@ -1220,10 +1243,37 @@ function renderEditor(ed: WorldEditor): string {
         <button type="button" id="e-undo" ${ed.canUndo() ? '' : 'disabled'}>Undo</button>
         <button type="button" id="e-blank">Blank ocean</button>
         <button type="button" id="e-random">Fresh random land</button>
+        <button type="button" id="e-clear-sources" ${ed.sources.length ? '' : 'disabled'}>Clear river sources</button>
       </div>
       <h3 class="mini-h">See</h3>
       <div class="seg" role="group" aria-label="Editor view">${views.map(([k, n]) => `<button type="button" data-eview="${k}" aria-pressed="${ed.layer === k}">${n}</button>`).join('')}</div>
       ${ed.layer !== 'terrain' ? `<p class="land-legend">${LAYER_LEGEND[ed.layer] ?? ''}</p>` : ''}
+      <div class="row">
+        <label class="field" for="e-style"><span>Style</span><select id="e-style">${(
+          [['drawn', 'Drawn map'], ['topo', 'Topographic'], ['parchment', 'Parchment'], ['satellite', 'Satellite']] as const
+        ).map(([k, n]) => `<option value="${k}" ${ed.style === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="toggle" for="e-contours"><input id="e-contours" type="checkbox" ${ed.contours ? 'checked' : ''}> Contours (every 250 ft)</label>
+      </div>
+      <h3 class="mini-h">Terrain</h3>
+      <p class="sub">How the land is carved, as in Gaea: mountain shapes, then water wearing them down.</p>
+      <div class="row">
+        ${num('e-mountains', 'Mountain shape', tr.mountains ?? TERRAIN_DEFAULTS.mountains, 0, 1.5, 0.05)}
+        ${num('e-erosion', 'Erosion strength', tr.erosion ?? TERRAIN_DEFAULTS.erosion, 0, 2, 0.05)}
+      </div>
+      <div class="row">
+        ${num('e-softness', 'Rock softness', tr.softness ?? TERRAIN_DEFAULTS.softness, 0, 1, 0.05)}
+        ${num('e-downcut', 'Downcutting', tr.downcutting ?? TERRAIN_DEFAULTS.downcutting, 0, 1, 0.05)}
+      </div>
+      <h3 class="mini-h">Rivers</h3>
+      <p class="sub">As Gaea's Rivers node: rivers rise in the uplands (and wherever you mark a source) and run down to the sea or a lake.</p>
+      <div class="row">
+        ${num('e-rwater', 'Water', tr.riverWater ?? RIVER_DEFAULTS.water, 0, 2, 0.05, 'More water, more rivers.')}
+        ${num('e-rwidth', 'Width', tr.riverWidth ?? RIVER_DEFAULTS.width, 0.4, 2.5, 0.05)}
+      </div>
+      <div class="row">
+        ${num('e-rdepth', 'Depth', tr.riverDepth ?? RIVER_DEFAULTS.depth, 0, 2, 0.05)}
+        ${num('e-rdowncut', 'Downcutting', tr.riverDowncutting ?? RIVER_DEFAULTS.downcutting, 0, 1, 0.05, 'How far rivers cut through rises to keep falling.')}
+      </div>
       <h3 class="mini-h">Place on the globe</h3>
       <div class="row">
         ${num('e-latn', 'Top edge', c.latNorth ?? 90, -90, 90, 1)}
@@ -1270,6 +1320,31 @@ function wireEditor(ed: WorldEditor): void {
     ed.setClimate({ oceanCurrents: (e.target as HTMLInputElement).checked });
     drawMap();
   });
+  const look = () => {
+    view.style = (['parchment', 'satellite', 'topo'] as const).find((k) => k === $<HTMLSelectElement>('e-style').value) ?? 'drawn';
+    view.contours = $<HTMLInputElement>('e-contours').checked;
+    store.set('style', view.style);
+    store.set('contours', view.contours ? '1' : '0');
+    styleSel.value = view.style;
+    contourBox.checked = view.contours;
+    paperPane();
+    ed.setLook(view.style, view.contours);
+    drawMap();
+  };
+  $('e-style').addEventListener('change', look);
+  $('e-contours').addEventListener('change', look);
+  range('e-mountains', (v) => ed.setTerrain({ mountains: v }), false);
+  range('e-erosion', (v) => ed.setTerrain({ erosion: v }), false);
+  range('e-softness', (v) => ed.setTerrain({ softness: v }), false);
+  range('e-downcut', (v) => ed.setTerrain({ downcutting: v }), false);
+  range('e-rwater', (v) => ed.setTerrain({ riverWater: v }), false);
+  range('e-rwidth', (v) => ed.setTerrain({ riverWidth: v }), false);
+  range('e-rdepth', (v) => ed.setTerrain({ riverDepth: v }), false);
+  range('e-rdowncut', (v) => ed.setTerrain({ riverDowncutting: v }), false);
+  $('e-clear-sources').addEventListener('click', () => {
+    ed.clearSources();
+    redraw();
+  });
   $('e-undo').addEventListener('click', () => {
     if (ed.undo()) redraw();
   });
@@ -1283,8 +1358,9 @@ function wireEditor(ed: WorldEditor): void {
   });
   $('e-cancel').addEventListener('click', closeEditor);
   $('e-use').addEventListener('click', () => {
-    cfg = { ...ed.cfg, heightmap: ed.heightmap() };
+    cfg = ed.settings();
     store.set('config', JSON.stringify(cfg));
+    ed.dispose();
     editing = null;
     canvas.classList.remove('painting');
     showMapChrome(true);

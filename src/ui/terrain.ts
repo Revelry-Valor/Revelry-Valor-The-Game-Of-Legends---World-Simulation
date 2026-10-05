@@ -32,23 +32,6 @@ function sampler(field: Float32Array, w: number, h: number) {
   };
 }
 
-/**
- * Light falling on each tile from the north-west, from the slope across its neighbours. Shading is
- * worked out per tile and then blended between tiles, which keeps the grid from showing in it.
- */
-function tileShade(field: Float32Array, w: number, h: number): Float32Array {
-  const out = new Float32Array(w * h);
-  const at = (x: number, y: number) => Math.max(0, field[clamp(y, 0, h - 1) * w + clamp(x, 0, w - 1)]);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const ex = (at(x + 1, y) - at(x - 1, y)) * 0.5;
-      const ey = (at(x, y + 1) - at(x, y - 1)) * 0.5;
-      out[y * w + x] = clamp(1 - (ex + ey) * 4.2, 0.5, 1.5);
-    }
-  }
-  return out;
-}
-
 /** Plain bilinear blend between tile centres. */
 function linear(field: Float32Array, w: number, h: number) {
   return (fx: number, fy: number): number => {
@@ -66,8 +49,6 @@ function linear(field: Float32Array, w: number, h: number) {
   };
 }
 
-const SEA_SHALLOW: [number, number, number] = [92, 150, 190];
-const SEA_DEEP: [number, number, number] = [30, 64, 112];
 
 export type MapStyle = 'drawn' | 'parchment' | 'satellite' | 'topo';
 
@@ -601,7 +582,7 @@ export class TerrainShader {
           const depth = lake ? 0.05 : -e;
           if (topo) {
             // Shallows a shade lighter than open water, without the sea floor's mottling.
-            const k = smooth(0.0, 0.06, depth);
+            const k = smooth(0.0, 0.02, depth);
             r = TOPO_SEA[0] + (TOPO_DEEP[0] - TOPO_SEA[0]) * k;
             g = TOPO_SEA[1] + (TOPO_DEEP[1] - TOPO_SEA[1]) * k;
             b = TOPO_SEA[2] + (TOPO_DEEP[2] - TOPO_SEA[2]) * k;
@@ -862,18 +843,6 @@ function blurField(a: Float32Array, w: number, h: number): void {
   a.set(t);
 }
 
-/** Paint the whole map at `scale` pixels per tile, optionally with its rivers. */
-export function paintTerrain(map: MapData, canvas: HTMLCanvasElement = document.createElement('canvas'), scale = TERRAIN_SCALE, rivers = true, style: MapStyle = 'drawn'): HTMLCanvasElement {
-  canvas.width = map.width * scale;
-  canvas.height = map.height * scale;
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.createImageData(canvas.width, canvas.height);
-  new TerrainShader(map, style).paint(img, 0, 0, 1 / scale, 1 / scale);
-  ctx.putImageData(img, 0, 0);
-  if (rivers) drawRiverCurves(ctx, riverCurves(map), { zoom: scale, ox: 0, oy: 0 });
-  return canvas;
-}
-
 /**
  * Rivers as smooth winding curves in map coordinates, thickening as they gather water. Normally
  * these are the rivers traced along the carved valleys; otherwise, from the tiles: each river
@@ -946,81 +915,9 @@ export function drawRiverCurves(ctx: CanvasRenderingContext2D, curves: Float32Ar
       any = true;
     }
     if (!any) continue;
-    ctx.lineWidth = Math.max(0.8, ((lo + Math.min(hi, 0.3)) / 2) * z);
+    ctx.lineWidth = Math.max(1.1, ((lo + Math.min(hi, 0.3)) / 2) * z);
     ctx.stroke();
   }
-}
-
-/**
- * Quick colouring of bare heights for the editor while a stroke is under way: sea blues, then
- * lowland green through upland brown to rock and snow, hill-shaded.
- */
-export function paintHeights(heights: Float32Array, w: number, h: number, canvas: HTMLCanvasElement, box?: { x0: number; y0: number; x1: number; y1: number }, scale = TERRAIN_SCALE): void {
-  if (canvas.width !== w * scale || canvas.height !== h * scale) {
-    canvas.width = w * scale;
-    canvas.height = h * scale;
-    box = undefined;
-  }
-  const bx0 = box ? Math.max(0, box.x0 - 1) : 0;
-  const by0 = box ? Math.max(0, box.y0 - 1) : 0;
-  const bx1 = box ? Math.min(w - 1, box.x1 + 1) : w - 1;
-  const by1 = box ? Math.min(h - 1, box.y1 + 1) : h - 1;
-  const W = (bx1 - bx0 + 1) * scale;
-  const Hh = (by1 - by0 + 1) * scale;
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.createImageData(W, Hh);
-  const d = img.data;
-  const elev = sampler(heights, w, h);
-  const shadeAt = linear(tileShade(heights, w, h), w, h);
-  for (let py = 0; py < Hh; py++) {
-    const fy = by0 + (py + 0.5) / scale - 0.5;
-    for (let px = 0; px < W; px++) {
-      const fx = bx0 + (px + 0.5) / scale - 0.5;
-      const e = elev(fx, fy);
-      const o = (py * W + px) * 4;
-      let r: number;
-      let g: number;
-      let b: number;
-      if (e < 0) {
-        const depth = clamp(-e * 2.2, 0, 1);
-        r = SEA_SHALLOW[0] + (SEA_DEEP[0] - SEA_SHALLOW[0]) * depth;
-        g = SEA_SHALLOW[1] + (SEA_DEEP[1] - SEA_SHALLOW[1]) * depth;
-        b = SEA_SHALLOW[2] + (SEA_DEEP[2] - SEA_SHALLOW[2]) * depth;
-      } else {
-        [r, g, b] = hypsometric(e);
-        const shade = shadeAt(fx, fy);
-        r *= shade;
-        g *= shade;
-        b *= shade;
-      }
-      d[o] = r > 255 ? 255 : r;
-      d[o + 1] = g > 255 ? 255 : g;
-      d[o + 2] = b > 255 ? 255 : b;
-      d[o + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, bx0 * scale, by0 * scale);
-}
-
-const HYPSO: [number, [number, number, number]][] = [
-  [0, [118, 160, 96]],
-  [0.15, [150, 170, 104]],
-  [0.3, [176, 160, 110]],
-  [0.5, [150, 124, 96]],
-  [0.7, [140, 132, 128]],
-  [0.85, [236, 236, 240]],
-];
-
-function hypsometric(e: number): [number, number, number] {
-  for (let k = 1; k < HYPSO.length; k++) {
-    if (e <= HYPSO[k][0]) {
-      const [a, ca] = HYPSO[k - 1];
-      const [b, cb] = HYPSO[k];
-      const t = (e - a) / (b - a);
-      return [ca[0] + (cb[0] - ca[0]) * t, ca[1] + (cb[1] - ca[1]) * t, ca[2] + (cb[2] - ca[2]) * t];
-    }
-  }
-  return HYPSO[HYPSO.length - 1][1];
 }
 
 /**

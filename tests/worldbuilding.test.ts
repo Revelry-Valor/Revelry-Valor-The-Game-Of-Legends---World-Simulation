@@ -226,6 +226,28 @@ describe('world building', () => {
     expect(lower / total).toBeGreaterThan(0.8);
   });
 
+  it('makes rivers as Gaea does: more water more rivers, and a river from every painted source', () => {
+    const wet = (m: ReturnType<typeof mapOf>) => {
+      let n = 0;
+      for (let i = 0; i < m.size; i++) if (m.river[i] > 0) n++;
+      return n;
+    };
+    const none = mapOf({ seed: 3, terrain: { riverWater: 0 } });
+    expect(wet(none)).toBe(0);
+    const few = mapOf({ seed: 3, terrain: { riverWater: 0.5 } });
+    const many = mapOf({ seed: 3, terrain: { riverWater: 1.5 } });
+    expect(wet(many)).toBeGreaterThan(wet(few));
+    // A river source on high land, with no other rivers: a river runs from it.
+    let best = -1;
+    for (let i = 0; i < none.size; i++) if (none.elevation[i] > 0.3 && (best < 0 || none.elevation[i] > none.elevation[best])) best = i;
+    expect(best).toBeGreaterThanOrEqual(0);
+    const sx = best % none.width;
+    const sy = Math.floor(best / none.width);
+    const one = mapOf({ seed: 3, terrain: { riverWater: 0 }, riverSources: [[sx, sy]] });
+    expect(one.river[sy * one.width + sx]).toBeGreaterThan(0);
+    expect(wet(one)).toBeGreaterThan(3);
+  });
+
   it('runs a history on hand-shaped land', () => {
     const world = new World(defaultConfig({ seed: 5, width: W, height: H, heightmap: encodeHeights(boxWorld(), W, H) }));
     for (let y = 0; y < 40; y++) world.tick();

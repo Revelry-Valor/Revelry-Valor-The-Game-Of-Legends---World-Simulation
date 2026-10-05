@@ -240,14 +240,22 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     }
     surface[i] = k ? sum / k : 0;
   }
+  const t = cfg.terrain ?? {};
   const carved = erodeRelief(surface, waterTile, w, h, {
-    scale: clamp(Math.floor(Math.sqrt(400000 / size)), 2, 4),
+    scale: cfg.terrainPreview ? 1 : clamp(Math.floor(Math.sqrt(400000 / size)), 2, 4),
     seed: cfg.seed,
-    ...cfg.terrain,
+    mountains: t.mountains,
+    erosion: t.erosion,
+    softness: t.softness,
+    downcutting: t.downcutting,
   });
-  // Traced cell by cell, a stream wanders through more tiles than a tile-to-tile one, so it needs
-  // more water to count as a river: this keeps about as much of the land on a river as before.
-  const rivers = traceRivers(carved, sea, lakeTile, rainOn, w, h, riverThreshold * 2.2, cfg.seed);
+  const rivers = traceRivers(carved, sea, lakeTile, rainOn, w, h, riverThreshold, cfg.seed, {
+    water: t.riverWater,
+    width: t.riverWidth,
+    depth: t.riverDepth,
+    downcutting: t.riverDowncutting,
+    sources: cfg.riverSources,
+  });
   river.set(rivers.river);
 
   // --- Relief & biomes ---------------------------------------------------
