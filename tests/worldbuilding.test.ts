@@ -158,6 +158,35 @@ describe('world building', () => {
       hi = Math.max(hi, a.heights[row * a.width + X]);
     }
     expect(hi - lo).toBeGreaterThan(0.05);
+    // It leaves the maps a landscape is coloured by: worn ground, settled soil and running water.
+    const some = (m: Float32Array) => m.some((v) => v > 0.3);
+    expect(some(a.wear) && some(a.deposits) && some(a.flow)).toBe(true);
+    for (const m of [a.wear, a.deposits, a.flow]) expect(m.every((v) => v >= 0 && v <= 1)).toBe(true);
+    expect(a.wear[0] + a.deposits[0] + a.flow[0]).toBe(0);
+  });
+
+  it('builds the terrain in stages, each adding to the last', () => {
+    const w = 40;
+    const h = 30;
+    const surface = new Float32Array(w * h);
+    const water = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const land = x > 3 && x < w - 4 && y > 3 && y < h - 4;
+        water[y * w + x] = land ? 0 : 1;
+        surface[y * w + x] = land ? Math.max(0.01, 0.7 - Math.abs(y - h / 2) * 0.07) : 0;
+      }
+    }
+    const rough = (r: { heights: Float32Array; width: number }) => {
+      let g = 0;
+      for (let i = 1; i < r.heights.length - 1; i++) g += Math.abs(r.heights[i + 1] - r.heights[i]);
+      return g;
+    };
+    const layout = erodeRelief(surface, water, w, h, { scale: 3, stage: 'layout' });
+    const shaped = erodeRelief(surface, water, w, h, { scale: 3, stage: 'mountains' });
+    // The mountain shapes make the smooth heightmap far more rugged; with none asked for, nothing changes.
+    expect(rough(shaped)).toBeGreaterThan(rough(layout) * 1.3);
+    expect(Array.from(erodeRelief(surface, water, w, h, { scale: 3, stage: 'mountains', mountains: 0 }).heights)).toEqual(Array.from(layout.heights));
   });
 
   it('runs a history on hand-shaped land', () => {

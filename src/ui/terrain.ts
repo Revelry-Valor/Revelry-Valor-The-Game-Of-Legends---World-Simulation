@@ -3,7 +3,7 @@ import { Noise2D } from '../engine/noise';
 import { Rng } from '../engine/rng';
 import type { MapData } from '../engine/types';
 import { riverNext, riverPoint, type Point } from '../engine/geometry';
-import { erodeRelief, type ReliefField } from '../engine/erosion';
+import { erodeRelief, type ErosionOptions, type ReliefField } from '../engine/erosion';
 
 /** Pixels per tile in the painted terrain: enough for smooth coasts and soft biome edges. */
 export const TERRAIN_SCALE = 4;
@@ -105,6 +105,7 @@ const SATELLITE: Record<string, [number, number, number]> = {
 const ROCK: [number, number, number] = [112, 102, 92];
 const ALPINE: [number, number, number] = [128, 120, 100];
 const SNOW: [number, number, number] = [240, 242, 246];
+const SCREE: [number, number, number] = [176, 164, 140];
 const SHELF: [number, number, number] = [44, 120, 128];
 const MIDSEA: [number, number, number] = [22, 70, 106];
 const DEEPSEA: [number, number, number] = [10, 34, 66];
@@ -130,6 +131,7 @@ const DRAWN_SEA: [number, number, number] = [170, 202, 214];
 const DRAWN_DEEP: [number, number, number] = [140, 180, 202];
 const DRAWN_INK: [number, number, number] = [62, 58, 60];
 const DRAWN_SHADOW: [number, number, number] = [100, 90, 84];
+const DRAWN_ROCK: [number, number, number] = [168, 160, 150];
 const PAPER_SEA: [number, number, number] = [212, 205, 178];
 const INK: [number, number, number] = [72, 54, 38];
 
@@ -147,6 +149,52 @@ const LIGHT = (() => {
 
 /** Each map's land is carved once, however many times (and in whatever style) it is painted. */
 const carved = new WeakMap<MapData, ReliefField>();
+
+/** The land's surface for carving: a lake lies level with its shores, the sea at zero. */
+function landSurface(map: MapData): Float32Array {
+  const { width: w, height: h, size } = map;
+  const surface = new Float32Array(size);
+  for (let i = 0; i < size; i++) {
+    const e = map.elevation[i];
+    if (e >= 0) surface[i] = e;
+    else if (map.biome[i] === Biome.Lake) {
+      let sum = 0;
+      let n = 0;
+      const x = i % w;
+      const y = (i - x) / w;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          const yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h || map.elevation[yy * w + xx] < 0) continue;
+          sum += map.elevation[yy * w + xx];
+          n++;
+        }
+      }
+      surface[i] = n ? sum / n : 0;
+    }
+  }
+  return surface;
+}
+
+/**
+ * Carve a map's land into realistic terrain (see erodeRelief), on a grid finer than the tiles kept
+ * to a few hundred thousand cells, so even big maps carve in a second or two. With no options the
+ * result is kept, so the map is carved once however often it is painted.
+ */
+export function carveMap(map: MapData, opts?: ErosionOptions): ReliefField {
+  const cached = opts ? undefined : carved.get(map);
+  if (cached) return cached;
+  const water = new Uint8Array(map.size);
+  for (let i = 0; i < map.size; i++) water[i] = map.elevation[i] < 0 ? 1 : 0;
+  const relief = erodeRelief(landSurface(map), water, map.width, map.height, {
+    scale: clamp(Math.floor(Math.sqrt(400000 / map.size)), 2, 4),
+    seed: map.width * 7919 + map.height,
+    ...opts,
+  });
+  if (!opts) carved.set(map, relief);
+  return relief;
+}
 
 /**
  * Paints the land as one continuous surface rather than squares, in any of the map styles.
@@ -179,6 +227,10 @@ export class TerrainShader {
    * interpolated: the height every style is shaded from.
    */
   private reliefH: (fx: number, fy: number) => number;
+  /** What the erosion left (0..1): scoured rock, settled soil and scree, and running water. */
+  private wearAt: (fx: number, fy: number) => number;
+  private depositAt: (fx: number, fy: number) => number;
+  private flowAt: (fx: number, fy: number) => number;
   /** How rugged the land is around each point (0 flat .. 1 mountains), for tinting. */
   private ruggedAt: (fx: number, fy: number) => number;
   /** Ground colours of the drawn map. */
@@ -186,7 +238,8 @@ export class TerrainShader {
   private paperG: (fx: number, fy: number) => number;
   private paperB: (fx: number, fy: number) => number;
 
-  constructor(private map: MapData, private style: MapStyle = 'drawn') {
+  /** `given` paints from land already carved (with other erosion settings) instead of the map's own. */
+  constructor(private map: MapData, private style: MapStyle = 'drawn', given?: ReliefField) {
     const { width: w, height: h, size } = map;
     this.elev = sampler(map.elevation, w, h);
     this.temp = sampler(map.temperature, w, h);
@@ -228,41 +281,19 @@ export class TerrainShader {
         cav[y * w + x] = map.elevation[y * w + x] < 0 || n === 0 ? 0 : map.elevation[y * w + x] - sum / n;
       }
     }
-    // The surface: a lake lies level with its shores, the sea at zero.
-    const surface = new Float32Array(size);
-    for (let i = 0; i < size; i++) {
-      const e = map.elevation[i];
-      if (e >= 0) surface[i] = e;
-      else if (map.biome[i] === Biome.Lake) {
-        let sum = 0;
-        let n = 0;
-        const x = i % w;
-        const y = (i - x) / w;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const xx = x + dx;
-            const yy = y + dy;
-            if (xx < 0 || yy < 0 || xx >= w || yy >= h || map.elevation[yy * w + xx] < 0) continue;
-            sum += map.elevation[yy * w + xx];
-            n++;
-          }
-        }
-        surface[i] = n ? sum / n : 0;
-      }
-    }
+    const surface = landSurface(map);
     const at = (x: number, y: number) => surface[clamp(y, 0, h - 1) * w + clamp(x, 0, w - 1)];
-    // Carve the land with running water, on a grid finer than the tiles (kept to a few hundred
-    // thousand cells so even big maps carve in about a second).
-    const water = new Uint8Array(size);
-    for (let i = 0; i < size; i++) water[i] = map.elevation[i] < 0 ? 1 : 0;
-    let relief = carved.get(map);
-    if (!relief) {
-      relief = erodeRelief(surface, water, w, h, { scale: clamp(Math.floor(Math.sqrt(400000 / size)), 2, 4), seed: w * 7919 + h });
-      carved.set(map, relief);
-    }
+    const relief = given ?? carveMap(map);
     const scale = relief.scale;
     const rel = cubic(relief.heights, relief.width, relief.height);
     this.reliefH = (fx, fy) => rel((fx + 0.5) * scale - 0.5, (fy + 0.5) * scale - 0.5);
+    const onGrid = (a: Float32Array) => {
+      const f = linear(a, relief.width, relief.height);
+      return (fx: number, fy: number) => f((fx + 0.5) * scale - 0.5, (fy + 0.5) * scale - 0.5);
+    };
+    this.wearAt = onGrid(relief.wear);
+    this.depositAt = onGrid(relief.deposits);
+    this.flowAt = onGrid(relief.flow);
     const rug = new Float32Array(size);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -310,6 +341,17 @@ export class TerrainShader {
     if (a >= 0.06) return e;
     const n = edgeNoise.fbm(fx * 0.9 + 13, fy * 0.9 - 7, 4) * 0.011 + edgeNoise.noise(fx * 3.7, fy * 3.7) * 0.004 + edgeNoise.noise(fx * 11, fy * 11) * 0.0015;
     return e + n * (1 - a / 0.06);
+  }
+
+  /**
+   * The erosion maps at a point, eased for colouring: wear counts most on steep ground, deposits on
+   * gentle ground, and the flow map is taken in its stronger streams only.
+   */
+  private erosionAt(fx: number, fy: number, slope: number): [number, number, number] {
+    const wear = smooth(0.15, 0.8, this.wearAt(fx, fy)) * (0.4 + 0.6 * smooth(0.1, 0.6, slope));
+    const dep = smooth(0.2, 0.85, this.depositAt(fx, fy)) * (1 - 0.7 * smooth(0.3, 0.9, slope));
+    const flow = smooth(0.35, 0.95, this.flowAt(fx, fy));
+    return [wear, dep, flow];
   }
 
   /**
@@ -431,6 +473,16 @@ export class TerrainShader {
             r += (DRAWN_HIGH[0] - r) * high;
             g += (DRAWN_HIGH[1] - g) * high;
             b += (DRAWN_HIGH[2] - b) * high;
+            // What the erosion left, in light washes: grey scoured rock, pale screes and fans, and
+            // the gullies picked out a shade darker.
+            const [wr, dp, fl] = this.erosionAt(fx, fy, slope);
+            r += (DRAWN_ROCK[0] - r) * wr * 0.6 + (DRAWN_PAPER[0] - r) * dp * 0.35;
+            g += (DRAWN_ROCK[1] - g) * wr * 0.6 + (DRAWN_PAPER[1] - g) * dp * 0.35;
+            b += (DRAWN_ROCK[2] - b) * wr * 0.6 + (DRAWN_PAPER[2] - b) * dp * 0.35;
+            const gully = 1 - fl * 0.14;
+            r *= gully;
+            g *= gully;
+            b *= gully;
             const t = this.temp(fx, fy);
             const snow = Math.max(smooth(0.3, 0.6, this.iceAt(jx, jy)), smooth(0.17, 0.08, t - Math.max(0, hh - Math.max(0, e0)) * 0.4));
             r += (250 - r) * snow;
@@ -488,6 +540,24 @@ export class TerrainShader {
             r += (ROCK[0] - r) * steep;
             g += (ROCK[1] - g) * steep;
             b += (ROCK[2] - b) * steep;
+            // What the erosion left, as Gaea colours a landscape from its erosion maps: bare rock
+            // where water scoured it, pale scree and gravel fans where the load came to rest (soil,
+            // and so greener, down in the lowlands), and the gullies darker, wet and shaded.
+            const [wr, dp, fl] = this.erosionAt(fx, fy, slope);
+            r += (ROCK[0] - r) * wr * 0.75;
+            g += (ROCK[1] - g) * wr * 0.75;
+            b += (ROCK[2] - b) * wr * 0.75;
+            const low = smooth(0.4, 0.15, hh);
+            const dr = SCREE[0] + (r * 1.08 - SCREE[0]) * low;
+            const dg = SCREE[1] + (g * 1.12 - SCREE[1]) * low;
+            const db = SCREE[2] + (b * 1.0 - SCREE[2]) * low;
+            r += (dr - r) * dp * 0.55;
+            g += (dg - g) * dp * 0.55;
+            b += (db - b) * dp * 0.55;
+            const wet = 1 - fl * 0.22;
+            r *= wet;
+            g *= wet;
+            b *= wet;
             // Snow where it is cold enough, thinner on the steepest faces.
             const tp = t - Math.max(0, hh - Math.max(0, e0)) * 0.4;
             const glacier = smooth(0.3, 0.6, this.iceAt(jx, jy));
