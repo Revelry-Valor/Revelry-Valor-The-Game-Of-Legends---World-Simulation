@@ -5,7 +5,8 @@ import { BUILDINGS, LAND_USE_COLORS, LAND_USE_NAMES, TIERS } from '../engine/dat
 import { comfort } from '../engine/systems/development';
 import { ringRadius } from '../engine/systems/land';
 import { MAP_SIZES, defaultConfig } from '../engine/config';
-import { BIOMES } from '../engine/data/biomes';
+import { BIOMES, Biome } from '../engine/data/biomes';
+import { heightFeet } from './terrain';
 import { GOOD_NAMES, JOBS, RES_COUNT, RES_NAMES, Res, SECTOR_KEYS } from '../engine/data/economy';
 import { DEFAULT_RACES } from '../engine/data/races';
 import { ERA_NAMES, TECHS, TECH_BY_ID } from '../engine/data/techs';
@@ -80,7 +81,8 @@ let spaceHeld = false;
 
 const view: ViewState = {
   layer: 'political',
-  style: (['drawn', 'parchment', 'satellite'] as const).find((k) => k === store.get('style')) ?? 'drawn',
+  style: (['drawn', 'parchment', 'satellite', 'topo'] as const).find((k) => k === store.get('style')) ?? 'drawn',
+  contours: store.get('contours') === '1',
   resource: Res.Iron,
   showRoutes: true,
   showLabels: true,
@@ -371,6 +373,13 @@ resSel.addEventListener('change', () => {
   renderer.invalidate();
   drawMap();
 });
+const contourBox = $<HTMLInputElement>('t-contours');
+contourBox.checked = view.contours;
+contourBox.addEventListener('change', () => {
+  view.contours = contourBox.checked;
+  store.set('contours', view.contours ? '1' : '0');
+  drawMap();
+});
 for (const [id, key] of [['t-routes', 'showRoutes'], ['t-labels', 'showLabels'], ['t-ruins', 'showRuins'], ['t-caravans', 'showCaravans'], ['t-armies', 'showArmies'], ['t-roads', 'showRoads']] as const) {
   const box = $<HTMLInputElement>(id);
   box.checked = view[key];
@@ -390,10 +399,11 @@ const paperPane = () => {
   const pane = document.querySelector('.map-pane');
   pane?.classList.toggle('parchment', view.style === 'parchment');
   pane?.classList.toggle('drawn', view.style === 'drawn');
+  pane?.classList.toggle('topo', view.style === 'topo');
 };
 paperPane();
 styleSel.addEventListener('change', () => {
-  view.style = styleSel.value === 'parchment' ? 'parchment' : styleSel.value === 'satellite' ? 'satellite' : 'drawn';
+  view.style = (['parchment', 'satellite', 'topo'] as const).find((k) => k === styleSel.value) ?? 'drawn';
   store.set('style', view.style);
   paperPane();
   drawMap();
@@ -914,7 +924,7 @@ function renderTile(t: number): string {
       <h3>Land at ${t % m.width}, ${Math.floor(t / m.width)}</h3>
       <dl class="facts">
         <div><dt>Terrain</dt><dd>${BIOMES[m.biome[t]].name}</dd></div>
-        <div><dt>Elevation</dt><dd>${m.elevation[t] < 0 ? 'below sea' : `${Math.round(m.elevation[t] * 4000)} m`}</dd></div>
+        <div><dt>Elevation</dt><dd>${m.elevation[t] < 0 ? (m.biome[t] === Biome.Lake ? 'lake' : 'sea') : `${(Math.round(heightFeet(m, t % m.width, Math.floor(t / m.width)) / 10) * 10).toLocaleString('en-US')} ft`}</dd></div>
         <div><dt>Climate</dt><dd>${Math.round(-25 + m.temperature[t] * 55)} °C mean</dd></div>
         <div><dt>Rainfall</dt><dd>${Math.round(m.moisture[t] * 2000)} mm/yr</dd></div>
         <div><dt>River</dt><dd>${m.river[t] > 0 ? 'yes' : 'no'}</dd></div>

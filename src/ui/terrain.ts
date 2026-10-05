@@ -69,7 +69,7 @@ function linear(field: Float32Array, w: number, h: number) {
 const SEA_SHALLOW: [number, number, number] = [92, 150, 190];
 const SEA_DEEP: [number, number, number] = [30, 64, 112];
 
-export type MapStyle = 'drawn' | 'parchment' | 'satellite';
+export type MapStyle = 'drawn' | 'parchment' | 'satellite' | 'topo';
 
 /** Ground colours as seen from orbit: muted, darker greens and dun browns rather than map-book colours. */
 const SATELLITE: Record<string, [number, number, number]> = {
@@ -116,6 +116,56 @@ const DRAWN_INK: [number, number, number] = [62, 58, 60];
 const DRAWN_SHADOW: [number, number, number] = [100, 90, 84];
 const DRAWN_ROCK: [number, number, number] = [168, 160, 150];
 const PAPER_SEA: [number, number, number] = [212, 205, 178];
+
+/** Heights in feet: the map's height 1 stands this high above the sea. */
+export const FEET_PER_UNIT = 15000;
+/** Contour lines every this many feet, with every fourth (each 1,000 ft) drawn bold and labelled. */
+export const CONTOUR_FEET = 250;
+export const INDEX_EVERY = 4;
+/** A topographic map's layer tints, by height in feet: green lowlands up to white summits. */
+const TOPO_TINTS: [number, [number, number, number]][] = [
+  [0, [172, 206, 154]],
+  [1000, [196, 216, 160]],
+  [2500, [226, 226, 174]],
+  [4500, [232, 210, 160]],
+  [7000, [214, 182, 140]],
+  [9500, [190, 160, 130]],
+  [12000, [214, 206, 200]],
+  [14500, [248, 248, 250]],
+];
+const TOPO_SEA: [number, number, number] = [184, 216, 234];
+const TOPO_DEEP: [number, number, number] = [140, 184, 214];
+const TOPO_SHORE: [number, number, number] = [62, 112, 160];
+const CONTOUR_INK: [number, number, number] = [150, 100, 60];
+
+function topoTint(ft: number): [number, number, number] {
+  if (ft <= TOPO_TINTS[0][0]) return TOPO_TINTS[0][1];
+  for (let i = 1; i < TOPO_TINTS.length; i++) {
+    const [f1, c1] = TOPO_TINTS[i];
+    if (ft <= f1) {
+      const [f0, c0] = TOPO_TINTS[i - 1];
+      const t = (ft - f0) / (f1 - f0);
+      return [c0[0] + (c1[0] - c0[0]) * t, c0[1] + (c1[1] - c0[1]) * t, c0[2] + (c1[2] - c0[2]) * t];
+    }
+  }
+  return TOPO_TINTS[TOPO_TINTS.length - 1][1];
+}
+
+/** How much a pixel at a height (feet) is covered by contour lines, given feet per pixel: 0..1, and whether it is a bold one. */
+function contourAt(ft: number, perPixel: number): [number, boolean] {
+  if (ft < CONTOUR_FEET * 0.5 || perPixel <= 0) return [0, false];
+  const m = ft / CONTOUR_FEET;
+  const k = Math.round(m);
+  const off = (Math.abs(m - k) * CONTOUR_FEET) / perPixel; // pixels to the nearest line
+  const bold = k % INDEX_EVERY === 0;
+  const half = bold ? 0.75 : 0.4;
+  let a = clamp(1 - (off - half), 0, 1);
+  if (a <= 0) return [0, bold];
+  // Where the lines would crowd closer than a few pixels, only the bold ones are kept, then none.
+  const gap = CONTOUR_FEET / perPixel;
+  a *= bold ? clamp((gap * INDEX_EVERY - 3) / 3, 0, 1) : clamp((gap - 3) / 3, 0, 1);
+  return [a, bold];
+}
 const INK: [number, number, number] = [72, 54, 38];
 
 const smooth = (a: number, b: number, v: number) => {
@@ -158,6 +208,28 @@ function landSurface(map: MapData): Float32Array {
     }
   }
   return surface;
+}
+
+/** The carved land's height at a point (in tiles), in feet above the sea; 0 on the water. */
+export function heightFeet(map: MapData, fx: number, fy: number): number {
+  const r = map.carved;
+  if (!r) {
+    const t = Math.min(map.height - 1, Math.max(0, Math.round(fy))) * map.width + Math.min(map.width - 1, Math.max(0, Math.round(fx)));
+    return Math.max(0, map.elevation[t]) * FEET_PER_UNIT;
+  }
+  const x = clamp((fx + 0.5) * r.scale - 0.5, 0, r.width - 1);
+  const y = clamp((fy + 0.5) * r.scale - 0.5, 0, r.height - 1);
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(r.width - 1, x0 + 1);
+  const y1 = Math.min(r.height - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+  const H = r.heights;
+  const W = r.width;
+  if (r.water[y0 * W + x0] && r.water[y1 * W + x1] && r.water[y0 * W + x1] && r.water[y1 * W + x0]) return 0;
+  const v = (H[y0 * W + x0] * (1 - tx) + H[y0 * W + x1] * tx) * (1 - ty) + (H[y1 * W + x0] * (1 - tx) + H[y1 * W + x1] * tx) * ty;
+  return Math.max(0, v) * FEET_PER_UNIT;
 }
 
 /**
@@ -228,7 +300,7 @@ export class TerrainShader {
   private paperB: (fx: number, fy: number) => number;
 
   /** `given` paints from land already carved (with other erosion settings) instead of the map's own. */
-  constructor(private map: MapData, private style: MapStyle = 'drawn', given?: ReliefField) {
+  constructor(private map: MapData, private style: MapStyle = 'drawn', given?: ReliefField, private contours = false) {
     const { width: w, height: h, size } = map;
     this.elev = sampler(map.elevation, w, h);
     this.temp = sampler(map.temperature, w, h);
@@ -492,6 +564,8 @@ export class TerrainShader {
     const md = mask?.data;
     const parchment = this.style === 'parchment';
     const drawn = this.style === 'drawn';
+    const topo = this.style === 'topo';
+    const lines = this.contours || topo;
     for (let py = rowFrom; py < Math.min(H, rowTo); py++) {
       // Sampling coordinates put tile centres on whole numbers.
       const fy = y0 + (py + 0.5) * sy - 0.5;
@@ -525,7 +599,19 @@ export class TerrainShader {
         let b: number;
         if (lake || sea) {
           const depth = lake ? 0.05 : -e;
-          if (drawn) {
+          if (topo) {
+            // Shallows a shade lighter than open water, without the sea floor's mottling.
+            const k = smooth(0.0, 0.06, depth);
+            r = TOPO_SEA[0] + (TOPO_DEEP[0] - TOPO_SEA[0]) * k;
+            g = TOPO_SEA[1] + (TOPO_DEEP[1] - TOPO_SEA[1]) * k;
+            b = TOPO_SEA[2] + (TOPO_DEEP[2] - TOPO_SEA[2]) * k;
+            const line = lake ? this.lakeShoreInk(lsd, sx) : this.shoreInk(fx, fy, e, sx);
+            if (line > 0) {
+              r += (TOPO_SHORE[0] - r) * line;
+              g += (TOPO_SHORE[1] - g) * line;
+              b += (TOPO_SHORE[2] - b) * line;
+            }
+          } else if (drawn) {
             const k = smooth(0.0, 0.1, depth);
             r = DRAWN_SEA[0] + (DRAWN_DEEP[0] - DRAWN_SEA[0]) * k;
             g = DRAWN_SEA[1] + (DRAWN_DEEP[1] - DRAWN_SEA[1]) * k;
@@ -600,7 +686,20 @@ export class TerrainShader {
           const lambert = (nx * LIGHT[0] + ny * LIGHT[1] + LIGHT[2]) / nl;
           const shade = clamp(lambert / LIGHT[2], 0.35, 1.45);
           const ao = clamp(1 + this.cavAt(fx, fy) * 2.2, 0.72, 1.06);
-          if (drawn) {
+          if (topo) {
+            // A topographic map: layer tints by height, a light hill shade, and the contours.
+            [r, g, b] = topoTint(hh * FEET_PER_UNIT);
+            const sh = 1 + (shade - 1) * 0.45;
+            r *= sh;
+            g *= sh;
+            b *= sh;
+            const line = Math.max(this.shoreInk(fx, fy, e, sx), this.lakeShoreInk(lsd, sx));
+            if (line > 0) {
+              r += (TOPO_SHORE[0] - r) * line;
+              g += (TOPO_SHORE[1] - g) * line;
+              b += (TOPO_SHORE[2] - b) * line;
+            }
+          } else if (drawn) {
             // Watercolour washes on cream paper, browning with height, crisp relief shading.
             const paper = 1 + edgeNoise.noise(fx * 1.5 + 40, fy * 1.5) * 0.03 + edgeNoise.noise(fx * 7, fy * 7) * 0.015;
             const jx = fx + edgeNoise.noise(fx * 0.35, fy * 0.35) * 0.6;
@@ -719,6 +818,18 @@ export class TerrainShader {
             r *= k;
             g *= k;
             b *= k;
+          }
+          // Contour lines: one every 250 ft, every 1,000 ft bold, each about a pixel wide whatever
+          // the zoom, fading where they would crowd together on steep ground.
+          if (lines) {
+            const [c, bold] = contourAt(hh * FEET_PER_UNIT, Math.hypot(gx, gy) * sx * FEET_PER_UNIT);
+            if (c > 0) {
+              const ink = parchment ? INK : CONTOUR_INK;
+              const k = c * (bold ? 0.85 : 0.55) * (this.style === 'satellite' ? 0.8 : 1);
+              r += (ink[0] - r) * k;
+              g += (ink[1] - g) * k;
+              b += (ink[2] - b) * k;
+            }
           }
         }
         d[o] = r > 255 ? 255 : r < 0 ? 0 : r;
@@ -910,4 +1021,74 @@ function hypsometric(e: number): [number, number, number] {
     }
   }
   return HYPSO[HYPSO.length - 1][1];
+}
+
+/**
+ * Heights written on the bold contour lines, as a topographic map labels them: set along the line,
+ * reading uphill, spaced out across the view so they never crowd. Only close enough in to read.
+ */
+export function drawContourLabels(ctx: CanvasRenderingContext2D, map: MapData, view: { zoom: number; ox: number; oy: number }, cw: number, ch: number, color: string): void {
+  const z = view.zoom;
+  if (z < 7) return;
+  const step = CONTOUR_FEET * INDEX_EVERY;
+  const ftAt = (sx: number, sy: number) => heightFeet(map, view.ox + sx / z, view.oy + sy / z);
+  const grid = 170;
+  ctx.save();
+  ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  for (let gy = grid / 2; gy < ch; gy += grid) {
+    for (let gx = grid / 2 + ((gy / grid) % 2) * (grid / 2); gx < cw; gx += grid) {
+      const h0 = ftAt(gx, gy);
+      if (h0 < step * 0.5) continue;
+      // Walk uphill or downhill from the grid point to the nearest bold line.
+      const level = Math.round(h0 / step) * step;
+      if (level <= 0) continue;
+      const e = 2;
+      const dx = ftAt(gx + e, gy) - ftAt(gx - e, gy);
+      const dy = ftAt(gx, gy + e) - ftAt(gx, gy - e);
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-3) continue;
+      const ux = dx / len;
+      const uy = dy / len;
+      const dir = level > h0 ? 1 : -1;
+      let px = gx;
+      let py = gy;
+      let found = false;
+      for (let k = 0; k < 40; k++) {
+        const nx = px + ux * dir * 2;
+        const ny = py + uy * dir * 2;
+        const hn = ftAt(nx, ny);
+        if ((dir > 0 && hn >= level) || (dir < 0 && hn <= level)) {
+          px = nx;
+          py = ny;
+          found = true;
+          break;
+        }
+        px = nx;
+        py = ny;
+      }
+      if (!found || px < 20 || py < 12 || px > cw - 20 || py > ch - 12) continue;
+      // Lines too close together (steep ground) get no label.
+      const gx2 = ftAt(px + e, py) - ftAt(px - e, py);
+      const gy2 = ftAt(px, py + e) - ftAt(px, py - e);
+      const perPx = Math.hypot(gx2, gy2) / (2 * e);
+      if (perPx <= 0 || CONTOUR_FEET / perPx < 5) continue;
+      // Along the line, turned so the text reads uphill (tops of letters towards higher ground).
+      let ang = Math.atan2(gy2, gx2) + Math.PI / 2;
+      if (Math.cos(ang) < 0) ang += Math.PI;
+      const text = `${level.toLocaleString('en-US')} ft`;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(ang);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(250, 246, 236, 0.85)';
+      ctx.strokeText(text, 0, 0);
+      ctx.fillStyle = color;
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
 }

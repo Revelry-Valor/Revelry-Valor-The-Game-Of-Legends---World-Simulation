@@ -1162,3 +1162,6 @@ table.market td {
 .map-pane.drawn {
   background: #bcd5dc;
 }
+.map-pane.topo {
+  background: #c4dcea;
+}

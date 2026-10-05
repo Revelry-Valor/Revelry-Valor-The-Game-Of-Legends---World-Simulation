@@ -3,7 +3,7 @@ import type { MapData } from '../engine/types';
 import type { World } from '../engine/world';
 import { LAND_USE_COLORS } from '../engine/data/settlements';
 import { friendly } from '../engine/systems/diplomacy';
-import { TERRAIN_SCALE, TerrainShader, drawRiverCurves, riverCurves, type MapStyle } from './terrain';
+import { TERRAIN_SCALE, TerrainShader, drawContourLabels, drawRiverCurves, riverCurves, type MapStyle } from './terrain';
 import { paintOutline, paintRegions, pixelLabels, warpLabels } from './regions';
 import { sideColor } from '../engine/systems/landwars';
 import { pointAlong, waypoint, type Point } from '../engine/geometry';
@@ -31,6 +31,8 @@ export interface ViewState {
   showCaravans: boolean;
   showArmies: boolean;
   showRoads: boolean;
+  /** Contour lines (every 250 ft, bold and labelled every 1,000 ft) over the land, in any style. */
+  contours: boolean;
   /** Progress through the current month (0..1) for smooth movement in real time. */
   frac: number;
   /** Screen pixels per tile. */
@@ -255,11 +257,13 @@ export class MapRenderer {
   }
 
   private style: MapStyle = 'drawn';
+  private contours = false;
 
-  /** Switch between the satellite and parchment looks (repaints the land). */
-  setStyle(style: MapStyle): void {
-    if (style === this.style) return;
+  /** Switch map style, or contour lines on or off (repaints the land). */
+  setStyle(style: MapStyle, contours = this.contours): void {
+    if (style === this.style && contours === this.contours) return;
     this.style = style;
+    this.contours = contours;
     this.detailKey = '';
     this.paintBase();
     this.invalidate();
@@ -267,7 +271,7 @@ export class MapRenderer {
 
   private paintBase(): void {
     const map = this.world.map;
-    this.shader = new TerrainShader(map, this.style);
+    this.shader = new TerrainShader(map, this.style, undefined, this.contours);
     for (const c of [this.base, this.landMask]) {
       c.width = map.width * TERRAIN_SCALE;
       c.height = map.height * TERRAIN_SCALE;
@@ -300,7 +304,7 @@ export class MapRenderer {
       const H = Math.ceil(ch * res);
       const img = new ImageData(W, H);
       const mask = new ImageData(W, H);
-      this.shader ??= new TerrainShader(this.world.map, this.style);
+      this.shader ??= new TerrainShader(this.world.map, this.style, undefined, this.contours);
       const shader = this.shader;
       const step = 1 / (view.zoom * res);
       let row = 0;
@@ -626,11 +630,12 @@ export class MapRenderer {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.base, tx(0), ty(0), map.width * z, map.height * z);
-    this.setStyle(view.style);
+    this.setStyle(view.style, view.contours);
     const detail = this.detailFor(view, cw, ch);
     if (detail) ctx.drawImage(detail, 0, 0, cw, ch);
-    const riverInk = view.style === 'parchment' ? 'rgb(84, 98, 122)' : view.style === 'drawn' ? 'rgb(84, 128, 160)' : undefined;
+    const riverInk = view.style === 'parchment' ? 'rgb(84, 98, 122)' : view.style === 'drawn' ? 'rgb(84, 128, 160)' : view.style === 'topo' ? 'rgb(62, 112, 160)' : undefined;
     drawRiverCurves(ctx, this.rivers, view, { x0: view.ox, y0: view.oy, x1: view.ox + cw / z, y1: view.oy + ch / z }, riverInk);
+    if ((view.contours || view.style === 'topo') && view.layer === 'terrain') drawContourLabels(ctx, map, view, cw, ch, view.style === 'parchment' ? 'rgb(72, 54, 38)' : 'rgb(130, 84, 48)');
     const selected = view.selectedPolity >= 0 && world.polities[view.selectedPolity]?.alive ? view.selectedPolity : -1;
     const bonded = selected >= 0 ? this.bondedTo(selected) : new Set<number>();
     if (view.layer === 'political' || view.layer === 'nations' || view.layer === 'culture' || view.layer === 'race') this.drawRegions(ctx, view, cw, ch);
