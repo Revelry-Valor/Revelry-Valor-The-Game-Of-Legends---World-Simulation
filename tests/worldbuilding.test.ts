@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '../src/engine/config';
 import { TerrainEditor, strokeLevel } from '../src/engine/editor';
-import { erodeRelief } from '../src/engine/erosion';
+import { erodeRelief, traceRivers } from '../src/engine/erosion';
 import { Rng } from '../src/engine/rng';
 import { decodeHeights, encodeHeights, generateMap } from '../src/engine/worldgen';
 import { World } from '../src/engine/world';
@@ -246,6 +246,55 @@ describe('world building', () => {
     const one = mapOf({ seed: 3, terrain: { riverWater: 0 }, riverSources: [[sx, sy]] });
     expect(one.river[sy * one.width + sx]).toBeGreaterThan(0);
     expect(wet(one)).toBeGreaterThan(3);
+  });
+
+  it('fills wet basins into lakes that spill out in a river, and leaves dry ones without an outlet', () => {
+    // Land falling east to the sea, with a deep bowl in the west.
+    const w = 40;
+    const h = 30;
+    const surface = new Float32Array(w * h);
+    const sea = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (x >= 34) {
+          sea[i] = 1;
+          continue;
+        }
+        const bowl = Math.max(0, 1 - Math.hypot(x - 10, y - 15) / 7) * 0.25;
+        surface[i] = 0.05 + (34 - x) * 0.012 + Math.abs(y - 15) * 0.006 - bowl;
+      }
+    }
+    const lakeFlow = (wetness: number) => {
+      const relief = erodeRelief(surface, sea, w, h, { scale: 2, stage: 'layout' });
+      const moist = new Float32Array(w * h).fill(wetness);
+      const rain = moist.map((m) => 0.05 + m);
+      return traceRivers(relief, rain, moist, w, h, 6, 1);
+    };
+    const wet = lakeFlow(0.9);
+    expect(wet.lake[15 * w + 10]).toBe(1);
+    // A river runs on from the lake, all the way down to the coast.
+    let downstream = 0;
+    for (let x = 18; x < 34; x++) for (let y = 0; y < h; y++) if (wet.river[y * w + x] > 0) downstream++;
+    expect(downstream).toBeGreaterThan(8);
+    expect(wet.river[15 * w + 33] + wet.river[14 * w + 33] + wet.river[16 * w + 33]).toBeGreaterThan(0);
+    // In a desert the bowl keeps its water: a smaller lake or a salt flat, and no river out.
+    const dry = lakeFlow(0.05);
+    let lakeWet = 0;
+    let lakeDry = 0;
+    for (let i = 0; i < w * h; i++) {
+      lakeWet += wet.lake[i];
+      lakeDry += dry.lake[i];
+    }
+    expect(lakeDry).toBeLessThan(lakeWet);
+    // Just past the bowl's rim the wet land has its lake's river; the dry land has none.
+    const rim = (r: Float32Array) => {
+      let v = 0;
+      for (let y = 12; y <= 18; y++) for (let x = 17; x <= 19; x++) v += r[y * w + x];
+      return v;
+    };
+    expect(rim(wet.river)).toBeGreaterThan(0);
+    expect(rim(dry.river)).toBe(0);
   });
 
   it('runs a history on hand-shaped land', () => {

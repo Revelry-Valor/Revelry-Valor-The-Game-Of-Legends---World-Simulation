@@ -272,6 +272,8 @@ export class TerrainShader {
   private lakeSd!: (fx: number, fy: number) => number;
   /** Tiles within reach of a lake, so lake shores are only worked out where there could be one. */
   private nearLake!: Uint8Array;
+  /** Whether lake shores come from the carved land (else from the tiles, roughened). */
+  private fineLakes = false;
   /** What the erosion left (0..1): scoured rock, settled soil and scree, and running water. */
   /** How rugged the land is around each point (0 flat .. 1 mountains), for tinting. */
   private ruggedAt: (fx: number, fy: number) => number;
@@ -366,6 +368,23 @@ export class TerrainShader {
         }
       }
     }
+    if (relief.lake) {
+      // Every tile with lake water on it, and its neighbours.
+      const L = relief.lake;
+      for (let c = 0; c < L.length; c++) {
+        if (!L[c]) continue;
+        const X = c % relief.width;
+        const tx = Math.min(w - 1, Math.floor(X / scale));
+        const ty = Math.min(h - 1, Math.floor((c - X) / relief.width / scale));
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = tx + dx;
+            const yy = ty + dy;
+            if (xx >= 0 && yy >= 0 && xx < w && yy < h) near[yy * w + xx] = 1;
+          }
+        }
+      }
+    }
     this.nearLake = near;
     // Lakes take their outline from how far each tile centre is from the other side of the shore,
     // which blends into smooth shores of an even steepness (a lone lake tile becomes a round pond).
@@ -390,6 +409,13 @@ export class TerrainShader {
       sd[i] = wet ? Math.min(3, best - 0.5) : -Math.min(3, best - 0.5);
     }
     this.lakeSd = linear(sd, w, h);
+    // Lakes worked out on the carved land: their shores at its own fine resolution, so a lake
+    // fills its basin exactly.
+    if (relief.lakeSd) {
+      const fine = linear(relief.lakeSd, relief.width, relief.height);
+      this.lakeSd = (fx, fy) => fine((fx + 0.5) * scale - 0.5, (fy + 0.5) * scale - 0.5);
+      this.fineLakes = true;
+    }
     const rug = new Float32Array(size);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -564,7 +590,7 @@ export class TerrainShader {
         let lx = fx;
         let ly = fy;
         const tile = Math.min(h - 1, Math.max(0, Math.round(fy))) * w + Math.min(w - 1, Math.max(0, Math.round(fx)));
-        if (this.nearLake[tile]) {
+        if (this.nearLake[tile] && !this.fineLakes) {
           lx += edgeNoise.noise(fx * 0.45 + 17, fy * 0.45) * 0.5 + edgeNoise.noise(fx * 1.6, fy * 1.6 + 5) * 0.1;
           ly += edgeNoise.noise(fx * 0.45, fy * 0.45 + 17) * 0.5 + edgeNoise.noise(fx * 1.6 + 5, fy * 1.6) * 0.1;
         }

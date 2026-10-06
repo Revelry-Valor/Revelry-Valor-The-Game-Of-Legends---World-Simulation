@@ -182,66 +182,21 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
   const river = new Float32Array(size);
   for (const i of order) if (flow[i] >= riverThreshold) river[i] = flow[i];
 
-  // Lakes in wet depressions, salt flats in dry ones.
-  const saltFlat = new Uint8Array(size);
-  const hollow = (i: number) => filled[i] - elevation[i] > 0.012;
-  for (const i of order) {
-    const depth = filled[i] - elevation[i];
-    // A lone hollow a tile across is filled in, not made a pond: lakes need a basin.
-    let around = 0;
-    const x = i % w;
-    const y = (i / w) | 0;
-    for (let d = 0; d < 8; d++) {
-      const nx = x + DX[d];
-      const ny = y + DY[d];
-      if (nx >= 0 && ny >= 0 && nx < w && ny < h && hollow(ny * w + nx)) around++;
-    }
-    if (depth > 0.012 && (around >= 2 || depth > 0.05)) {
-      if (moisture[i] > 0.38) {
-        elevation[i] = -0.02;
-        river[i] = 0;
-      } else if (moisture[i] < 0.25) saltFlat[i] = 1;
-    }
-  }
-
-  // --- Carved terrain, and the rivers that run in it ----------------------
+  // --- Carved terrain, and the lakes and rivers on it ---------------------
   // The land is carved as terrain programs do (mountain shapes, valleys cut by water, rain and
-  // scree), on a grid finer than the tiles; then the rivers are found where water gathers on the
-  // carved land, so they run in its valleys, and those are the rivers the world lives by.
+  // scree), on a grid finer than the tiles. Then the water is worked out on the carved land: lakes
+  // where it pools in real basins, filled to their brims and spilling on (or, in dry lands, with no
+  // outlet), and rivers down the valley floors. Those are the lakes and rivers the world lives by.
   const sea = new Uint8Array(size);
-  const lakeTile = new Uint8Array(size);
   const surface = new Float32Array(size);
   const rainOn = new Float32Array(size);
-  const waterTile = new Uint8Array(size);
   for (let i = 0; i < size; i++) {
-    const e = elevation[i];
     rainOn[i] = 0.05 + moisture[i];
-    if (e >= 0) {
-      surface[i] = e;
-      continue;
-    }
-    waterTile[i] = 1;
-    if (!(e > -0.03 && wasLand[i])) {
-      sea[i] = 1;
-      continue;
-    }
-    lakeTile[i] = 1;
-    // A lake lies level with its shores.
-    let sum = 0;
-    let k = 0;
-    const x = i % w;
-    const y = (i - x) / w;
-    for (let d = 0; d < 8; d++) {
-      const nx = x + DX[d];
-      const ny = y + DY[d];
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h || elevation[ny * w + nx] < 0) continue;
-      sum += elevation[ny * w + nx];
-      k++;
-    }
-    surface[i] = k ? sum / k : 0;
+    if (elevation[i] < 0) sea[i] = 1;
+    else surface[i] = elevation[i];
   }
   const t = cfg.terrain ?? {};
-  const carved = erodeRelief(surface, waterTile, w, h, {
+  const carved = erodeRelief(surface, sea, w, h, {
     scale: cfg.terrainPreview ? 1 : clamp(Math.floor(Math.sqrt(400000 / size)), 2, 4),
     seed: cfg.seed,
     mountains: t.mountains,
@@ -249,7 +204,7 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     softness: t.softness,
     downcutting: t.downcutting,
   });
-  const rivers = traceRivers(carved, sea, lakeTile, rainOn, w, h, riverThreshold, cfg.seed, {
+  const rivers = traceRivers(carved, rainOn, moisture, w, h, riverThreshold, cfg.seed, {
     water: t.riverWater,
     width: t.riverWidth,
     depth: t.riverDepth,
@@ -257,6 +212,12 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     sources: cfg.riverSources,
   });
   river.set(rivers.river);
+  const saltFlat = rivers.salt;
+  for (let i = 0; i < size; i++) {
+    if (!rivers.lake[i] || elevation[i] < 0) continue;
+    elevation[i] = -0.02;
+    river[i] = 0;
+  }
 
   // --- Relief & biomes ---------------------------------------------------
   const landElev: number[] = [];

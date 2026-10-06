@@ -39,7 +39,7 @@ describe('land held by presence, and taken only by war', () => {
     let changed = 0;
     for (let t = 0; t < a.length; t++) if (a[t] !== -1 && b[t] !== -1 && a[t] !== b[t]) changed++;
     const wars = world.landWars.filter((w) => w.end !== null && w.end >= 120 * 12 && w.end < 122 * 12).length + world.wars.filter((w) => w.end !== null && w.end >= 120 && w.end <= 121).length;
-    const towns = world.history.filter((e) => e.year === 121 && /ceded|went over|declared|rose|joined|union|inherit|absorbed|seceded|broke away/i.test(e.text)).length;
+    const towns = world.history.filter((e) => e.year === 121 && /ceded|went over|declared|rose|joined|joining|allegiance|union|inherit|absorbed|seceded|broke away/i.test(e.text)).length;
     if (changed > 0) expect(wars + towns).toBeGreaterThan(0);
   });
 
