@@ -907,21 +907,26 @@ export function traceRivers(relief: ReliefField, rain: Float32Array, moisture: F
     if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
     force(Y * W + X);
   }
+  // Rivers the world lives by (towns, boats, trade) need real water; the map draws the whole tree
+  // of streams feeding them too, as Gaea's Rivers node does, each as wide as the water it carries.
   const isRiver = (c: number) => !isSea[c] && !isLake[c] && (q[c] >= thr || forced[c] === 1);
+  const drawThr = thr * 0.12;
+  const isStream = (c: number) => !isSea[c] && !isLake[c] && (q[c] >= drawThr || forced[c] === 1);
   // A forced stretch carries at least a small river's water.
-  const flowOf = (c: number) => Math.max(q[c], forced[c] ? thr * 0.6 : 0, threshold * 0.5);
+  const flowOf = (c: number) => Math.max(q[c], forced[c] ? thr * 0.6 : 0);
 
-  // Lines: from each river's source down its main stream, ending on the sea, a lake, or the river it joins.
+  // Lines: from each stream's source down its main stem, ending on the sea, a lake, or the stream
+  // it joins. Where two meet, the one carrying more water carries on and the other ends there.
   const main = new Int32Array(n).fill(-1);
   for (let c = 0; c < n; c++) {
-    if (!isRiver(c)) continue;
+    if (!isStream(c)) continue;
     const d = recv[c];
-    if (d < 0 || !isRiver(d)) continue;
+    if (d < 0 || !isStream(d)) continue;
     if (main[d] < 0 || flowOf(c) > flowOf(main[d])) main[d] = c;
   }
   const lines: { cells: number[]; end: number }[] = [];
   for (let c = 0; c < n; c++) {
-    if (!isRiver(c) || main[c] >= 0) continue;
+    if (!isStream(c) || main[c] >= 0) continue;
     const cells: number[] = [];
     let cur = c;
     let end = -1;
@@ -929,15 +934,15 @@ export function traceRivers(relief: ReliefField, rain: Float32Array, moisture: F
       cells.push(cur);
       const d = recv[cur];
       if (d < 0) break;
-      if (!isRiver(d) || main[d] !== cur) {
+      if (!isStream(d) || main[d] !== cur) {
         end = d;
         break;
       }
       cur = d;
     }
-    // Short tributaries are left off, so the map shows the rivers and their main branches.
-    const joins = end >= 0 && isRiver(end);
-    if (joins && !forced[c] && cells.length < S * 2.5) continue;
+    // Rills shorter than a tile are left off: they would only speckle the slopes.
+    const joins = end >= 0 && isStream(end);
+    if (joins && !forced[c] && cells.length < S) continue;
     lines.push({ cells, end });
   }
 
@@ -953,8 +958,8 @@ export function traceRivers(relief: ReliefField, rain: Float32Array, moisture: F
   }
 
   // --- 6. Channels cut into the valley floor, wider and deeper as the river grows.
-  const size = (v: number) => Math.sqrt(Math.max(v, threshold * 0.2) / threshold);
-  const wid = (v: number) => Math.min(0.32, Math.max(0.05, size(v) * 0.06)) * widthK;
+  const size = (v: number) => Math.sqrt(Math.max(v, threshold * 0.02) / threshold);
+  const wid = (v: number) => Math.min(0.32, Math.max(0.012, size(v) * 0.06)) * widthK;
   for (const { cells } of lines) {
     for (const c of cells) {
       const r = Math.max(1, wid(flowOf(c)) * S * 1.5);
@@ -999,7 +1004,9 @@ export function traceRivers(relief: ReliefField, rain: Float32Array, moisture: F
     for (const c of cells) {
       const t = tileOf(c);
       if (lake[t]) continue;
-      if (flowOf(c) > river[t]) river[t] = flowOf(c);
+      if (!isRiver(c)) continue;
+      const v = Math.max(flowOf(c), threshold * 0.5);
+      if (v > river[t]) river[t] = v;
     }
   }
   // Signed distance to the nearest lake shore, in tiles: positive on the water.

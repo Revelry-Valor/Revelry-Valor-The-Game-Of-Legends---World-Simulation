@@ -923,11 +923,12 @@ export function drawRiverCurves(ctx: CanvasRenderingContext2D, curves: Float32Ar
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = color;
-  // Batched by width so a few strokes draw them all.
-  const BINS = 6;
-  for (let bin = 0; bin < BINS; bin++) {
-    const lo = 0.06 + ((0.28 - 0.06) * bin) / BINS;
-    const hi = bin === BINS - 1 ? Infinity : 0.06 + ((0.28 - 0.06) * (bin + 1)) / BINS;
+  // Batched by width so a few strokes draw them all. Thin streams fade rather than shrink below
+  // a hairline, so the headwaters show as fine lines at any zoom.
+  const EDGES = [0, 0.02, 0.035, 0.05, 0.07, 0.1, 0.14, 0.19, 0.25, Infinity];
+  for (let bin = 0; bin < EDGES.length - 1; bin++) {
+    const lo = EDGES[bin];
+    const hi = EDGES[bin + 1];
     ctx.beginPath();
     let any = false;
     for (let k = 0; k < curves.length; k += 7) {
@@ -941,9 +942,12 @@ export function drawRiverCurves(ctx: CanvasRenderingContext2D, curves: Float32Ar
       any = true;
     }
     if (!any) continue;
-    ctx.lineWidth = Math.max(1.1, ((lo + Math.min(hi, 0.3)) / 2) * z);
+    const px = ((lo + Math.min(hi, 0.3)) / 2) * z;
+    ctx.lineWidth = Math.max(0.7, px);
+    ctx.globalAlpha = Math.min(1, 0.35 + px * 0.6);
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 }
 
 /**
