@@ -33,7 +33,7 @@ CLI options: `--seed`, `--years`, `--size small|medium|large|huge`, `--magic 0|1
     2. **River valleys.** Water gathers into streams that cut down by how much they carry and how steep they run, so valleys branch up into the ranges and leave sharp crests between them.
     3. **Rain.** Raindrops run downhill one by one. Each scours soil where it speeds up and drops it where it slows, leaving gullies on the slopes and soil and gravel fans on the valley floors.
     4. **Crumbling slopes.** Slopes too steep to stand slump into scree at their foot.
-    5. **Lakes and rivers**, worked out together on the carved land as water really behaves. Every hollow is found with the height at which it would spill over; small ones are filled in. A real basin collects the rain of all the land draining into it. Where that is more than its surface loses to evaporation, it fills to the brim and spills out through its lowest gap, and a river carries on from there to the next lake or the sea. In a dry land it fills only until evaporation matches the inflow: a lake with no outlet, or a salt flat. Rivers run where enough water gathers, always the steepest way down the carved land, so they keep to the valley floors. As Gaea draws them, the whole branching tree is shown: hairline streams high in the hills join into creeks and then into the main rivers, each drawn as wide as the water it carries (rills under a tile long are left off). Only the bigger rivers count for the world itself: towns, boats and trade follow those. Marked **river sources** start a river where you choose. Rivers cut their channels into the land, wider and deeper downstream, and wind a little on flat ground; **Downcutting** cuts them through rises so they keep falling. Gaea's Rivers node handles the river side of this; the lakes filling and spilling are this simulation's own. These are the lakes and rivers the world lives by: towns, river trade, boats, fishing and floods all follow them.
+    5. **Lakes and rivers.** In a world made in the editor, these are only the ones you draw (see Shaping the land). Worlds generated from a seed alone (tests and the command line) work them out by themselves, together on the carved land as water really behaves. Every hollow is found with the height at which it would spill over; small ones are filled in. A real basin collects the rain of all the land draining into it. Where that is more than its surface loses to evaporation, it fills to the brim and spills out through its lowest gap, and a river carries on from there to the next lake or the sea. In a dry land it fills only until evaporation matches the inflow: a lake with no outlet, or a salt flat. Rivers run where enough water gathers, always the steepest way down the carved land, so they keep to the valley floors. As Gaea draws them, the whole branching tree is shown: hairline streams high in the hills join into creeks and then into the main rivers, each drawn as wide as the water it carries (rills under a tile long are left off). Only the bigger rivers count for the world itself: towns, boats and trade follow those. Marked **river sources** start a river where you choose. Rivers cut their channels into the land, wider and deeper downstream, and wind a little on flat ground; **Downcutting** cuts them through rises so they keep falling. Gaea's Rivers node handles the river side of this; the lakes filling and spilling are this simulation's own. These are the lakes and rivers the world lives by: towns, river trade, boats, fishing and floods all follow them.
 
     Like Gaea, the erosion leaves three maps: **wear** (where the land was scoured), **deposits** (where the soil came to rest) and **flow** (where the water ran). The map colours the ground from them: bare rock where it wore away, pale scree and gravel below (soil, and greener, in the lowlands), and darker gullies along the streams. Coasts and lakes stay where they are. The land is carved once, when the world is made (a second or two; the editor carves again after each stroke), and every style is shaded from it. Nothing is carved while history runs. The default carving is mountain shape 1.3, erosion strength 1.4, rock softness 0.6 and downcutting 0.7.
   - *Parchment* draws the same land in the colours of an old map: paper, an inked coastline and lake shores, ripple lines along the shore, soft sepia relief, and forests hatched in fine diagonal ink lines.
@@ -83,22 +83,42 @@ Behind the scenes the simulation still keeps its books on a fine grid of small p
 
 ## Shaping the land
 
-**Create world** in the top bar (or **Setup → Shape the land…**) opens the world editor. Shaping is done with one terrain tool. Drag on the map to use it. Right-drag or hold Space to pan, and scroll to zoom. `[` and `]` change the width, and Ctrl+Z undoes a stroke.
+Worlds are made by hand. A new world starts as a blank ocean and opens in the world editor; **Create world** in the top bar (or **Setup → Shape the land…**) opens it on the current land. The editor has three parts, and you can move between them at any time. Drag on the map to use a brush. Right-drag or hold Space to pan, and scroll to zoom. `[` and `]` change the brush size, and Ctrl+Z undoes.
 
-| Function | What it does |
+**Land & Sea** draws the outline of the world, as a flat map program like Wonderdraft does. **Brush size** sets how big the brush is, and **Roughness** how ragged its edge: smooth and rounded at 0, fractal coasts towards 1.
+
+| Brush | What it does |
 |---|---|
-| Raise | Lift the ground. Out of the sea it makes land. Keep going over it and it builds hills, then a mountain range. Drag along the line you want the range to follow. When you let go, the land is shaped into peaks and carved by water, leaving a sharp crest with spurs and valleys running down to the floor. |
-| Lower | Sink the ground: cut valleys and passes, or drown land to make coves, inlets and seas. |
-| Flatten | Level the ground to the height where the stroke began: plateaus, mesas and table lands, with steep edges. Raise a block first, then flatten its top. |
-| River source | Click (or drag) where a river should rise, as Gaea paints headwaters. Each runs downhill to the sea or a lake, joining any river it meets. Undo or **Clear river sources** takes them away. |
+| Land | Paint land out of the sea: continents, islands, peninsulas. New land is low and flat, ready to shape. |
+| Sea | Paint the sea back over land: coves, bays, straits, inland seas. |
+| Shallows | Shallow water: reefs, banks, sounds and lagoons. |
+| Deep sea | Deepen the sea: ocean basins and trenches. |
 
-**Width** sets how wide the tool is. Use a wide tool for broad ranges and big landmasses, and a narrow one for thin, sharp ridges. **Strength** sets how much each pass lifts, sinks or levels the ground.
+**Terrain** shapes the land. Every raising tool has a **Height limit** (in feet) that nothing it builds rises above, and the lowering tools a **Lowest height** they never cut below.
 
-**You see the world as it will be while you draw**, the way Gaea previews a terrain. As you drag, the land is rebuilt a few times a second at a quicker preview resolution (carved, with its rivers, lakes, colours and contours, in the map style you choose in the editor). When you let go it is built again at full detail. The building runs on a background thread, so drawing never waits for it, and the panel says whether you are looking at a preview or full detail.
+| Brush | What it does |
+|---|---|
+| Mountains | Drag along a range: a sharp crest, rising with each pass up to the height limit. |
+| Hills | Rolling, uneven hill country. |
+| Raise / Lower | Lift or sink the ground gently and evenly. |
+| Plateau | Level the ground to the height where the stroke began: plateaus, mesas, table lands. |
+| Cliff | Raises the land on the left of your stroke, dropping sheer along the line you draw. **Cliff height** sets how tall. |
+| Smooth | Softens the land: gentler slopes, rounded ridges. |
+| Valley | Cuts a V-shaped valley along the stroke, never below the lowest height or under the sea. |
 
-**Terrain** sliders set how the land is carved: Mountain shape, Erosion strength, Rock softness and Downcutting (defaults 1.3, 1.4, 0.6, 0.7). **Rivers** sliders are Gaea's: Water (more water, more rivers), Width, Depth and Downcutting.
+Erosion always works on the land you shape, as described above: mountain shapes, valleys and gullies carved by water, screes. Its settings are under **Erosion** on the Terrain tab. **Only the land you change is worked again.** The map is carved in pieces 32 tiles across, each with a margin of land around it and blended into its neighbours, so a stroke re-carves and repaints only the pieces it touches (a fraction of a second) and the rest of the map stays exactly as it was. Carving the whole map the same way gives the same land, so the world you use is the world you drew.
 
-After every stroke the climate, rivers, lakes and biomes are rebuilt for the new land. The editor can show terrain, temperature, rainfall or currents, and it draws latitude lines every 15°. You can move the map on the globe or change the tilt and see the climate follow. Start from a blank ocean or freshly generated land. **Use this world** saves the land with the world's settings and starts a new history on it. The land is kept with the settings until you untick "Keep the hand-shaped land" in Setup. On a different map size, it is resampled to fit.
+**Water** puts in rivers and lakes. A world made in the editor has only the rivers and lakes you draw.
+
+| Tool | What it does |
+|---|---|
+| River | Click where the river rises, then click each point it should pass. It ends when a point lands on the sea, a lake or another river (where it becomes a tributary), or when you press Enter. Between your points it finds the most natural way: through low ground and along valley floors, as little uphill as can be. Where the land is in the way it is cut through, its bed always falling, with a gorge as deep as the cut needs. It grows downstream and as rivers join it. Esc cancels; click a river to select it, and Delete removes it. |
+| Lake | Click a low spot: the hollow fills with water to where it would spill over. **Water level** sets how high it stands (100% is the brim). Click a lake to select it. Lakes keep to the hollows as you shaped them, so erosion never silts them up. |
+| Add water / Remove water | Paint lake water in (widen a lake, make a pond), or paint land back over it (islands, headlands). |
+
+**River width** and **Channel depth** set how big rivers are drawn and how deep their channels are cut.
+
+The editor can show terrain, temperature, rainfall or currents in any map style, with contours, and it draws latitude lines every 15°. Under **Place on the globe** you can move the map north or south or change the tilt and see the climate follow. **Use this world** saves the land and water with the world's settings and starts a new history on it. They are kept with the settings until you untick "Keep this land" in Setup (which starts again from a blank ocean). On a different map size, the land is resampled to fit.
 
 ### Climate
 
@@ -119,6 +139,8 @@ src/engine/            deterministic simulation; no DOM, runs in Node or the bro
   world.ts             World state and the yearly tick
   worldgen.ts          terrain, latitude & climate, ocean currents, lakes, carved land and its rivers, biomes, resources; height codes for hand-shaped land
   systems/landwars.ts  land wars involving clans, warbands, occupation of land and the peace that settles it
+  terrainbuild.ts      carving the map in pieces, so only what changed is carved again
+  water.ts             rivers and lakes drawn by hand: routes, gorges, lake fills
   erosion.ts           heightmap to landscape: mountain shapes, river valleys, raindrop erosion, crumbling slopes; wear, deposit and flow maps; rivers traced on the carved land
   geometry.ts          continuous positions: settlement sites, river courses, waypoints, smooth paths
   editor.ts            the terrain tool (raise, lower, flatten) with undo

@@ -1,7 +1,9 @@
 import { BIOMES, Biome, Relief } from './data/biomes';
 import { RES_COUNT, Res } from './data/economy';
 import { MinHeap } from './heap';
-import { erodeRelief, traceRivers } from './erosion';
+import { traceRivers } from './erosion';
+import { ChunkCarver, copyField, type Box } from './terrainbuild';
+import { applyWater } from './water';
 import { Noise2D } from './noise';
 import type { Rng } from './rng';
 import type { MapData, WorldConfig } from './types';
@@ -29,7 +31,11 @@ export function isWaterBiome(b: number): boolean {
  * rainfall with rain shadows → priority-flood drainage → lakes and salt flats → the land carved
  * into terrain (mountain shapes, erosion) and rivers traced along its valleys → Whittaker-style biomes → geology-driven resource deposits.
  */
-export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
+/**
+ * `build` lets the world editor carve only what changed: a carver kept between builds, and the
+ * box of tiles that changed since the last one (null: everything).
+ */
+export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: ChunkCarver; dirty?: Box | null }): MapData {
   const w = cfg.width;
   const h = cfg.height;
   const size = w * h;
@@ -196,25 +202,39 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     else surface[i] = elevation[i];
   }
   const t = cfg.terrain ?? {};
-  const carved = erodeRelief(surface, sea, w, h, {
-    scale: cfg.terrainPreview ? 1 : clamp(Math.floor(Math.sqrt(400000 / size)), 2, 4),
-    seed: cfg.seed,
-    mountains: t.mountains,
-    erosion: t.erosion,
-    softness: t.softness,
-    downcutting: t.downcutting,
-  });
-  const rivers = traceRivers(carved, rainOn, moisture, w, h, riverThreshold, cfg.seed, {
-    water: t.riverWater,
-    width: t.riverWidth,
-    depth: t.riverDepth,
-    downcutting: t.riverDowncutting,
-    sources: cfg.riverSources,
-  });
-  river.set(rivers.river);
-  const saltFlat = rivers.salt;
+  const carver = build?.carver && build.carver.w === w && build.carver.h === h ? build.carver : carverFor(cfg);
+  const base = carver.carve(surface, sea, build?.carver === carver ? build.dirty : null);
+  // The water works on a copy, so the carved land can be kept for the next build.
+  const carved = copyField(base);
+  let saltFlat: Uint8Array = new Uint8Array(size);
+  let riverPaths: Float32Array[] | undefined;
+  let lakeInfo: MapData['lakeInfo'];
+  let curves: Float32Array;
+  let lakeTiles: Uint8Array;
+  if (cfg.water) {
+    // Water drawn by hand: only the rivers and lakes put there.
+    const wr = applyWater(carved, w, h, cfg.water, riverThreshold, { width: t.riverWidth, depth: t.riverDepth, seed: cfg.seed }, surface);
+    river.fill(0);
+    river.set(wr.river);
+    curves = wr.curves;
+    lakeTiles = wr.lake;
+    riverPaths = wr.paths;
+    lakeInfo = wr.lakes;
+  } else {
+    const rivers = traceRivers(carved, rainOn, moisture, w, h, riverThreshold, cfg.seed, {
+      water: t.riverWater,
+      width: t.riverWidth,
+      depth: t.riverDepth,
+      downcutting: t.riverDowncutting,
+      sources: cfg.riverSources,
+    });
+    river.set(rivers.river);
+    saltFlat = rivers.salt;
+    curves = rivers.curves;
+    lakeTiles = rivers.lake;
+  }
   for (let i = 0; i < size; i++) {
-    if (!rivers.lake[i] || elevation[i] < 0) continue;
+    if (!lakeTiles[i] || elevation[i] < 0) continue;
     elevation[i] = -0.02;
     river[i] = 0;
   }
@@ -374,8 +394,23 @@ export function generateMap(cfg: WorldConfig, rng: Rng): MapData {
     traffic: new Float32Array(size),
     riverThreshold,
     carved,
-    riverCurves: rivers.curves,
+    riverCurves: curves,
+    riverPaths,
+    lakeInfo,
   };
+}
+
+/** A carver for a world's land, with its carving settings. */
+export function carverFor(cfg: WorldConfig): ChunkCarver {
+  const t = cfg.terrain ?? {};
+  return new ChunkCarver(cfg.width, cfg.height, {
+    scale: clamp(Math.floor(Math.sqrt(400000 / (cfg.width * cfg.height))), 2, 4),
+    seed: cfg.seed,
+    mountains: t.mountains,
+    erosion: t.erosion,
+    softness: t.softness,
+    downcutting: t.downcutting,
+  });
 }
 
 function classifyBiome(t: number, m: number, e: number, relief: number): Biome {

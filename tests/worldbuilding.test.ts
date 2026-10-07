@@ -107,7 +107,7 @@ describe('world building', () => {
     // The middle of the stroke rises most: a range is highest along its spine.
     expect(hts[50 * W + 80]).toBeGreaterThan(hts[55 * W + 80]);
     ed.beginStroke();
-    for (let k = 0; k < 6; k++) ed.dab(80, 50, { tool: 'lower', radius: 3, strength: 1 });
+    for (let k = 0; k < 12; k++) ed.dab(80, 50, { tool: 'lower', radius: 3, strength: 1, floor: -1 });
     expect(hts[50 * W + 80]).toBeLessThan(0);
     ed.undoStroke();
     expect(hts[50 * W + 80]).toBeGreaterThanOrEqual(0);
@@ -118,9 +118,9 @@ describe('world building', () => {
     expect(hts[20 * W + 34]).toBeCloseTo(-0.2, 5);
     ed.beginStroke();
     for (let k = 0; k < 6; k++) ed.dab(70, 50, raise);
-    const level = strokeLevel('flatten', ed.heightAt(70, 50))!;
+    const level = strokeLevel('plateau', ed.heightAt(70, 50))!;
     expect(strokeLevel('raise', 0.5)).toBeUndefined();
-    for (let k = 0; k < 5; k++) ed.dab(70, 50, { tool: 'flatten', radius: 4, strength: 1, level });
+    for (let k = 0; k < 5; k++) ed.dab(70, 50, { tool: 'plateau', radius: 4, strength: 1, level });
     // However often the tool passes, the top settles level: a plateau.
     expect(hts[50 * W + 70]).toBeCloseTo(level, 2);
     expect(hts[50 * W + 69]).toBeCloseTo(level, 2);

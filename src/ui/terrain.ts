@@ -608,7 +608,7 @@ export class TerrainShader {
           const depth = lake ? 0.05 : -e;
           if (topo) {
             // Shallows a shade lighter than open water, without the sea floor's mottling.
-            const k = smooth(0.0, 0.02, depth);
+            const k = smooth(0.0, 0.35, depth);
             r = TOPO_SEA[0] + (TOPO_DEEP[0] - TOPO_SEA[0]) * k;
             g = TOPO_SEA[1] + (TOPO_DEEP[1] - TOPO_SEA[1]) * k;
             b = TOPO_SEA[2] + (TOPO_DEEP[2] - TOPO_SEA[2]) * k;
@@ -619,7 +619,7 @@ export class TerrainShader {
               b += (TOPO_SHORE[2] - b) * line;
             }
           } else if (drawn) {
-            const k = smooth(0.0, 0.1, depth);
+            const k = smooth(0.0, 0.4, depth);
             r = DRAWN_SEA[0] + (DRAWN_DEEP[0] - DRAWN_SEA[0]) * k;
             g = DRAWN_SEA[1] + (DRAWN_DEEP[1] - DRAWN_SEA[1]) * k;
             b = DRAWN_SEA[2] + (DRAWN_DEEP[2] - DRAWN_SEA[2]) * k;

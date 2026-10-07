@@ -46,10 +46,12 @@ export interface ErosionOptions {
   downcutting?: number;
   /** Raindrops per land cell (of the half-fine grid the rain falls on). */
   rain?: number;
+  /** Where this piece of land sits on the whole map, in tiles (so a piece carves like the whole). */
+  offset?: [number, number];
 }
 
 /** A min-heap of cell indices ordered by height. */
-class CellHeap {
+export class CellHeap {
   private idx: Int32Array;
   private key: Float64Array;
   size = 0;
@@ -186,7 +188,7 @@ function layOut(surface: Float32Array, water: Uint8Array, w: number, h: number, 
  * nodes do: Voronoi pyramids at three sizes, warped so their edges wander, the smaller ones riding
  * on the bigger ones' flanks. Low ground is left alone; the higher the land, the more mountainous.
  */
-function addMountains(g: Grid, s: number, rng: Rng, amount: number): void {
+function addMountains(g: Grid, s: number, rng: Rng, amount: number, ox = 0, oy = 0): void {
   if (amount <= 0) return;
   const { hts, fixed, W, H } = g;
   const warp = new Noise2D(rng.fork('mountain-warp'));
@@ -198,13 +200,16 @@ function addMountains(g: Grid, s: number, rng: Rng, amount: number): void {
       if (fixed[i]) continue;
       const v = hts[i];
       const mass = smooth(0.12, 0.5, v);
+      // Where on the whole map this cell is (in cells), so pieces carved apart line up.
+      const AX = X + ox * s;
+      const AY = Y + oy * s;
       if (mass <= 0) {
-        hts[i] = v + grain.noise(X * 0.6 / s, Y * 0.6 / s) * 0.003;
+        hts[i] = v + grain.noise(AX * 0.6 / s, AY * 0.6 / s) * 0.003;
         continue;
       }
       // In tiles, warped.
-      const tx = (X + 0.5) / s + warp.fbm(X * 0.05 / s, Y * 0.05 / s, 3) * 3;
-      const ty = (Y + 0.5) / s + warp.fbm(X * 0.05 / s + 31, Y * 0.05 / s - 17, 3) * 3;
+      const tx = (AX + 0.5) / s + warp.fbm(AX * 0.05 / s, AY * 0.05 / s, 3) * 3;
+      const ty = (AY + 0.5) / s + warp.fbm(AX * 0.05 / s + 31, AY * 0.05 / s - 17, 3) * 3;
       let m = 0;
       let amp = 1;
       let f = 1 / 8;
@@ -439,7 +444,7 @@ export function erodeRelief(surface: Float32Array, water: Uint8Array, w: number,
   const flow = new Float32Array(n);
   const done = (): ReliefField => ({ heights: hts, wear, deposits, flow, water: fixed, width: W, height: H, scale: s });
   if (stage === 'layout') return done();
-  addMountains(g, s, rng.fork('mountains'), opts.mountains ?? TERRAIN_DEFAULTS.mountains);
+  addMountains(g, s, rng.fork('mountains'), opts.mountains ?? TERRAIN_DEFAULTS.mountains, opts.offset?.[0] ?? 0, opts.offset?.[1] ?? 0);
   if (stage === 'mountains' || strength <= 0) return done();
 
   // 3 to 5 happen first on a grid half as fine: water gathers from further, the raindrops cut

@@ -1,3 +1,4 @@
+import type { WaterPlan } from './water';
 import type { ReliefField } from './erosion';
 import type { BiomeKey } from './data/biomes';
 import type { SectorKey } from './data/economy';
@@ -131,6 +132,8 @@ export interface WorldConfig {
   };
   /** Carve the land at the tiles' own resolution: a quick, coarser preview (the world editor while you draw). */
   terrainPreview?: boolean;
+  /** Rivers and lakes drawn by hand in the world editor. When set, the world has only these (no rivers or lakes of its own). */
+  water?: WaterPlan;
   /** Where rivers must rise, in tiles: painted with the world editor's River source tool. */
   riverSources?: [number, number][];
   races: RaceDef[];
@@ -189,6 +192,10 @@ export interface MapData {
   carved?: ReliefField;
   /** The rivers as smooth curves along the carved valleys (see traceRivers). */
   riverCurves?: Float32Array;
+  /** Hand-drawn rivers' courses, in tiles (x, y pairs), in the order they were drawn. */
+  riverPaths?: Float32Array[];
+  /** Hand-set lakes: water level, and the level their hollow spills at. */
+  lakeInfo?: { level: number; spill: number; bottom: number }[];
 }
 
 export interface TradeLink {

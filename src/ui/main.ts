@@ -7,6 +7,7 @@ import { ringRadius } from '../engine/systems/land';
 import { MAP_SIZES, defaultConfig } from '../engine/config';
 import { BIOMES, Biome } from '../engine/data/biomes';
 import { heightFeet } from './terrain';
+import { decodeHeights, encodeHeights } from '../engine/worldgen';
 import { GOOD_NAMES, JOBS, RES_COUNT, RES_NAMES, Res, SECTOR_KEYS } from '../engine/data/economy';
 import { DEFAULT_RACES } from '../engine/data/races';
 import { ERA_NAMES, TECHS, TECH_BY_ID } from '../engine/data/techs';
@@ -21,7 +22,7 @@ import { pactsBetween, sameConfederation } from '../engine/systems/diplomacy';
 import { CARAVAN_COLOR, MapRenderer, type MapLayer, type ViewState } from './render';
 import { mountTechTree, techDetail } from './techtree';
 import { TRAITS, TRAIT_BY_ID } from '../engine/data/traits';
-import { BRUSHES, type BrushTool } from '../engine/editor';
+import { BRUSHES, type BrushTool, type ToolGroup } from '../engine/editor';
 import { RIVER_DEFAULTS, TERRAIN_DEFAULTS } from '../engine/erosion';
 import { WorldEditor, type EditorView } from './worldeditor';
 
@@ -110,12 +111,24 @@ function loadConfig(): WorldConfig {
   const saved = store.get('config');
   if (saved) {
     try {
-      return { ...defaultConfig(), ...JSON.parse(saved) };
+      return withLand({ ...defaultConfig(), ...JSON.parse(saved) });
     } catch {
       /* ignore corrupt config */
     }
   }
-  return defaultConfig({ seed: Math.floor(Math.random() * 1e6) });
+  return withLand(defaultConfig({ seed: Math.floor(Math.random() * 1e6) }));
+}
+
+/** Worlds are made by hand: one with no land drawn yet starts as a blank ocean, with no water features. */
+function withLand(c: WorldConfig): WorldConfig {
+  if (c.heightmap) return c;
+  return { ...c, heightmap: encodeHeights(new Float32Array(c.width * c.height).fill(-0.12), c.width, c.height), water: { rivers: [], lakes: [], edits: [] } };
+}
+
+/** Whether a world has no land at all yet. */
+function blankWorld(c: WorldConfig): boolean {
+  const hts = c.heightmap ? decodeHeights(c.heightmap, c.width, c.height) : null;
+  return !hts || hts.every((v) => v < 0);
 }
 
 // ------------------------------------------------------------------ map
@@ -170,6 +183,8 @@ canvas.addEventListener('pointerdown', (e) => {
   if (editing && e.button === 0 && !spaceHeld) {
     editing.begin(...tileAt(e));
     drawMap();
+    // Rivers and lakes are placed by clicks: show the panel for what was picked or drawn.
+    if (!editing.painting) renderPanel(true);
     return;
   }
   drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false };
@@ -589,6 +604,22 @@ document.addEventListener('keydown', (e) => {
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) {
       e.preventDefault();
       if (editing.undo()) {
+        drawMap();
+        renderPanel(true);
+      }
+    } else if (!typing && e.key === 'Enter' && editing.pending) {
+      e.preventDefault();
+      editing.finishRiver();
+      drawMap();
+      renderPanel(true);
+    } else if (!typing && e.key === 'Escape' && (editing.pending || editing.selected)) {
+      editing.cancelRiver();
+      editing.selected = null;
+      drawMap();
+      renderPanel(true);
+    } else if (!typing && (e.key === 'Delete' || e.key === 'Backspace') && editing.selected) {
+      e.preventDefault();
+      if (editing.deleteSelected()) {
         drawMap();
         renderPanel(true);
       }
@@ -1075,7 +1106,6 @@ function renderSetup(): string {
       </div>
       <label class="field" for="s-size"><span>Map size</span><select id="s-size">${Object.entries(MAP_SIZES).map(([k, [w, h]]) => `<option value="${k}" ${k === sizeKey ? 'selected' : ''}>${k} (${w}×${h})</option>`).join('')}</select></label>
       <label class="field" for="s-start"><span>Peoples begin as</span><select id="s-start"><option value="bands" ${cfg.start !== 'settlements' ? 'selected' : ''}>Wandering clans of hunters and gatherers</option><option value="settlements" ${cfg.start === 'settlements' ? 'selected' : ''}>Settled villages</option></select><small>Each clan's tribes roam until they find good hunting and foraging land, claim it as the clan's hunting grounds and defend it, split as they grow to claim more, fight other clans for land, and settle down when farming or the land makes it pay (each race's lifestyle decides how readily).</small></label>
-      ${num('s-land', 'Land', cfg.landFraction, 0.2, 0.75, 0.01, 'Share of the map above sea level.')}
       ${num('s-temp', 'Temperature', cfg.temperature, -0.3, 0.3, 0.02, 'Negative for an ice age, positive for a hothouse.')}
       ${num('s-moist', 'Rainfall', cfg.moisture, -0.3, 0.3, 0.02, 'Drier worlds have more desert and steppe.')}
       <div class="row">
@@ -1085,10 +1115,10 @@ function renderSetup(): string {
       ${num('s-tilt', 'Axial tilt', cfg.axialTilt ?? 23.5, 0, 60, 0.5, 'Degrees. Earth is 23.5. More tilt: harsher seasons, milder poles, a cooler equator.')}
       <label class="toggle" for="s-currents"><input id="s-currents" type="checkbox" ${cfg.oceanCurrents !== false ? 'checked' : ''}> Ocean currents <small>&nbsp;warm water carried poleward along eastern coasts, cold water towards the equator along western ones</small></label>
       <div class="shape-box">
-        <p>${cfg.heightmap ? 'This world’s land was <strong>shaped by hand</strong>.' : 'The land is generated from the seed.'} Raise land and mountain ranges, lower it into seas and valleys, and flatten plateaus.</p>
+        <p>${blankWorld(cfg) ? 'No land drawn yet: worlds begin as a blank ocean.' : 'This world’s land was <strong>drawn by hand</strong>.'} Outline continents and seas, shape mountains, hills and cliffs, and put in rivers and lakes.</p>
         <div class="row">
           <button type="button" id="s-shape">Shape the land…</button>
-          ${cfg.heightmap ? '<label class="toggle" for="s-keep"><input id="s-keep" type="checkbox" checked> Keep the hand-shaped land</label>' : ''}
+          ${blankWorld(cfg) ? '' : '<label class="toggle" for="s-keep"><input id="s-keep" type="checkbox" checked> Keep this land (untick for a blank ocean)</label>'}
         </div>
       </div>
       ${num('s-abund', 'Mineral wealth', cfg.resourceAbundance, 0.3, 2.5, 0.1, 'How rich the ore, gold and gem deposits are.')}
@@ -1102,7 +1132,7 @@ function renderSetup(): string {
       <label class="field" for="s-races"><span>Races (JSON)</span><textarea id="s-races" rows="12" spellcheck="false">${esc(JSON.stringify(cfg.races, null, 2))}</textarea><small>Edit traits, biome preferences, growth, sound palettes — or add your own people. Remove an entry to leave that race out.</small></label>
       <p id="s-error" class="error" role="alert" hidden></p>
       <div class="row">
-        <button type="submit" class="primary">Generate world</button>
+        <button type="submit" class="primary">Start new history</button>
         <button type="button" id="s-reset-races">Restore default races</button>
       </div>
     </form>`;
@@ -1110,7 +1140,7 @@ function renderSetup(): string {
 
 function wireSetup(): void {
   const form = $<HTMLFormElement>('setup');
-  for (const id of ['s-land', 's-temp', 's-moist', 's-abund', 's-magic', 's-cal', 's-space', 's-latn', 's-lats', 's-tilt']) {
+  for (const id of ['s-temp', 's-moist', 's-abund', 's-magic', 's-cal', 's-space', 's-latn', 's-lats', 's-tilt']) {
     const inp = $<HTMLInputElement>(id);
     inp.addEventListener('input', () => ($(id + '-o').textContent = inp.value));
   }
@@ -1124,6 +1154,11 @@ function wireSetup(): void {
     e.preventDefault();
     const next = readSetup();
     if (!next) return;
+    // No land yet: draw it first.
+    if (blankWorld(next)) {
+      openEditor(next);
+      return;
+    }
     cfg = next;
     store.set('config', JSON.stringify(cfg));
     newWorld();
@@ -1148,12 +1183,12 @@ function readSetup(): WorldConfig | null {
     const [w, h] = MAP_SIZES[$<HTMLSelectElement>('s-size').value] ?? MAP_SIZES.medium;
     const v = (id: string) => Number($<HTMLInputElement>(id).value);
     const keep = document.getElementById('s-keep') as HTMLInputElement | null;
-    return defaultConfig({
+    return withLand(defaultConfig({
       name: $<HTMLInputElement>('s-name').value.trim() || 'Aerth',
       seed: Math.floor(v('s-seed')) || 1,
       width: w,
       height: h,
-      landFraction: v('s-land'),
+      landFraction: cfg.landFraction,
       temperature: v('s-temp'),
       moisture: v('s-moist'),
       resourceAbundance: v('s-abund'),
@@ -1169,7 +1204,8 @@ function readSetup(): WorldConfig | null {
       axialTilt: v('s-tilt'),
       oceanCurrents: $<HTMLInputElement>('s-currents').checked,
       heightmap: keep?.checked ? cfg.heightmap : undefined,
-    });
+      water: keep?.checked ? cfg.water : undefined,
+    }));
   }
 }
 
@@ -1187,8 +1223,8 @@ function openEditor(base: WorldConfig): void {
     if (st) st.textContent = editorStatus(ed);
     const undo = document.getElementById('e-undo') as HTMLButtonElement | null;
     if (undo) undo.disabled = !ed.canUndo();
-    const clear = document.getElementById('e-clear-sources') as HTMLButtonElement | null;
-    if (clear) clear.disabled = !ed.sources.length;
+    const note = document.getElementById('e-note');
+    if (note) note.textContent = ed.note;
   };
   ed.onStatus = () => {
     const st = document.getElementById('e-status');
@@ -1220,8 +1256,7 @@ function closeEditor(): void {
 }
 
 function editorStatus(ed: WorldEditor): string {
-  if (ed.working) return ed.painting ? 'Live preview…' : 'Building full detail…';
-  return ed.shown === 'full' ? 'Full detail' : 'Preview';
+  return ed.working ? 'Updating the land you changed…' : 'Up to date';
 }
 
 function renderEditor(ed: WorldEditor): string {
@@ -1231,19 +1266,56 @@ function renderEditor(ed: WorldEditor): string {
   const num = (id: string, label: string, v: number, min: number, max: number, step: number, hint = '') =>
     `<label class="field" for="${id}"><span>${label} <output id="${id}-o">${v}</output></span><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${v}">${hint ? `<small>${hint}</small>` : ''}</label>`;
   const views: [EditorView, string][] = [['terrain', 'Terrain'], ['temperature', 'Temperature'], ['rainfall', 'Rainfall'], ['currents', 'Currents']];
+  const tabs: [ToolGroup, string][] = [['outline', 'Land & Sea'], ['terrain', 'Terrain'], ['water', 'Water']];
+  const tool = ed.tool;
+  const raising = tool === 'mountains' || tool === 'hills' || tool === 'raise' || tool === 'plateau' || tool === 'cliff';
+  const lowering = tool === 'lower' || tool === 'valley';
+  const sized = !(tool === 'river' || tool === 'lake');
+  const lakeLevel = ed.lakeLevel;
+  let tools = '';
+  if (ed.tab === 'outline') {
+    tools = `
+      ${num('e-size', 'Brush size (tiles)', ed.radius, 1, 40, 1)}
+      ${num('e-rough', 'Roughness', ed.roughness, 0, 1, 0.05, 'Smooth, rounded edges at 0; ragged, fractal coasts towards 1.')}`;
+  } else if (ed.tab === 'terrain') {
+    tools = `
+      ${num('e-size', 'Width (tiles)', ed.radius, 1, 40, 1, 'Wide for broad ranges, narrow for thin, sharp ridges.')}
+      ${tool !== 'plateau' ? num('e-strength', tool === 'cliff' ? 'Cliff height' : 'Strength', ed.strength, 0.05, 1, 0.05) : ''}
+      ${raising ? num('e-top', 'Height limit (ft)', ed.topFeet, 250, 15000, 250, 'Nothing this tool builds rises above this.') : ''}
+      ${lowering ? num('e-floor', 'Lowest height (ft)', ed.floorFeet, 0, 12000, 250, 'This tool never cuts below this.') : ''}
+      <details class="mini"><summary>Erosion</summary>
+        <p class="sub">Water wears the land you shape, as in Gaea: valleys, ridges, gullies and screes. Only the land around each change is worn again.</p>
+        <div class="row">
+          ${num('e-mountains', 'Mountain shape', tr.mountains ?? TERRAIN_DEFAULTS.mountains, 0, 1.5, 0.05)}
+          ${num('e-erosion', 'Erosion strength', tr.erosion ?? TERRAIN_DEFAULTS.erosion, 0, 2, 0.05)}
+        </div>
+        <div class="row">
+          ${num('e-softness', 'Rock softness', tr.softness ?? TERRAIN_DEFAULTS.softness, 0, 1, 0.05)}
+          ${num('e-downcut', 'Downcutting', tr.downcutting ?? TERRAIN_DEFAULTS.downcutting, 0, 1, 0.05)}
+        </div>
+      </details>`;
+  } else {
+    tools = `
+      ${sized ? num('e-size', 'Brush size (tiles)', ed.radius, 1, 20, 1) : ''}
+      ${tool === 'river' ? `<p class="sub">${ed.pending ? `Drawing a river: ${ed.pending.length} point${ed.pending.length === 1 ? '' : 's'}. Click the next point, press Enter to end it here, Esc to cancel.` : 'Click where the river rises.'}</p>` : ''}
+      ${lakeLevel !== null ? num('e-level', 'Water level', Math.round(lakeLevel * 100), 5, 100, 1, '% of the way up the hollow: 100 fills it to where it would spill over.') : ''}
+      ${ed.selected ? `<div class="row"><button type="button" id="e-delete">Delete ${ed.selected.kind}</button></div>` : ''}
+      <div class="row">
+        ${num('e-rwidth', 'River width', tr.riverWidth ?? RIVER_DEFAULTS.width, 0.4, 2.5, 0.05)}
+        ${num('e-rdepth', 'Channel depth', tr.riverDepth ?? RIVER_DEFAULTS.depth, 0, 2, 0.05)}
+      </div>`;
+  }
   return `
-    <header class="head"><h2>Shape the land</h2><p class="sub">Drag on the map to raise, lower or flatten the land, or to mark where rivers rise. The world updates as you draw, as a quick preview, and sharpens to full detail when you let go. Right-drag or hold Space to pan, scroll to zoom. [ and ] change the width, Ctrl+Z undoes.</p><p class="sub" id="e-status" role="status">${editorStatus(ed)}</p></header>
+    <header class="head"><h2>Shape the world</h2><p class="sub">Outline the land and seas, shape the terrain, then put in rivers and lakes; move between them freely. Only the land you change is worked again. Right-drag or hold Space to pan, scroll to zoom. [ and ] change the brush size, Ctrl+Z undoes.</p><p class="sub" id="e-status" role="status">${editorStatus(ed)}</p></header>
     <div class="setup">
-      <div class="seg" role="group" aria-label="Terrain tool">${BRUSHES.map((b) => `<button type="button" data-brush="${b.id}" aria-pressed="${b.id === ed.tool}" title="${esc(b.hint)}">${b.name}</button>`).join('')}</div>
+      <div class="seg" role="tablist" aria-label="Editor stage">${tabs.map(([k, n]) => `<button type="button" role="tab" data-etab="${k}" aria-selected="${ed.tab === k}" aria-pressed="${ed.tab === k}">${n}</button>`).join('')}</div>
+      <div class="seg" role="group" aria-label="Tool">${BRUSHES.filter((b) => b.group === ed.tab).map((b) => `<button type="button" data-brush="${b.id}" aria-pressed="${b.id === tool}" title="${esc(b.hint)}">${b.name}</button>`).join('')}</div>
       <p class="sub">${esc(brush.hint)}</p>
-      ${num('e-size', 'Width (tiles)', ed.radius, 1, 40, 1, 'Wide for broad ranges and big landmasses, narrow for thin, sharp ridges.')}
-      ${num('e-strength', 'Strength', ed.strength, 0.05, 1, 0.05)}
-
+      ${tools}
+      <p class="sub" id="e-note" role="status">${esc(ed.note)}</p>
       <div class="row">
         <button type="button" id="e-undo" ${ed.canUndo() ? '' : 'disabled'}>Undo</button>
         <button type="button" id="e-blank">Blank ocean</button>
-        <button type="button" id="e-random">Fresh random land</button>
-        <button type="button" id="e-clear-sources" ${ed.sources.length ? '' : 'disabled'}>Clear river sources</button>
       </div>
       <h3 class="mini-h">See</h3>
       <div class="seg" role="group" aria-label="Editor view">${views.map(([k, n]) => `<button type="button" data-eview="${k}" aria-pressed="${ed.layer === k}">${n}</button>`).join('')}</div>
@@ -1254,33 +1326,14 @@ function renderEditor(ed: WorldEditor): string {
         ).map(([k, n]) => `<option value="${k}" ${ed.style === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="toggle" for="e-contours"><input id="e-contours" type="checkbox" ${ed.contours ? 'checked' : ''}> Contours (every 250 ft)</label>
       </div>
-      <h3 class="mini-h">Terrain</h3>
-      <p class="sub">How the land is carved, as in Gaea: mountain shapes, then water wearing them down.</p>
-      <div class="row">
-        ${num('e-mountains', 'Mountain shape', tr.mountains ?? TERRAIN_DEFAULTS.mountains, 0, 1.5, 0.05)}
-        ${num('e-erosion', 'Erosion strength', tr.erosion ?? TERRAIN_DEFAULTS.erosion, 0, 2, 0.05)}
-      </div>
-      <div class="row">
-        ${num('e-softness', 'Rock softness', tr.softness ?? TERRAIN_DEFAULTS.softness, 0, 1, 0.05)}
-        ${num('e-downcut', 'Downcutting', tr.downcutting ?? TERRAIN_DEFAULTS.downcutting, 0, 1, 0.05)}
-      </div>
-      <h3 class="mini-h">Rivers</h3>
-      <p class="sub">As Gaea's Rivers node: rivers rise in the uplands (and wherever you mark a source) and run down to the sea or a lake.</p>
-      <div class="row">
-        ${num('e-rwater', 'Water', tr.riverWater ?? RIVER_DEFAULTS.water, 0, 2, 0.05, 'More water, more rivers.')}
-        ${num('e-rwidth', 'Width', tr.riverWidth ?? RIVER_DEFAULTS.width, 0.4, 2.5, 0.05)}
-      </div>
-      <div class="row">
-        ${num('e-rdepth', 'Depth', tr.riverDepth ?? RIVER_DEFAULTS.depth, 0, 2, 0.05)}
-        ${num('e-rdowncut', 'Downcutting', tr.riverDowncutting ?? RIVER_DEFAULTS.downcutting, 0, 1, 0.05, 'How far rivers cut through rises to keep falling.')}
-      </div>
-      <h3 class="mini-h">Place on the globe</h3>
-      <div class="row">
-        ${num('e-latn', 'Top edge', c.latNorth ?? 90, -90, 90, 1)}
-        ${num('e-lats', 'Bottom edge', c.latSouth ?? -90, -90, 90, 1)}
-      </div>
-      ${num('e-tilt', 'Axial tilt', c.axialTilt ?? 23.5, 0, 60, 0.5, 'Earth: 23.5°.')}
-      <label class="toggle" for="e-currents"><input id="e-currents" type="checkbox" ${c.oceanCurrents !== false ? 'checked' : ''}> Ocean currents</label>
+      <details class="mini"><summary>Place on the globe</summary>
+        <div class="row">
+          ${num('e-latn', 'Top edge', c.latNorth ?? 90, -90, 90, 1)}
+          ${num('e-lats', 'Bottom edge', c.latSouth ?? -90, -90, 90, 1)}
+        </div>
+        ${num('e-tilt', 'Axial tilt', c.axialTilt ?? 23.5, 0, 60, 0.5, 'Earth: 23.5°.')}
+        <label class="toggle" for="e-currents"><input id="e-currents" type="checkbox" ${c.oceanCurrents !== false ? 'checked' : ''}> Ocean currents</label>
+      </details>
       <div class="row">
         <button type="button" id="e-use" class="primary">Use this world</button>
         <button type="button" id="e-cancel">Cancel</button>
@@ -1294,31 +1347,55 @@ function wireEditor(ed: WorldEditor): void {
     drawMap();
     renderPanel(true);
   };
+  for (const b of panel.querySelectorAll<HTMLButtonElement>('[data-etab]')) b.addEventListener('click', () => {
+    ed.tab = b.dataset.etab as ToolGroup;
+    ed.pending = null;
+    redraw();
+  });
   for (const b of panel.querySelectorAll<HTMLButtonElement>('[data-brush]')) b.addEventListener('click', () => {
     ed.tool = b.dataset.brush as BrushTool;
-    renderPanel(true);
+    if (ed.tool !== 'river') ed.pending = null;
+    redraw();
   });
   for (const b of panel.querySelectorAll<HTMLButtonElement>('[data-eview]')) b.addEventListener('click', () => {
     ed.setLayer(b.dataset.eview as EditorView);
     redraw();
   });
-  const range = (id: string, set: (v: number) => void, live = true) => {
-    const inp = $<HTMLInputElement>(id);
+  const range = (id: string, set: (v: number) => void, live = true, start?: () => void) => {
+    const inp = document.getElementById(id) as HTMLInputElement | null;
+    if (!inp) return;
+    let begun = false;
     inp.addEventListener('input', () => {
       $(id + '-o').textContent = inp.value;
+      if (!begun) {
+        begun = true;
+        start?.();
+      }
       if (live) set(Number(inp.value));
     });
-    if (!live) inp.addEventListener('change', () => set(Number(inp.value)));
+    inp.addEventListener('change', () => {
+      begun = false;
+      if (!live) set(Number(inp.value));
+    });
   };
   range('e-size', (v) => (ed.radius = v));
   range('e-strength', (v) => (ed.strength = v));
-
-  range('e-latn', (v) => { ed.setClimate({ latNorth: v }); drawMap(); }, false);
-  range('e-lats', (v) => { ed.setClimate({ latSouth: v }); drawMap(); }, false);
-  range('e-tilt', (v) => { ed.setClimate({ axialTilt: v }); drawMap(); }, false);
-  $<HTMLInputElement>('e-currents').addEventListener('change', (e) => {
-    ed.setClimate({ oceanCurrents: (e.target as HTMLInputElement).checked });
-    drawMap();
+  range('e-rough', (v) => (ed.roughness = v));
+  range('e-top', (v) => (ed.topFeet = v));
+  range('e-floor', (v) => (ed.floorFeet = v));
+  {
+    // The lake's level follows the slider as it moves; one undo step for the whole move.
+    const inp = document.getElementById('e-level') as HTMLInputElement | null;
+    let begun = false;
+    inp?.addEventListener('input', () => {
+      $('e-level-o').textContent = inp.value;
+      ed.setLakeLevel(Number(inp.value) / 100, !begun);
+      begun = true;
+    });
+    inp?.addEventListener('change', () => (begun = false));
+  }
+  document.getElementById('e-delete')?.addEventListener('click', () => {
+    if (ed.deleteSelected()) redraw();
   });
   const look = () => {
     view.style = (['parchment', 'satellite', 'topo'] as const).find((k) => k === $<HTMLSelectElement>('e-style').value) ?? 'drawn';
@@ -1337,23 +1414,20 @@ function wireEditor(ed: WorldEditor): void {
   range('e-erosion', (v) => ed.setTerrain({ erosion: v }), false);
   range('e-softness', (v) => ed.setTerrain({ softness: v }), false);
   range('e-downcut', (v) => ed.setTerrain({ downcutting: v }), false);
-  range('e-rwater', (v) => ed.setTerrain({ riverWater: v }), false);
   range('e-rwidth', (v) => ed.setTerrain({ riverWidth: v }), false);
   range('e-rdepth', (v) => ed.setTerrain({ riverDepth: v }), false);
-  range('e-rdowncut', (v) => ed.setTerrain({ riverDowncutting: v }), false);
-  $('e-clear-sources').addEventListener('click', () => {
-    ed.clearSources();
-    redraw();
+  range('e-latn', (v) => { ed.setClimate({ latNorth: v }); drawMap(); }, false);
+  range('e-lats', (v) => { ed.setClimate({ latSouth: v }); drawMap(); }, false);
+  range('e-tilt', (v) => { ed.setClimate({ axialTilt: v }); drawMap(); }, false);
+  $<HTMLInputElement>('e-currents').addEventListener('change', (e) => {
+    ed.setClimate({ oceanCurrents: (e.target as HTMLInputElement).checked });
+    drawMap();
   });
   $('e-undo').addEventListener('click', () => {
     if (ed.undo()) redraw();
   });
   $('e-blank').addEventListener('click', () => {
     ed.blank();
-    redraw();
-  });
-  $('e-random').addEventListener('click', () => {
-    ed.generated(Math.floor(Math.random() * 1e6));
     redraw();
   });
   $('e-cancel').addEventListener('click', closeEditor);
@@ -1476,3 +1550,5 @@ resizeCanvas();
 refreshTopbar();
 setTab(tab);
 requestAnimationFrame(frame);
+// A world with no land yet opens straight in the editor.
+if (blankWorld(cfg)) openEditor(cfg);
