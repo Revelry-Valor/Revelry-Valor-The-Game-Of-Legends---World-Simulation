@@ -1,10 +1,12 @@
 import { BRUSHES, TerrainEditor, strokeLevel, type BrushTool, type ToolGroup } from '../engine/editor';
 import { Rng } from '../engine/rng';
-import type { Box, ChunkCarver } from '../engine/terrainbuild';
+import { copyField, type Box, type ChunkCarver } from '../engine/terrainbuild';
+import type { ReliefField } from '../engine/erosion';
 import type { MapData, WorldConfig } from '../engine/types';
 import { emptyWater, type WaterPlan } from '../engine/water';
-import { carverFor, decodeHeights, encodeHeights, generateMap } from '../engine/worldgen';
+import { carverFor, decodeHeights, encodeHeights, generateMap, keepCarving } from '../engine/worldgen';
 import BuilderWorker from './builder.worker?worker&inline';
+import type { BuildReply, PaintJob } from './builder.worker';
 import { drawCurrents, paintClimate, type ClimateLayer } from './render';
 import { FEET_PER_UNIT, TerrainShader, drawContourLabels, drawRiverCurves, riverCurves, type MapStyle } from './terrain';
 
@@ -70,7 +72,6 @@ export class WorldEditor {
   private dirty: Box | null = null;
   /** What to paint again when the next build lands: a box of tiles, or everything. */
   private repaint: Box | 'all' | null = 'all';
-  private inFlight: { repaint: Box | 'all' | null } | null = null;
 
   constructor(cfg: WorldConfig, style: MapStyle = 'drawn', contours = false) {
     this.cfg = { ...cfg };
@@ -84,7 +85,13 @@ export class WorldEditor {
     if (!land) this.editor.clear();
     try {
       this.worker = new BuilderWorker();
-      this.worker.onmessage = (e: MessageEvent<{ id: number; map: MapData; changed: Box | null; full: boolean }>) => this.received(e.data.id, e.data.map, e.data.changed, e.data.full);
+      this.worker.onmessage = (e: MessageEvent<BuildReply | { kept: ReliefField | null }>) => {
+        if ('kept' in e.data) {
+          this.keptWaiter?.(e.data.kept);
+          return;
+        }
+        this.received(e.data);
+      };
       this.worker.onerror = () => {
         this.worker = null;
         this.busy = false;
@@ -96,6 +103,27 @@ export class WorldEditor {
     }
     this.dirty = null;
     this.request(true);
+  }
+
+  private keptWaiter: ((f: ReliefField | null) => void) | null = null;
+
+  /**
+   * The world's settings, with the land as carved here kept for the world made from them (so the
+   * world is exactly the one drawn). Waits for any build under way to finish first.
+   */
+  async finish(): Promise<WorldConfig> {
+    while (this.working) await new Promise((r) => setTimeout(r, 50));
+    const cfg = this.settings();
+    let field: ReliefField | null = null;
+    if (this.worker) {
+      field = await new Promise<ReliefField | null>((resolve) => {
+        this.keptWaiter = resolve;
+        this.worker!.postMessage({ kept: true });
+      });
+      this.keptWaiter = null;
+    } else if (this.localCarver) field = copyField(this.localCarver.field);
+    if (field) keepCarving(cfg, field);
+    return cfg;
   }
 
   /** Stop building (the editor is closing). */
@@ -165,36 +193,50 @@ export class WorldEditor {
     const cfg = this.settings();
     // Nothing of the land changed: an empty box, so nothing is carved again.
     const dirty = this.fullCarve ? null : (this.dirty ?? { x0: 0, y0: 0, x1: -1, y1: -1 });
-    this.inFlight = { repaint: this.repaint };
+    const paint: PaintJob = { style: this.style, contours: this.contours, scale: SCALE, box: !this.map ? 'all' : this.repaint };
     this.repaint = null;
     this.dirty = null;
     this.fullCarve = false;
     if (this.worker) {
-      this.worker.postMessage({ id, cfg, dirty });
+      this.worker.postMessage({ id, cfg, dirty, paint });
       return;
     }
-    // No background thread to be had: build here, between frames.
+    // No background thread to be had: build and paint here, between frames.
     setTimeout(() => {
       const fresh = !this.localCarver || dirty === null;
       if (fresh) this.localCarver = carverFor(cfg);
       const map = generateMap(cfg, new Rng(cfg.seed).fork('map'), { carver: this.localCarver!, dirty: fresh ? null : dirty });
-      this.received(id, map, fresh ? null : this.localCarver!.changed, fresh);
+      const changed = fresh ? null : this.localCarver!.changed;
+      let box: Box | null = fresh || paint.box === 'all' ? { x0: 0, y0: 0, x1: map.width - 1, y1: map.height - 1 } : union(changed, paint.box);
+      let painted: BuildReply['painted'] = null;
+      if (box) {
+        box = { x0: Math.max(0, box.x0 - 1), y0: Math.max(0, box.y0 - 1), x1: Math.min(map.width - 1, box.x1 + 1), y1: Math.min(map.height - 1, box.y1 + 1) };
+        const width = (box.x1 - box.x0 + 1) * SCALE;
+        const height = (box.y1 - box.y0 + 1) * SCALE;
+        const pixels = new Uint8ClampedArray(width * height * 4);
+        new TerrainShader(map, paint.style, undefined, paint.contours).paint({ width, height, data: pixels } as ImageData, box.x0, box.y0, 1 / SCALE, 1 / SCALE);
+        painted = { box, width, height, pixels };
+      }
+      this.received({ id, map, painted });
     }, 0);
   }
 
   private fullCarve = false;
 
-  private received(id: number, map: MapData, changed: Box | null, full: boolean): void {
-    if (id !== this.job) return;
+  private received(reply: BuildReply): void {
+    if (reply.id !== this.job) return;
     this.busy = false;
-    const asked = this.inFlight?.repaint ?? null;
-    this.inFlight = null;
-    const first = !this.map;
+    const map = reply.map;
     this.map = map;
-    // Paint again what changed: the land carved again, and whatever the edit itself asked for.
-    let box: Box | 'all' | null = full || first || asked === 'all' ? 'all' : union(changed, asked);
-    if (box && box !== 'all') box = { x0: Math.max(0, box.x0 - 1), y0: Math.max(0, box.y0 - 1), x1: Math.min(map.width - 1, box.x1 + 1), y1: Math.min(map.height - 1, box.y1 + 1) };
-    if (box) this.paint(box);
+    // Lay in only the part of the map that was painted again.
+    const p = reply.painted;
+    if (p) {
+      if (this.terrain.width !== map.width * SCALE || this.terrain.height !== map.height * SCALE) {
+        this.terrain.width = map.width * SCALE;
+        this.terrain.height = map.height * SCALE;
+      }
+      this.terrain.getContext('2d')!.putImageData(new ImageData(p.pixels as Uint8ClampedArray<ArrayBuffer>, p.width, p.height), p.box.x0 * SCALE, p.box.y0 * SCALE);
+    }
     // A lake clicked where there is no hollow to hold it: say what to do instead.
     const sel = this.selected;
     if (sel?.kind === 'lake') {
@@ -225,26 +267,8 @@ export class WorldEditor {
     if (style === this.style && contours === this.contours) return;
     this.style = style;
     this.contours = contours;
-    if (this.map) this.paint('all');
-  }
-
-  /** Paint the land: everything, or one box of tiles. */
-  private paint(box: Box | 'all'): void {
-    const map = this.map;
-    if (!map) return;
-    if (this.terrain.width !== map.width * SCALE || this.terrain.height !== map.height * SCALE) {
-      this.terrain.width = map.width * SCALE;
-      this.terrain.height = map.height * SCALE;
-      box = 'all';
-    }
-    const b = box === 'all' ? { x0: 0, y0: 0, x1: map.width - 1, y1: map.height - 1 } : box;
-    const ctx = this.terrain.getContext('2d')!;
-    const pw = (b.x1 - b.x0 + 1) * SCALE;
-    const ph = (b.y1 - b.y0 + 1) * SCALE;
-    if (pw <= 0 || ph <= 0) return;
-    const img = ctx.createImageData(pw, ph);
-    new TerrainShader(map, this.style, undefined, this.contours).paint(img, b.x0, b.y0, 1 / SCALE, 1 / SCALE);
-    ctx.putImageData(img, b.x0 * SCALE, b.y0 * SCALE);
+    this.repaint = 'all';
+    this.request();
   }
 
   private paintClimate(): void {

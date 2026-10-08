@@ -235,7 +235,7 @@ function addMountains(g: Grid, s: number, rng: Rng, amount: number, ox = 0, oy =
  * sea. Soft rock wears quickly but drops its load soon; hard rock wears slowly and carries further.
  * Records where it wore the land, where it left its load, and where the water ran.
  */
-function rainfall(g: Grid, rng: Rng, s: number, opts: { drops: number; strength: number; softness: number; downcutting: number }, wear: Float32Array, deposits: Float32Array, flow: Float32Array): void {
+function rainfall(g: Grid, rng: Rng, s: number, opts: { drops: number; strength: number; softness: number; downcutting: number; ox?: number; oy?: number }, wear: Float32Array, deposits: Float32Array, flow: Float32Array): void {
   const { hts, fixed, W, H } = g;
   const inertia = 0.1;
   const gravity = 4;
@@ -264,10 +264,24 @@ function rainfall(g: Grid, rng: Rng, s: number, opts: { drops: number; strength:
     }
   }
   for (let k = 0; k < bw.length; k++) bw[k] /= bsum;
-  const land: number[] = [];
-  for (let i = 0; i < W * H; i++) if (!fixed[i]) land.push(i);
-  if (!land.length) return;
-  const drops = Math.floor(land.length * opts.drops);
+  // Where each drop falls depends only on where on the map it is, never on how much land there is
+  // elsewhere: change the land in one place and the rain everywhere else falls just as before.
+  const ox = opts.ox ?? 0;
+  const oy = opts.oy ?? 0;
+  const seed = Math.floor(rng.next() * 1e9);
+  const starts: number[] = [];
+  for (let i = 0; i < W * H; i++) {
+    if (fixed[i]) continue;
+    const X = (i % W) + ox;
+    const Y = Math.floor(i / W) + oy;
+    const [a, b] = hash2(X, Y, seed);
+    const count = Math.floor(opts.drops + a);
+    for (let k = 0; k < count; k++) {
+      const [u, v] = hash2(X * 7 + k, Y * 13 - k, seed + 17);
+      starts.push(i, u, (v + b) % 1);
+    }
+  }
+  if (!starts.length) return;
   const hg = new Float64Array(3);
   const sample = (x: number, y: number) => {
     const ix = Math.floor(x);
@@ -283,10 +297,10 @@ function rainfall(g: Grid, rng: Rng, s: number, opts: { drops: number; strength:
     hg[1] = (b - a) * (1 - fy) + (d - c) * fy;
     hg[2] = (c - a) * (1 - fx) + (d - b) * fx;
   };
-  for (let n = 0; n < drops; n++) {
-    const start = land[Math.floor(rng.next() * land.length)];
-    let x = (start % W) + rng.next();
-    let y = Math.floor(start / W) + rng.next();
+  for (let n = 0; n < starts.length; n += 3) {
+    const start = starts[n];
+    let x = (start % W) + starts[n + 1];
+    let y = Math.floor(start / W) + starts[n + 2];
     let dx = 0;
     let dy = 0;
     let speed = 1;
@@ -306,7 +320,7 @@ function rainfall(g: Grid, rng: Rng, s: number, opts: { drops: number; strength:
       dy = dy * inertia - hg[2] * (1 - inertia);
       const len = Math.hypot(dx, dy);
       if (len < 1e-9) {
-        const a = rng.next() * Math.PI * 2;
+        const a = hash2(Math.floor(x * 31) + ox, Math.floor(y * 31) + oy, seed + life)[0] * Math.PI * 2;
         dx = Math.cos(a);
         dy = Math.sin(a);
       } else {
@@ -483,7 +497,7 @@ export function erodeRelief(surface: Float32Array, water: Uint8Array, w: number,
   erodeGrid(coarse, cfixed, CW, CH, quick ? 18 : 30, K, 0.03, 0.5, rng.fork('valleys'));
   for (let i = 0; i < cn; i++) if (was[i] > coarse[i]) cwear[i] += (was[i] - coarse[i]) * 0.5;
   if (stage === 'full') {
-    rainfall(cg, rng.fork('rain'), cs, { drops: (opts.rain ?? (quick ? 1.5 : 3)) * strength, strength: Math.min(1.5, strength), softness, downcutting }, cwear, cdep, cflow);
+    rainfall(cg, rng.fork('rain'), cs, { drops: (opts.rain ?? (quick ? 1.5 : 3)) * strength, strength: Math.min(1.5, strength), softness, downcutting, ox: (opts.offset?.[0] ?? 0) * cs, oy: (opts.offset?.[1] ?? 0) * cs }, cwear, cdep, cflow);
     crumble(cg, cs, 3, cdep);
   }
   // Carry the change and the maps up to the full grid, smoothly.

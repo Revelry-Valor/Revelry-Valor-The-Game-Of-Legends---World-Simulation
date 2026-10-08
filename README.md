@@ -94,7 +94,7 @@ Worlds are made by hand. A new world starts as a blank ocean and opens in the wo
 | Shallows | Shallow water: reefs, banks, sounds and lagoons. |
 | Deep sea | Deepen the sea: ocean basins and trenches. |
 
-**Terrain** shapes the land. Every raising tool has a **Height limit** (in feet) that nothing it builds rises above, and the lowering tools a **Lowest height** they never cut below.
+**Terrain** shapes the land, and only the land: its tools never move a coast, never raise land out of the sea and never sink it below sea level (that is what Land & Sea is for). Every raising tool has a **Height limit** (in feet) that nothing it builds rises above, and the lowering tools a **Lowest height** they never cut below.
 
 | Brush | What it does |
 |---|---|
@@ -106,7 +106,7 @@ Worlds are made by hand. A new world starts as a blank ocean and opens in the wo
 | Smooth | Softens the land: gentler slopes, rounded ridges. |
 | Valley | Cuts a V-shaped valley along the stroke, never below the lowest height or under the sea. |
 
-Erosion always works on the land you shape, as described above: mountain shapes, valleys and gullies carved by water, screes. Its settings are under **Erosion** on the Terrain tab. **Only the land you change is worked again.** The map is carved in pieces 32 tiles across, each with a margin of land around it and blended into its neighbours, so a stroke re-carves and repaints only the pieces it touches (a fraction of a second) and the rest of the map stays exactly as it was. Carving the whole map the same way gives the same land, so the world you use is the world you drew.
+Erosion always works on the land you shape, as described above: mountain shapes, valleys and gullies carved by water, screes. Its settings are under **Erosion** on the Terrain tab. **Only the land you change is worked again.** The map is carved once when the editor opens. After that, each change is carved again in a small window around it and laid in only over the land the brush touched, fading out over three tiles, so everything else stays exactly as it was. The rain that wears the land falls in the same places every time, so unchanged land erodes just as before. The carving and the painting both run on a background thread and only the changed part of the map is painted again, so the pen never waits: drawing stays smooth while the land catches up a moment behind it. **Use this world** takes the land exactly as it was carved in the editor.
 
 **Water** puts in rivers and lakes. A world made in the editor has only the rivers and lakes you draw.
 

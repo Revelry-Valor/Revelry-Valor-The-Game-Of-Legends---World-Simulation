@@ -3,6 +3,7 @@ import { RES_COUNT, Res } from './data/economy';
 import { MinHeap } from './heap';
 import { traceRivers } from './erosion';
 import { ChunkCarver, copyField, type Box } from './terrainbuild';
+import type { ReliefField } from './erosion';
 import { applyWater } from './water';
 import { Noise2D } from './noise';
 import type { Rng } from './rng';
@@ -202,8 +203,14 @@ export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: Chunk
     else surface[i] = elevation[i];
   }
   const t = cfg.terrain ?? {};
-  const carver = build?.carver && build.carver.w === w && build.carver.h === h ? build.carver : carverFor(cfg);
-  const base = carver.carve(surface, sea, build?.carver === carver ? build.dirty : null);
+  // Land carved in the world editor is used as it was carved there, so the world is the one drawn.
+  const kept = !build ? keptCarving.get(carvingKey(cfg)) : undefined;
+  let base: ReliefField;
+  if (kept) base = kept;
+  else {
+    const carver = build?.carver && build.carver.w === w && build.carver.h === h ? build.carver : carverFor(cfg);
+    base = carver.carve(surface, sea, build?.carver === carver ? build.dirty : null);
+  }
   // The water works on a copy, so the carved land can be kept for the next build.
   const carved = copyField(base);
   let saltFlat: Uint8Array = new Uint8Array(size);
@@ -398,6 +405,21 @@ export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: Chunk
     riverPaths,
     lakeInfo,
   };
+}
+
+/** Land carved in the world editor, kept for the world made from it (see keepCarving). */
+const keptCarving = new Map<string, ReliefField>();
+
+/** What a world's carved land depends on: its land, size, seed and carving settings. */
+export function carvingKey(cfg: WorldConfig): string {
+  const t = cfg.terrain ?? {};
+  return JSON.stringify([cfg.width, cfg.height, cfg.seed, t.mountains, t.erosion, t.softness, t.downcutting, cfg.heightmap ?? '']);
+}
+
+/** Keep the land as carved in the editor for the world about to be made from these settings. */
+export function keepCarving(cfg: WorldConfig, field: ReliefField): void {
+  keptCarving.clear();
+  keptCarving.set(carvingKey(cfg), field);
 }
 
 /** A carver for a world's land, with its carving settings. */

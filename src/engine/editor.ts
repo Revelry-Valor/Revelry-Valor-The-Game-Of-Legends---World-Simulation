@@ -30,11 +30,11 @@ export const BRUSHES: { id: BrushTool; group: ToolGroup; name: string; hint: str
   { id: 'mountains', group: 'terrain', name: 'Mountains', hint: 'Drag along a range: a sharp crest, rising with each pass up to the height limit. Erosion carves its valleys and spurs.' },
   { id: 'hills', group: 'terrain', name: 'Hills', hint: 'Rolling, uneven hill country, up to the height limit.' },
   { id: 'raise', group: 'terrain', name: 'Raise', hint: 'Lift the ground gently and evenly, up to the height limit.' },
-  { id: 'lower', group: 'terrain', name: 'Lower', hint: 'Sink the ground, never below the lowest height.' },
+  { id: 'lower', group: 'terrain', name: 'Lower', hint: 'Sink the ground, never below the lowest height and never into the sea (the coast is drawn on Land & Sea).' },
   { id: 'plateau', group: 'terrain', name: 'Plateau', hint: 'Level the ground to the height where the stroke began: plateaus, mesas, table lands.' },
   { id: 'cliff', group: 'terrain', name: 'Cliff', hint: 'Raise the land on the left of your stroke into a cliff, dropping sheer along the line you draw. Strength sets how tall, the height limit how high.' },
   { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Soften the land: gentler slopes, rounded ridges.' },
-  { id: 'valley', group: 'terrain', name: 'Valley', hint: 'Cut a V-shaped valley along the stroke, never below the lowest height (and never under the sea).' },
+  { id: 'valley', group: 'terrain', name: 'Valley', hint: 'Cut a V-shaped valley along the stroke, never below the lowest height (and never into the sea).' },
   { id: 'river', group: 'water', name: 'River', hint: 'Click where the river rises, then click each point it should pass. It ends when it reaches the sea, a lake or another river, or press Enter. It finds the natural way between your points and cuts through anything in the way. Esc cancels; click a river to select it, Delete removes it.' },
   { id: 'lake', group: 'water', name: 'Lake', hint: 'Click a low spot: the hollow fills with water to where it would spill over. Set how high it stands with Water level. Click a lake to select it.' },
   { id: 'lakeAdd', group: 'water', name: 'Add water', hint: 'Paint lake water in: widen a lake, or make a pond.' },
@@ -70,6 +70,8 @@ export function strokeLevel(tool: BrushTool, start: number, strength = 0.5): num
 const STEP = 0.06;
 /** Heights the outline tools paint: new land, the sea, shallows, the deep. */
 const LAND = 0.015;
+/** The lowest the Terrain tools take land: just above the sea, so a coast never moves. */
+const LAND_FLOOR = 0.002;
 const SEA = -0.12;
 const SHALLOW = -0.025;
 const DEEP = -0.45;
@@ -142,6 +144,8 @@ export class TerrainEditor {
         if (d >= 1) continue;
         const i = y * w + x;
         const e = Hs[i];
+        // The Terrain tools shape only the land: the coast and the sea are the outline's business.
+        if (!outline && e < 0) continue;
         const t = 1 - d;
         let v = e;
         switch (b.tool) {
@@ -218,7 +222,7 @@ export class TerrainEditor {
             break;
           }
         }
-        Hs[i] = Math.max(-1, Math.min(1, v));
+        Hs[i] = outline ? Math.max(-1, Math.min(1, v)) : Math.max(LAND_FLOOR, Math.min(1, v));
       }
     }
     return { x0, y0, x1, y1 };

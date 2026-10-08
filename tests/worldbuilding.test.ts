@@ -97,25 +97,29 @@ describe('world building', () => {
   });
 
   it('raises land and ranges, lowers it again, flattens plateaus, and undoes strokes', () => {
-    const hts = new Float32Array(W * H).fill(-0.2);
+    // Low land to shape.
+    const hts = new Float32Array(W * H).fill(0.01);
     const ed = new TerrainEditor(hts, W, H, 1);
-    const raise = { tool: 'raise' as const, radius: 8, strength: 1 };
+    const raise = { tool: 'raise' as const, radius: 8, strength: 1, top: 1 };
     ed.beginStroke();
     for (let k = 0; k < 2; k++) ed.line(60, 50, 100, 50, raise);
-    expect(hts[50 * W + 80]).toBeGreaterThanOrEqual(0);
-    expect(hts[10 * W + 10]).toBeLessThan(0);
+    expect(hts[50 * W + 80]).toBeGreaterThan(0.05);
+    expect(hts[10 * W + 10]).toBeCloseTo(0.01, 5);
     // The middle of the stroke rises most: a range is highest along its spine.
     expect(hts[50 * W + 80]).toBeGreaterThan(hts[55 * W + 80]);
+    const raised = hts[50 * W + 80];
     ed.beginStroke();
-    for (let k = 0; k < 12; k++) ed.dab(80, 50, { tool: 'lower', radius: 3, strength: 1, floor: -1 });
-    expect(hts[50 * W + 80]).toBeLessThan(0);
+    for (let k = 0; k < 12; k++) ed.dab(80, 50, { tool: 'lower', radius: 3, strength: 1, floor: 0 });
+    // Lowered, but never into the sea: the coast belongs to the Land & Sea tools.
+    expect(hts[50 * W + 80]).toBeLessThan(raised);
+    expect(hts[50 * W + 80]).toBeGreaterThan(0);
     ed.undoStroke();
-    expect(hts[50 * W + 80]).toBeGreaterThanOrEqual(0);
+    expect(hts[50 * W + 80]).toBeCloseTo(raised, 6);
     // A narrow brush makes a narrower rise than a wide one.
     ed.beginStroke();
     for (let k = 0; k < 4; k++) ed.dab(30, 20, { tool: 'raise', radius: 2, strength: 1 });
-    expect(hts[20 * W + 30]).toBeGreaterThan(-0.1);
-    expect(hts[20 * W + 34]).toBeCloseTo(-0.2, 5);
+    expect(hts[20 * W + 30]).toBeGreaterThan(0.05);
+    expect(hts[20 * W + 34]).toBeCloseTo(0.01, 5);
     ed.beginStroke();
     for (let k = 0; k < 6; k++) ed.dab(70, 50, raise);
     const level = strokeLevel('plateau', ed.heightAt(70, 50))!;

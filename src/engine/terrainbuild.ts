@@ -14,6 +14,8 @@ const CHUNK = 32;
 const MARGIN = 7;
 /** ...and blended into its neighbours across this many tiles either side of the seam. */
 const FEATHER = 4;
+/** A change is laid in over the land it touched, fading out over this many tiles around it. */
+const PATCH_FADE = 3;
 
 interface Chunk {
   /** The tiles this piece is responsible for. */
@@ -24,9 +26,9 @@ interface Chunk {
 }
 
 /**
- * Carves the map's land piece by piece, so that when part of it changes only the pieces touching
- * the change are carved again and the rest of the map stays exactly as it was. The whole map is
- * carved the same way, so a world built in one go matches one built up stroke by stroke.
+ * Carves the map's land, piece by piece the first time. After that, a change is carved again in a
+ * small window around it and laid in only over the land that changed (fading out over a few tiles),
+ * so the rest of the map stays exactly as it was however much is drawn.
  *
  * Each piece is carved with a margin of land around it and blended into its neighbours over a few
  * tiles, so the seams don't show; the mountain shapes come from the same noise across the map.
@@ -78,6 +80,9 @@ export class ChunkCarver {
    * into that box are carved again; without it (or the first time), all of them.
    */
   carve(surface: Float32Array, sea: Uint8Array, dirty?: Box | null): ReliefField {
+    // Once the map has been carved, a change is carved in a small window around it and laid in
+    // only where the land changed, fading out over a few tiles: everything else stays as it was.
+    if (dirty && this.chunks.every((c) => c.field)) return this.patch(surface, sea, dirty);
     const todo: number[] = [];
     this.chunks.forEach((c, k) => {
       if (!c.field || !dirty || overlaps(c.ext, dirty)) todo.push(k);
@@ -110,6 +115,51 @@ export class ChunkCarver {
     }
     this.blend(box!);
     this.changed = { x0: Math.max(0, box!.x0), y0: Math.max(0, box!.y0), x1: Math.min(this.w - 1, box!.x1), y1: Math.min(this.h - 1, box!.y1) };
+    return this.field;
+  }
+
+  /** Carve the land around a changed box and lay it in over the box, fading out around it. */
+  private patch(surface: Float32Array, sea: Uint8Array, dirty: Box): ReliefField {
+    this.sea = sea;
+    this.changed = null;
+    if (dirty.x1 < dirty.x0 || dirty.y1 < dirty.y0) return this.field;
+    const { w, h } = this;
+    const S = this.scale;
+    const f = this.field;
+    const W = f.width;
+    const reach = MARGIN + PATCH_FADE;
+    const win = { x0: Math.max(0, dirty.x0 - reach), y0: Math.max(0, dirty.y0 - reach), x1: Math.min(w - 1, dirty.x1 + reach), y1: Math.min(h - 1, dirty.y1 + reach) };
+    const cw = win.x1 - win.x0 + 1;
+    const ch = win.y1 - win.y0 + 1;
+    const surf = new Float32Array(cw * ch);
+    const water = new Uint8Array(cw * ch);
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const t = (win.y0 + y) * w + win.x0 + x;
+        surf[y * cw + x] = surface[t];
+        water[y * cw + x] = sea[t];
+      }
+    }
+    const r = erodeRelief(surf, water, cw, ch, { ...this.opts, scale: S, offset: [win.x0, win.y0] });
+    // Weight 1 over the changed tiles, falling to 0 over PATCH_FADE tiles around them.
+    const out = { x0: Math.max(0, dirty.x0 - PATCH_FADE), y0: Math.max(0, dirty.y0 - PATCH_FADE), x1: Math.min(w - 1, dirty.x1 + PATCH_FADE), y1: Math.min(h - 1, dirty.y1 + PATCH_FADE) };
+    const fade = (v: number, lo: number, hi: number) => (v < lo ? Math.max(0, 1 - (lo - v) / PATCH_FADE) : v > hi ? Math.max(0, 1 - (v - hi) / PATCH_FADE) : 1);
+    for (let Y = out.y0 * S; Y < (out.y1 + 1) * S; Y++) {
+      const wy = fade((Y + 0.5) / S, dirty.y0, dirty.y1 + 1);
+      for (let X = out.x0 * S; X < (out.x1 + 1) * S; X++) {
+        const k = wy * fade((X + 0.5) / S, dirty.x0, dirty.x1 + 1);
+        if (k <= 0) continue;
+        const kk = k * k * (3 - 2 * k);
+        const i = Y * W + X;
+        const j = (Y - win.y0 * S) * r.width + (X - win.x0 * S);
+        f.heights[i] += (r.heights[j] - f.heights[i]) * kk;
+        f.wear[i] += (r.wear[j] - f.wear[i]) * kk;
+        f.deposits[i] += (r.deposits[j] - f.deposits[i]) * kk;
+        f.flow[i] += (r.flow[j] - f.flow[i]) * kk;
+      }
+    }
+    this.seaMask(out);
+    this.changed = out;
     return this.field;
   }
 
@@ -167,7 +217,18 @@ export class ChunkCarver {
         }
       }
     }
-    // Under the sea where the tiles around, blended, are more sea than land (as the carving has it).
+    this.seaMask(box);
+  }
+
+  /** Under the sea where the tiles around, blended, are more sea than land (as the carving has it). */
+  private seaMask(box: Box): void {
+    const S = this.scale;
+    const f = this.field;
+    const W = f.width;
+    const X0 = Math.max(0, box.x0 * S);
+    const Y0 = Math.max(0, box.y0 * S);
+    const X1 = Math.min(f.width - 1, (box.x1 + 1) * S - 1);
+    const Y1 = Math.min(f.height - 1, (box.y1 + 1) * S - 1);
     const sea = this.sea!;
     const { w, h } = this;
     for (let Y = Y0; Y <= Y1; Y++) {

@@ -1431,8 +1431,9 @@ function wireEditor(ed: WorldEditor): void {
     redraw();
   });
   $('e-cancel').addEventListener('click', closeEditor);
-  $('e-use').addEventListener('click', () => {
-    cfg = ed.settings();
+  $('e-use').addEventListener('click', async () => {
+    $<HTMLButtonElement>('e-use').disabled = true;
+    cfg = await ed.finish();
     store.set('config', JSON.stringify(cfg));
     ed.dispose();
     editing = null;

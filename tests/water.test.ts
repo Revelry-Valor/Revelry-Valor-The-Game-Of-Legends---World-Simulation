@@ -118,7 +118,7 @@ describe('land and sea brushes', () => {
 });
 
 describe('carving piece by piece', () => {
-  it('carves again only near a change, and matches carving the whole map', () => {
+  it('carves again only where the land changed, leaving the rest exactly as it was', () => {
     const w = 90;
     const h = 60;
     const surface = new Float32Array(w * h);
@@ -131,17 +131,43 @@ describe('carving piece by piece', () => {
     const a = new ChunkCarver(w, h, { scale: 2, seed: 3 });
     a.carve(surface, sea);
     const before = Float32Array.from(a.field.heights);
-    // Change a little land in one corner.
-    for (let y = 20; y < 24; y++) for (let x = 25; x < 29; x++) surface[y * w + x] += 0.1;
-    a.carve(surface, sea, { x0: 25, y0: 20, x1: 28, y1: 23 });
-    const fresh = new ChunkCarver(w, h, { scale: 2, seed: 3 });
-    fresh.carve(surface, sea);
-    let same = true;
-    for (let i = 0; i < a.field.heights.length; i++) if (Math.abs(a.field.heights[i] - fresh.field.heights[i]) > 1e-6) same = false;
-    expect(same).toBe(true);
-    // Far from the change, nothing moved.
-    const far = (55 * 2) * a.field.width + 85 * 2;
-    expect(a.field.heights[far]).toBe(before[far]);
-    expect(a.changed!.x1).toBeLessThan(w - 1);
+    // Change a little land.
+    const dirty = { x0: 30, y0: 22, x1: 35, y1: 27 };
+    for (let y = dirty.y0; y <= dirty.y1; y++) for (let x = dirty.x0; x <= dirty.x1; x++) surface[y * w + x] += 0.1;
+    a.carve(surface, sea, dirty);
+    // The change is there...
+    let rise = 0;
+    let cells = 0;
+    for (let Y = dirty.y0 * 2; Y < (dirty.y1 + 1) * 2; Y++) for (let X = dirty.x0 * 2; X < (dirty.x1 + 1) * 2; X++) {
+      rise += a.field.heights[Y * a.field.width + X] - before[Y * a.field.width + X];
+      cells++;
+    }
+    expect(rise / cells).toBeGreaterThan(0.008);
+    // ...and nothing more than a few tiles from it moved at all.
+    for (let Y = 0; Y < a.field.height; Y++) {
+      for (let X = 0; X < a.field.width; X++) {
+        const tx = (X + 0.5) / 2;
+        const ty = (Y + 0.5) / 2;
+        const out = tx < dirty.x0 - 3 || tx > dirty.x1 + 4 || ty < dirty.y0 - 3 || ty > dirty.y1 + 4;
+        if (out) expect(a.field.heights[Y * a.field.width + X]).toBe(before[Y * a.field.width + X]);
+      }
+    }
+    expect(a.changed).toEqual({ x0: dirty.x0 - 3, y0: dirty.y0 - 3, x1: dirty.x1 + 3, y1: dirty.y1 + 3 });
+  });
+});
+
+describe('the terrain tools', () => {
+  it('shape only the land, never the coast or the sea', () => {
+    const w = 60;
+    const h = 40;
+    const hts = new Float32Array(w * h).fill(-0.12);
+    const ed = new TerrainEditor(hts, w, h, 1);
+    ed.dab(30, 20, { tool: 'land', radius: 8, strength: 1, roughness: 0 });
+    const coast = hts.map((v) => (v >= 0 ? 1 : 0));
+    for (const tool of ['mountains', 'hills', 'raise', 'lower', 'valley', 'plateau', 'cliff', 'smooth'] as const) {
+      for (let k = 0; k < 10; k++) ed.line(18, 20, 42, 21, { tool, radius: 9, strength: 1, top: 0.6, floor: 0, level: 0.3 });
+    }
+    expect(Array.from(hts.map((v) => (v >= 0 ? 1 : 0)))).toEqual(Array.from(coast));
+    expect(hts[2 * w + 2]).toBeCloseTo(-0.12, 5);
   });
 });
