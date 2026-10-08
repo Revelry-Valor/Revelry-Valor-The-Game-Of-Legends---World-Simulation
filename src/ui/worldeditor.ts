@@ -61,7 +61,7 @@ export class WorldEditor {
   note = '';
   private terrain = document.createElement('canvas');
   private climate = document.createElement('canvas');
-  private stroke: { x: number; y: number; level?: number; lastEdit?: [number, number] } | null = null;
+  private stroke: { x: number; y: number; level?: number; lastEdit?: [number, number]; start: [number, number]; ramp?: Box | null } | null = null;
   private steps: Step[] = [];
   private worker: Worker | null = null;
   private localCarver: ChunkCarver | null = null;
@@ -475,11 +475,13 @@ export class WorldEditor {
       return;
     }
     this.remember();
-    this.stroke = { x, y, level: strokeLevel(tool, this.editor.heightAt(x, y), this.strength) };
+    this.stroke = { x, y, level: strokeLevel(tool, this.editor.heightAt(x, y), this.strength), start: [x, y] };
     if (tool === 'lakeAdd' || tool === 'lakeRemove') {
       this.paintWater(x, y);
       return;
     }
+    // Smooth lays its slope as you drag.
+    if (tool === 'smooth') return;
     this.touched(this.editor.dab(x, y, this.brush()));
     this.request();
   }
@@ -490,6 +492,16 @@ export class WorldEditor {
     if (this.tool === 'lakeAdd' || this.tool === 'lakeRemove') {
       const [lx, ly] = s.lastEdit ?? [s.x, s.y];
       if (Math.hypot(x - lx, y - ly) >= Math.max(0.5, this.radius * 0.4)) this.paintWater(x, y);
+      return;
+    }
+    if (this.tool === 'smooth') {
+      const base = this.editor.strokeBase();
+      if (!base) return;
+      s.ramp = this.editor.ramp(s.start[0], s.start[1], x, y, this.brush(), base, s.ramp ?? null);
+      this.touched(s.ramp);
+      s.x = x;
+      s.y = y;
+      this.request();
       return;
     }
     this.touched(this.editor.line(s.x, s.y, x, y, this.brush()));
@@ -626,6 +638,22 @@ export class WorldEditor {
       ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
       ctx.fillText(line === 0 ? 'Equator' : `${Math.abs(line)}°${line > 0 ? 'N' : 'S'}`, Math.max(4, x0 + 4), py - 7);
+    }
+    if (this.stroke && this.tool === 'smooth') {
+      // The line the slope is laid along.
+      const [ax, ay] = this.stroke.start;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(sx(ax), sy(ay));
+      ctx.lineTo(sx(this.stroke.x), sy(this.stroke.y));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.beginPath();
+      ctx.arc(sx(ax), sy(ay), 3, 0, Math.PI * 2);
+      ctx.fill();
     }
     if (this.cursor) {
       const BR = BRUSHES.find((b) => b.id === this.tool)!;

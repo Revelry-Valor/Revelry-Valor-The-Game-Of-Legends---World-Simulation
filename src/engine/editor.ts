@@ -28,18 +28,25 @@ export const BRUSHES: { id: BrushTool; group: ToolGroup; name: string; hint: str
   { id: 'shallows', group: 'outline', name: 'Shallows', hint: 'Shallow water: reefs, banks, sounds and lagoons. Paints over deep sea or drowns land just under the waves.' },
   { id: 'deep', group: 'outline', name: 'Deep sea', hint: 'Deepen the sea: ocean basins and trenches. Leaves land alone.' },
   { id: 'mountains', group: 'terrain', name: 'Mountains', hint: 'Drag along a range: a sharp crest, rising with each pass up to the height limit. Erosion carves its valleys and spurs.' },
-  { id: 'hills', group: 'terrain', name: 'Hills', hint: 'Rolling, uneven hill country, up to the height limit.' },
+  { id: 'hills', group: 'terrain', name: 'Hills', hint: 'A sponge: roughs up the land under the brush with lumps and hollows. Go over it again for rougher hill country, up to the height limit.' },
   { id: 'raise', group: 'terrain', name: 'Raise', hint: 'Lift the ground gently and evenly, up to the height limit.' },
   { id: 'lower', group: 'terrain', name: 'Lower', hint: 'Sink the ground, never below the lowest height and never into the sea (the coast is drawn on Land & Sea).' },
   { id: 'plateau', group: 'terrain', name: 'Plateau', hint: 'Level the ground to the height where the stroke began: plateaus, mesas, table lands.' },
   { id: 'cliff', group: 'terrain', name: 'Cliff', hint: 'Raise the land on the left of your stroke into a cliff, dropping sheer along the line you draw. Strength sets how tall, the height limit how high.' },
-  { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Soften the land: gentler slopes, rounded ridges.' },
+  { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Click and drag: lays an even slope from where you pressed to where you let go, up or down, as wide as the brush. The land beside it is left steeper.' },
   { id: 'valley', group: 'terrain', name: 'Valley', hint: 'Cut a V-shaped valley along the stroke, never below the lowest height (and never into the sea).' },
   { id: 'river', group: 'water', name: 'River', hint: 'Click where the river rises, then click each point it should pass. It ends when it reaches the sea, a lake or another river, or press Enter. It finds the natural way between your points and cuts through anything in the way. Esc cancels; click a river to select it, Delete removes it.' },
   { id: 'lake', group: 'water', name: 'Lake', hint: 'Click a low spot: the hollow fills with water to where it would spill over. Set how high it stands with Water level. Click a lake to select it.' },
   { id: 'lakeAdd', group: 'water', name: 'Add water', hint: 'Paint lake water in: widen a lake, or make a pond.' },
   { id: 'lakeRemove', group: 'water', name: 'Remove water', hint: 'Paint land back over lake water: islands, headlands, a narrower shore.' },
 ];
+
+export interface Box {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
 export interface Brush {
   tool: BrushTool;
@@ -167,9 +174,13 @@ export class TerrainEditor {
             break;
           }
           case 'hills': {
-            const bump = 0.55 + 0.45 * this.detail.noise(x * 0.45, y * 0.45);
-            const lift = STEP * 0.45 * k * t * t * bump;
-            v = Math.max(e, Math.min(e + lift, top));
+            // A sponge: lumps and hollows a couple of tiles across, pressed into the land as it is,
+            // so each pass roughens it further (mostly up, with dips between the hills).
+            const n = this.detail.fbm(x * 0.42 + 11.3, y * 0.42 - 7.9, 3) * 0.75 + this.detail.noise(x * 1.1 - 4.2, y * 1.1 + 2.6) * 0.25;
+            const lump = n * 1.6 + 0.3;
+            const fade = t * t * (3 - 2 * t);
+            const lift = STEP * 0.3 * k * fade * lump;
+            v = lift > 0 ? Math.max(e, Math.min(e + lift, top)) : e + lift;
             break;
           }
           case 'raise': {
@@ -203,24 +214,6 @@ export class TerrainEditor {
             if (lvl > e) v = e + (lvl - e) * step * Math.min(1, t * 2.5);
             break;
           }
-          case 'smooth': {
-            let sum = 0;
-            let cnt = 0;
-            for (let oy = -1; oy <= 1; oy++) {
-              for (let ox = -1; ox <= 1; ox++) {
-                const xx = x + ox;
-                const yy = y + oy;
-                if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-                sum += Hs[yy * w + xx];
-                cnt++;
-              }
-            }
-            const avg = sum / cnt;
-            // Smoothing never turns land to sea or sea to land.
-            const nv = e + (avg - e) * Math.min(1, k * t * 1.5);
-            v = e >= 0 ? Math.max(0.001, nv) : Math.min(-0.001, nv);
-            break;
-          }
         }
         Hs[i] = outline ? Math.max(-1, Math.min(1, v)) : Math.max(LAND_FLOOR, Math.min(1, v));
       }
@@ -240,6 +233,57 @@ export class TerrainEditor {
       box = { x0: Math.min(box.x0, r.x0), y0: Math.min(box.y0, r.y0), x1: Math.max(box.x1, r.x1), y1: Math.max(box.y1, r.y1) };
     }
     return box;
+  }
+
+  /**
+   * The Smooth drag: lays an even slope from the height where the drag began (a) to the height
+   * where it is now (b), as wide as the brush. It works from the land as it was before the drag
+   * (base) and puts back what the last move laid (prev), so the slope follows the pen live.
+   * The slope's edges fall away within the last fifth of the brush, so the land beside it is left
+   * steeper. Sea is never touched. Returns the changed area (including what was put back).
+   */
+  ramp(ax: number, ay: number, bx: number, by: number, b: Brush, base: Float32Array, prev: Box | null): Box {
+    const w = this.width;
+    const Hs = this.heights;
+    const at = (x: number, y: number) => base[Math.max(0, Math.min(this.height - 1, Math.floor(y))) * w + Math.max(0, Math.min(w - 1, Math.floor(x)))];
+    if (prev) {
+      for (let y = prev.y0; y <= prev.y1; y++) for (let x = prev.x0; x <= prev.x1; x++) Hs[y * w + x] = base[y * w + x];
+    }
+    const r = Math.max(0.5, b.radius);
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 0.25) return prev ?? { x0: 0, y0: 0, x1: -1, y1: -1 };
+    const ha = Math.max(LAND_FLOOR, at(ax, ay));
+    const hb = Math.max(LAND_FLOOR, at(bx, by));
+    const k = Math.max(0.02, Math.min(1, b.strength));
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - r));
+    const y0 = Math.max(0, Math.floor(Math.min(ay, by) - r));
+    const x1 = Math.min(w - 1, Math.ceil(Math.max(ax, bx) + r));
+    const y1 = Math.min(this.height - 1, Math.ceil(Math.max(ay, by) + r));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const i = y * w + x;
+        const e = base[i];
+        if (e < 0) continue;
+        const px = x + 0.5 - ax;
+        const py = y + 0.5 - ay;
+        const s = Math.max(0, Math.min(1, (px * dx + py * dy) / len2));
+        const d = Math.hypot(px - dx * s, py - dy * s) / r;
+        if (d >= 1) continue;
+        const edge = d < 0.8 ? 1 : 1 - (d - 0.8) / 0.2;
+        const target = ha + (hb - ha) * s;
+        const v = e + (target - e) * edge * edge * (3 - 2 * edge) * (0.3 + 0.7 * k);
+        Hs[i] = Math.max(LAND_FLOOR, Math.min(1, v));
+      }
+    }
+    const box = { x0, y0, x1, y1 };
+    return prev ? { x0: Math.min(x0, prev.x0), y0: Math.min(y0, prev.y0), x1: Math.max(x1, prev.x1), y1: Math.max(y1, prev.y1) } : box;
+  }
+
+  /** The land as it was when the current stroke began. */
+  strokeBase(): Float32Array | null {
+    return this.undo[this.undo.length - 1] ?? null;
   }
 
   /** Drown everything: a blank ocean to raise continents from. */

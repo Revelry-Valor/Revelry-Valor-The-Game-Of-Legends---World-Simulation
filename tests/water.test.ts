@@ -167,7 +167,57 @@ describe('the terrain tools', () => {
     for (const tool of ['mountains', 'hills', 'raise', 'lower', 'valley', 'plateau', 'cliff', 'smooth'] as const) {
       for (let k = 0; k < 10; k++) ed.line(18, 20, 42, 21, { tool, radius: 9, strength: 1, top: 0.6, floor: 0, level: 0.3 });
     }
+    ed.beginStroke();
+    ed.ramp(10, 20, 50, 20, { tool: 'smooth', radius: 12, strength: 1 }, ed.strokeBase()!, null);
     expect(Array.from(hts.map((v) => (v >= 0 ? 1 : 0)))).toEqual(Array.from(coast));
     expect(hts[2 * w + 2]).toBeCloseTo(-0.12, 5);
+  });
+});
+
+describe('the hills sponge', () => {
+  it('roughs up the land it passes over: lumps and hollows, not one rise', () => {
+    const w = 60;
+    const h = 40;
+    const hts = new Float32Array(w * h).fill(0.1);
+    const ed = new TerrainEditor(hts, w, h, 3);
+    for (let k = 0; k < 4; k++) ed.line(10, 20, 50, 20, { tool: 'hills', radius: 8, strength: 0.6, top: 1 });
+    const row: number[] = [];
+    for (let x = 14; x < 46; x++) row.push(hts[20 * w + x]);
+    const lo = Math.min(...row);
+    const hi = Math.max(...row);
+    expect(hi).toBeGreaterThan(0.13);
+    expect(lo).toBeLessThan(0.1);
+    // Bumpy: the ground turns up and down several times along the stroke.
+    let turns = 0;
+    for (let i = 2; i < row.length; i++) if ((row[i] - row[i - 1]) * (row[i - 1] - row[i - 2]) < 0) turns++;
+    expect(turns).toBeGreaterThanOrEqual(4);
+    // Outside the brush, nothing changed.
+    expect(hts[2 * w + 30]).toBeCloseTo(0.1, 6);
+  });
+});
+
+describe('the smooth drag', () => {
+  it('lays an even slope from where it began to where it ends, and follows the pen', () => {
+    const w = 60;
+    const h = 40;
+    const hts = new Float32Array(w * h);
+    // A bumpy rise from 0.05 at the left to 0.45 at the right.
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) hts[y * w + x] = 0.05 + (0.4 * x) / (w - 1) + 0.06 * Math.sin(x * 1.3) * Math.cos(y * 0.9);
+    const ed = new TerrainEditor(hts, w, h, 1);
+    ed.beginStroke();
+    const base = ed.strokeBase()!;
+    // First the pen goes one way, then ends somewhere else: the first slope is put back.
+    let box = ed.ramp(10.5, 20.5, 30.5, 5.5, { tool: 'smooth', radius: 4, strength: 1 }, base, null);
+    box = ed.ramp(10.5, 20.5, 50.5, 20.5, { tool: 'smooth', radius: 4, strength: 1 }, base, box);
+    expect(hts[10 * w + 23]).toBeCloseTo(base[10 * w + 23], 6);
+    const a = base[20 * w + 10];
+    const b = base[20 * w + 50];
+    for (let x = 12; x <= 48; x += 4) {
+      const want = a + ((b - a) * (x + 0.5 - 10.5)) / 40;
+      expect(hts[20 * w + x]).toBeCloseTo(want, 3);
+    }
+    // Away from the line, untouched.
+    expect(hts[35 * w + 30]).toBeCloseTo(base[35 * w + 30], 6);
+    expect(box.x1).toBeGreaterThanOrEqual(50);
   });
 });
