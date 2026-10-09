@@ -67,7 +67,7 @@ export class WorldEditor {
   private detailTimer = 0;
   private detailJob = 0;
   private climate = document.createElement('canvas');
-  private stroke: { x: number; y: number; level?: number; lastEdit?: [number, number]; start: [number, number]; ramp?: Box | null } | null = null;
+  private stroke: { x: number; y: number; level?: number; lastEdit?: [number, number]; start: [number, number]; ramp?: Box | null; path?: [number, number][] } | null = null;
   private steps: Step[] = [];
   private worker: Worker | null = null;
   private localCarver: ChunkCarver | null = null;
@@ -579,7 +579,12 @@ export class WorldEditor {
       return;
     }
     if (this.tool === 'ramp') {
-      s.ramp = this.editor.ramp(s.start[0], s.start[1], x, y, this.brush(), s.ramp ?? null);
+      // The path so far: a point every so often, and always the pen's place now.
+      const path = (s.path ??= [s.start]);
+      const [lx, ly] = path.length > 1 ? path[path.length - 2] : path[0];
+      if (path.length > 1 && Math.hypot(x - lx, y - ly) < Math.max(0.25, this.radius * 0.25)) path[path.length - 1] = [x, y];
+      else path.push([x, y]);
+      s.ramp = this.editor.ramp(path, this.brush(), s.ramp ?? null);
       this.touched(s.ramp);
     } else this.touched(this.editor.line(s.x, s.y, x, y, this.brush()));
     s.x = x;
@@ -725,14 +730,14 @@ export class WorldEditor {
       ctx.fillText(line === 0 ? 'Equator' : `${Math.abs(line)}°${line > 0 ? 'N' : 'S'}`, Math.max(4, x0 + 4), py - 7);
     }
     if (this.stroke && this.tool === 'ramp') {
-      // The line the slope is laid along.
+      // The path the ramp is laid along.
       const [ax, ay] = this.stroke.start;
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
       ctx.moveTo(sx(ax), sy(ay));
-      ctx.lineTo(sx(this.stroke.x), sy(this.stroke.y));
+      for (const [px, py] of this.stroke.path ?? [[this.stroke.x, this.stroke.y]]) ctx.lineTo(sx(px), sy(py));
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';

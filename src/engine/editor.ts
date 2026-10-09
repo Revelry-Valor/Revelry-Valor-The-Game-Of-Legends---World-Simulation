@@ -35,7 +35,7 @@ export const BRUSHES: { id: BrushTool; group: ToolGroup; name: string; hint: str
   { id: 'plateau', group: 'terrain', name: 'Plateau', hint: 'Level the ground to the height where the stroke began: plateaus, mesas, table lands.' },
   { id: 'cliff', group: 'terrain', name: 'Cliff', hint: 'Raise the land on the left of your stroke into a cliff, dropping sheer along the line you draw. Strength sets how tall, the height limit how high.' },
   { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Blends the land under the brush together: knocks down the sharp highs, fills the dips, softens slopes. Go over it again to smooth it more.' },
-  { id: 'ramp', group: 'terrain', name: 'Ramp', hint: 'Click and drag: lays an even slope from where you pressed to where you let go, up or down, as wide as the brush. The land beside it is left steeper.' },
+  { id: 'ramp', group: 'terrain', name: 'Ramp', hint: 'Click and drag along the way the ramp should go: it rises (or falls) evenly along your path, curves and all, from the height where you pressed to the height where you let go. Its sides blend into the land beside it. Wind it up a mountainside for a road or a pass.' },
   { id: 'valley', group: 'terrain', name: 'Valley', hint: 'Cut a V-shaped valley along the stroke, never below the lowest height (and never into the sea).' },
   { id: 'river', group: 'water', name: 'River', hint: 'Click where the river rises, then click each point it should pass. It ends when it reaches the sea, a lake or another river, or press Enter. It finds the natural way between your points and cuts through anything in the way. Esc cancels; click a river to select it, Delete removes it.' },
   { id: 'lake', group: 'water', name: 'Lake', hint: 'Click a low spot: the hollow fills with water to where it would spill over. Set how high it stands with Water level. Click a lake to select it.' },
@@ -495,51 +495,87 @@ export class TerrainEditor {
   }
 
   /**
-   * The Smooth drag: lays an even slope from the height where the drag began (a) to the height
-   * where it is now (b), as wide as the brush. It works from the land as it was before the drag
-   * and puts back what the last move laid (prev), so the slope follows the pen live. The slope's
-   * edges fall away within the last fifth of the brush, so the land beside it is left steeper.
+   * The Ramp drag: lays an even slope along the path dragged (`points`, in tiles), rising or
+   * falling from the height where the drag began to the height where it is now, evenly by the
+   * distance travelled along the path, curves and all: a road winding up a mountain, a switchback.
+   * It is as wide as the brush; its sides fade into the land beside it over the outer two thirds
+   * of the brush, so it meets the hillside like a natural spur. It works from the land as it was
+   * before the drag and puts back what the last move laid (prev), so the ramp follows the pen live.
    * Sea is never touched. Returns the changed area in tiles (including what was put back).
    */
-  ramp(ax: number, ay: number, bx: number, by: number, b: Brush, prev: Box | null): Box {
+  ramp(points: [number, number][], b: Brush, prev: Box | null): Box {
     const S = this.scale;
     const W = this.width * S;
     const base = this.undo[this.undo.length - 1]?.relief;
-    if (!base) return prev ?? { x0: 0, y0: 0, x1: -1, y1: -1 };
+    const none = { x0: 0, y0: 0, x1: -1, y1: -1 };
+    if (!base) return prev ?? none;
     if (prev) {
       for (let Y = prev.y0 * S; Y < (prev.y1 + 1) * S; Y++) for (let X = prev.x0 * S; X < (prev.x1 + 1) * S; X++) this.relief[Y * W + X] = base[Y * W + X];
     }
+    // The length along the path to each point.
+    const along = [0];
+    for (let k = 1; k < points.length; k++) along.push(along[k - 1] + Math.hypot(points[k][0] - points[k - 1][0], points[k][1] - points[k - 1][1]));
+    const total = along[along.length - 1];
+    if (points.length < 2 || total < 0.2) return prev ?? none;
     const r = Math.max(0.25, b.radius);
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    if (len2 < 0.04) return prev ?? { x0: 0, y0: 0, x1: -1, y1: -1 };
     const at = (x: number, y: number) => {
       const i = Math.max(0, Math.min(this.height * S - 1, Math.floor(y * S))) * W + Math.max(0, Math.min(W - 1, Math.floor(x * S)));
       return this.wet[i] ? LAND_FLOOR : this.under[i] + base[i];
     };
-    const ha = Math.max(LAND_FLOOR, at(ax, ay));
-    const hb = Math.max(LAND_FLOOR, at(bx, by));
+    const [sx, sy] = points[0];
+    const [ex, ey] = points[points.length - 1];
+    const ha = Math.max(LAND_FLOOR, at(sx, sy));
+    const hb = Math.max(LAND_FLOOR, at(ex, ey));
     const k = Math.max(0.02, Math.min(1, b.strength));
-    const box = this.cells((ax + bx) / 2, (ay + by) / 2, r + Math.sqrt(len2) / 2);
-    for (let Y = box.Y0; Y <= box.Y1; Y++) {
-      const ty = (Y + 0.5) / S;
-      for (let X = box.X0; X <= box.X1; X++) {
-        const i = Y * W + X;
+    // Each cell near the path: how far it is from the path, and how far along the path that is.
+    let box: Box | null = null;
+    for (const [x, y] of points) box = union(box, this.cells(x, y, r).tiles);
+    const bx = box!;
+    const X0 = bx.x0 * S;
+    const Y0 = bx.y0 * S;
+    const bw = (bx.x1 - bx.x0 + 1) * S;
+    const bh = (bx.y1 - bx.y0 + 1) * S;
+    const dist = new Float32Array(bw * bh).fill(Infinity);
+    const pos = new Float32Array(bw * bh);
+    for (let q = 1; q < points.length; q++) {
+      const [ax, ay] = points[q - 1];
+      const [cx, cy] = points[q];
+      const dx = cx - ax;
+      const dy = cy - ay;
+      const len2 = dx * dx + dy * dy;
+      const seg = this.cells((ax + cx) / 2, (ay + cy) / 2, r + Math.sqrt(len2) / 2);
+      for (let Y = seg.Y0; Y <= seg.Y1; Y++) {
+        const ty = (Y + 0.5) / S;
+        for (let X = seg.X0; X <= seg.X1; X++) {
+          const j = (Y - Y0) * bw + (X - X0);
+          if (j < 0 || j >= dist.length) continue;
+          const px = (X + 0.5) / S - ax;
+          const py = ty - ay;
+          const t = len2 > 1e-9 ? Math.max(0, Math.min(1, (px * dx + py * dy) / len2)) : 0;
+          const d = Math.hypot(px - dx * t, py - dy * t);
+          if (d < dist[j]) {
+            dist[j] = d;
+            pos[j] = (along[q - 1] + t * Math.sqrt(len2)) / total;
+          }
+        }
+      }
+    }
+    for (let y = 0; y < bh; y++) {
+      for (let x = 0; x < bw; x++) {
+        const j = y * bw + x;
+        const dd = dist[j] / r;
+        if (dd >= 1) continue;
+        const i = (Y0 + y) * W + X0 + x;
         if (this.wet[i]) continue;
-        const px = (X + 0.5) / S - ax;
-        const py = ty - ay;
-        const s = Math.max(0, Math.min(1, (px * dx + py * dy) / len2));
-        const d = Math.hypot(px - dx * s, py - dy * s) / r;
-        if (d >= 1) continue;
         const e = this.under[i] + base[i];
-        const edge = d < 0.8 ? 1 : 1 - (d - 0.8) / 0.2;
-        const target = ha + (hb - ha) * s;
-        const v = e + (target - e) * edge * edge * (3 - 2 * edge) * (0.3 + 0.7 * k);
+        const target = ha + (hb - ha) * pos[j];
+        // Full along the middle third, fading smoothly into the land beside it.
+        const side = 1 - smoothstep(0.33, 1, dd);
+        const v = e + (target - e) * side * (0.3 + 0.7 * k);
         this.relief[i] = Math.max(LAND_FLOOR, Math.min(1, v)) - this.under[i];
       }
     }
-    return union(prev, box.tiles);
+    return union(prev, bx);
   }
 
   /** Apply the tool along a stroke from one point to the next. Returns the changed area (tiles). */

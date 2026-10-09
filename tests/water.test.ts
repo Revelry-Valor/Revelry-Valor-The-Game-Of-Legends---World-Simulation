@@ -217,7 +217,7 @@ describe('the terrain tools', () => {
       for (let k = 0; k < 10; k++) ed.line(18, 20, 42, 21, { tool, radius: 9, strength: 1, top: 0.6, floor: 0, level: 0.3 });
     }
     ed.beginStroke();
-    ed.ramp(10, 20, 50, 20, { tool: 'ramp', radius: 12, strength: 1 }, null);
+    ed.ramp([[10, 20], [30, 25], [50, 20]], { tool: 'ramp', radius: 12, strength: 1 }, null);
     expect(Array.from(hts.map((v) => (v >= 0 ? 1 : 0)))).toEqual(Array.from(coast));
     expect(hts[2 * w + 2]).toBeCloseTo(-0.12, 5);
     // The land stays above the sea everywhere the tools went.
@@ -250,6 +250,35 @@ describe('the hills sponge', () => {
 });
 
 describe('the ramp drag', () => {
+  it('follows the path drawn, rising evenly along it, curves and all, and blends in at the sides', () => {
+    const w = 60;
+    const h = 40;
+    const hts = new Float32Array(w * h).fill(0.02);
+    const ed = new TerrainEditor(hts, w, h, 1);
+    // A high block to climb onto at the end.
+    for (let k = 0; k < 8; k++) {
+      ed.beginStroke();
+      ed.dab(45.5, 30.5, { tool: 'plateau', radius: 4, strength: 1, level: 0.3 });
+      ed.dab(45.5, 30.5, { tool: 'raise', radius: 4, strength: 1, top: 0.3 });
+    }
+    ed.beginStroke();
+    const top = ed.heightAt(45.5, 30.5);
+    expect(top).toBeGreaterThan(0.2);
+    // An L: east 20 tiles, then south 20 tiles up onto the block.
+    const path: [number, number][] = [[25.5, 10.5], [35.5, 10.5], [45.5, 10.5], [45.5, 20.5], [45.5, 30.5]];
+    ed.ramp(path, { tool: 'ramp', radius: 4, strength: 1 }, null);
+    const a = 0.02;
+    // Evenly by the distance along the path: a quarter of the way at 10 tiles, half at the corner.
+    expect(ed.heightAt(35.5, 10.5)).toBeCloseTo(a + (top - a) * 0.25, 2);
+    expect(ed.heightAt(45.5, 10.5)).toBeCloseTo(a + (top - a) * 0.5, 2);
+    expect(ed.heightAt(45.5, 20.5)).toBeCloseTo(a + (top - a) * 0.75, 2);
+    // The sides fade into the land: part way at half the brush out, untouched past its edge.
+    const mid = ed.heightAt(45.5 - 2, 20.5);
+    expect(mid).toBeGreaterThan(0.03);
+    expect(mid).toBeLessThan(ed.heightAt(45.5, 20.5));
+    expect(ed.heightAt(45.5 - 4.3, 20.5)).toBeCloseTo(0.02, 6);
+  });
+
   it('lays an even slope from where it began to where it ends, and follows the pen', () => {
     const w = 60;
     const h = 40;
@@ -264,8 +293,8 @@ describe('the ramp drag', () => {
     const b = at(50.5, 20.5);
     const far = at(30.1, 35.1);
     // First the pen goes one way, then ends somewhere else: the first slope is put back.
-    let box = ed.ramp(10.5, 20.5, 30.5, 5.5, { tool: 'ramp', radius: 4, strength: 1 }, null);
-    box = ed.ramp(10.5, 20.5, 50.5, 20.5, { tool: 'ramp', radius: 4, strength: 1 }, box);
+    let box = ed.ramp([[10.5, 20.5], [30.5, 5.5]], { tool: 'ramp', radius: 4, strength: 1 }, null);
+    box = ed.ramp([[10.5, 20.5], [30.5, 20.5], [50.5, 20.5]], { tool: 'ramp', radius: 4, strength: 1 }, box);
     expect(at(23.1, 10.1)).toBeCloseTo(off, 6);
     for (let x = 12.5; x <= 48.5; x += 4) expect(at(x, 20.5)).toBeCloseTo(a + ((b - a) * (x - 10.5)) / 40, 2);
     // Away from the line, untouched.
