@@ -14,6 +14,9 @@ const CHUNK = 32;
 const MARGIN = 7;
 /** ...and blended into its neighbours across this many tiles either side of the seam. */
 const FEATHER = 4;
+/** The least share of a stroke's change the carving keeps, and how far past it it may go. */
+const KEEP = 0.75;
+const LEEWAY = 0.01;
 /** How far, in tiles, a change to the tiles reaches into the land laid out from them. */
 const SPREAD = 3;
 
@@ -250,7 +253,13 @@ export class ChunkCarver {
           // Faded in by how much the land changed, so the edge of a stroke meets the land around it.
           const k0 = wet ? 1 : Math.min(1, Math.abs(dp) / 0.004);
           const k = k0 * k0 * (3 - 2 * k0);
-          f.heights[i] = Math.max(0, b.heights[i] + k * (isC.heights[j] - wasC.heights[j]) + (1 - k) * dp);
+          // What the carving made of the change, kept close to what was drawn: water may shape a
+          // stroke (gullies, worn crests, a fan at its foot) but never undo it. Wherever a brush
+          // goes, at least KEEP of what it raised stays raised and of what it lowered stays lowered,
+          // even on a valley floor where the streams would otherwise carry it all away.
+          let carved = isC.heights[j] - wasC.heights[j];
+          if (!wet) carved = dp > 0 ? Math.min(Math.max(carved, KEEP * dp), dp + LEEWAY) : Math.max(Math.min(carved, KEEP * dp), dp - LEEWAY);
+          f.heights[i] = Math.max(0, b.heights[i] + k * carved + (1 - k) * dp);
           f.wear[i] = clamp01(b.wear[i] + k * (isC.wear[j] - wasC.wear[j]));
           f.deposits[i] = clamp01(b.deposits[i] + k * (isC.deposits[j] - wasC.deposits[j]));
           f.flow[i] = clamp01(b.flow[i] + k * (isC.flow[j] - wasC.flow[j]));

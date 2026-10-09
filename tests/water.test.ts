@@ -322,6 +322,51 @@ describe('the ramp drag', () => {
   });
 });
 
+describe('a stroke on a valley floor', () => {
+  it('keeps at least three quarters of what the brush did, however hard the water runs there', () => {
+    const w = 70;
+    const h = 40;
+    const S = 2;
+    const surface = new Float32Array(w * h).fill(0.02);
+    const sea = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) sea[x] = sea[(h - 1) * w + x] = 1;
+    for (let y = 0; y < h; y++) sea[y * w] = sea[y * w + w - 1] = 1;
+    const relief = new Float32Array(w * S * h * S);
+    // Two high blocks with a valley between them, its floor draining a wide catchment.
+    const block = (cx: number) => {
+      for (let Y = 0; Y < h * S; Y++) for (let X = 0; X < w * S; X++) {
+        const d = Math.hypot((X + 0.5) / S - cx, ((Y + 0.5) / S - 20) * 0.5);
+        if (d < 12) relief[Y * w * S + X] = Math.max(relief[Y * w * S + X], 0.35 * (1 - d / 12));
+      }
+    };
+    block(20);
+    block(50);
+    for (const erosion of [1.4, 2.8]) {
+      const a = new ChunkCarver(w, h, { scale: S, seed: 9, erosion, downcutting: 1.4 });
+      const r0 = Float32Array.from(relief);
+      a.carve(surface, sea, r0);
+      const before = Float32Array.from(a.field.heights);
+      // A crest drawn across the valley.
+      const r1 = Float32Array.from(r0);
+      const added = new Float32Array(r1.length);
+      for (let Y = 0; Y < h * S; Y++) for (let X = 0; X < w * S; X++) {
+        const d = Math.abs((Y + 0.5) / S - 20);
+        const x = (X + 0.5) / S;
+        if (d < 3 && x > 28 && x < 42) added[Y * w * S + X] = 0.12 * (1 - d / 3);
+        r1[Y * w * S + X] += added[Y * w * S + X];
+      }
+      a.carve(surface, sea, r1, { x0: 27, y0: 16, x1: 43, y1: 24 }, true);
+      let cells = 0;
+      for (let i = 0; i < added.length; i++) {
+        if (added[i] < 0.01) continue;
+        cells++;
+        expect(a.field.heights[i] - before[i]).toBeGreaterThanOrEqual(0.75 * added[i] - 2e-3);
+      }
+      expect(cells).toBeGreaterThan(50);
+    }
+  });
+});
+
 describe('the mountains ridge', () => {
   it('raises a crest along the stroke, as narrow as the brush, and nothing outside it', () => {
     const w = 60;
