@@ -379,3 +379,51 @@ export function copyField(f: ReliefField): ReliefField {
     lakeSd: undefined,
   };
 }
+
+/**
+ * Land held as the Smooth and Ramp tools left it: on the fine grid, how firmly each cell is held
+ * (0 not at all .. 1 exactly) and the height it is held at. Held land stays as it was smoothed,
+ * whatever the carving does under it, until another tool reshapes it.
+ */
+export interface Held {
+  weight: Float32Array;
+  level: Float32Array;
+}
+
+/** The carved land's maps, before any held land is laid on them. */
+export interface LandMaps {
+  heights: Float32Array;
+  wear: Float32Array;
+  deposits: Float32Array;
+  flow: Float32Array;
+}
+
+/**
+ * Lay held land over the carved land `f`, from its maps as carved (`src`), over a box of tiles (or
+ * all of it). The held cells take their held height; the marks of wear there fade, as on ground
+ * smoothed over. Water is left alone.
+ */
+export function applyHeld(f: ReliefField, src: LandMaps, held: Held | null, box?: Box): void {
+  const S = f.scale;
+  const X0 = box ? Math.max(0, box.x0 * S) : 0;
+  const Y0 = box ? Math.max(0, box.y0 * S) : 0;
+  const X1 = box ? Math.min(f.width, (box.x1 + 1) * S) : f.width;
+  const Y1 = box ? Math.min(f.height, (box.y1 + 1) * S) : f.height;
+  for (let Y = Y0; Y < Y1; Y++) {
+    for (let X = X0; X < X1; X++) {
+      const i = Y * f.width + X;
+      const w = held ? held.weight[i] : 0;
+      if (w <= 0 || f.water[i] || f.lake?.[i]) {
+        f.heights[i] = src.heights[i];
+        f.wear[i] = src.wear[i];
+        f.deposits[i] = src.deposits[i];
+        f.flow[i] = src.flow[i];
+        continue;
+      }
+      f.heights[i] = src.heights[i] + (held!.level[i] - src.heights[i]) * w;
+      f.wear[i] = src.wear[i] * (1 - 0.8 * w);
+      f.deposits[i] = src.deposits[i] * (1 - 0.5 * w);
+      f.flow[i] = src.flow[i] * (1 - 0.8 * w);
+    }
+  }
+}

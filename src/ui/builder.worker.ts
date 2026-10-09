@@ -1,5 +1,5 @@
 import { Rng } from '../engine/rng';
-import { copyField, type Box, type ChunkCarver } from '../engine/terrainbuild';
+import { applyHeld, copyField, type Box, type ChunkCarver, type Held, type LandMaps } from '../engine/terrainbuild';
 import type { MapData, WorldConfig } from '../engine/types';
 import { carverFor, decodeHeights, generateMap } from '../engine/worldgen';
 import { TerrainShader, type MapStyle } from './terrain';
@@ -44,6 +44,8 @@ export interface BuildRequest {
   relief: Float32Array | null;
   /** Wear the change with water (false while a stroke is still being drawn). */
   erode: boolean;
+  /** Land held as Smooth and Ramp left it. */
+  held: Held | null;
   dirty: Box | null;
   paint: PaintJob;
 }
@@ -60,7 +62,7 @@ export interface BuildRequest {
 let carver: ChunkCarver | null = null;
 let carveKey = '';
 /** The last world built, its outline, and the painter for it, kept for showing strokes as drawn. */
-let last: { map: MapData; heightmap: string; shader: TerrainShader; look: string } | null = null;
+let last: { map: MapData; heightmap: string; shader: TerrainShader; look: string; raw: LandMaps } | null = null;
 /** The part of the map shown close in, painted in full detail. */
 let detailView: { box: Box; scale: number; look: string } | null = null;
 
@@ -107,7 +109,7 @@ self.onmessage = (e: MessageEvent<BuildRequest | DetailRequest | { kept: true }>
     post({ kept: f }, f ? ([f.heights.buffer, f.wear.buffer, f.deposits.buffer, f.flow.buffer, f.water.buffer] as ArrayBuffer[]) : []);
     return;
   }
-  const { id, cfg, relief, erode, dirty, paint } = e.data;
+  const { id, cfg, relief, erode, held, dirty, paint } = e.data;
   // New carving settings, map size or seed: everything is carved afresh.
   const key = JSON.stringify([cfg.width, cfg.height, cfg.seed, cfg.terrain?.mountains, cfg.terrain?.erosion, cfg.terrain?.softness, cfg.terrain?.downcutting]);
   const fresh = !carver || key !== carveKey || !dirty;
@@ -125,20 +127,24 @@ self.onmessage = (e: MessageEvent<BuildRequest | DetailRequest | { kept: true }>
       else surface[i] = outline[i];
     }
     const f = carver!.carve(surface, sea, relief, dirty, false);
-    const box = union(carver!.changed, paint.box);
+    const changed = carver!.changed;
+    const box = union(changed, paint.box);
     let painted: Painted | null = null;
     if (box) {
-      // The map's own copy of the land (with its rivers and lakes) takes the land as drawn here.
-      const c = map.carved!;
-      const S = f.scale;
-      for (let Y = Math.max(0, box.y0 * S); Y < Math.min(f.height, (box.y1 + 1) * S); Y++) {
-        const a = Y * f.width + Math.max(0, box.x0 * S);
-        const b = Y * f.width + Math.min(f.width, (box.x1 + 1) * S);
-        c.heights.set(f.heights.subarray(a, b), a);
-        c.wear.set(f.wear.subarray(a, b), a);
-        c.deposits.set(f.deposits.subarray(a, b), a);
-        c.flow.set(f.flow.subarray(a, b), a);
+      // The land as drawn here, under the map's rivers and lakes elsewhere; then the held land on it.
+      const raw = last.raw;
+      if (changed) {
+        const S = f.scale;
+        for (let Y = Math.max(0, changed.y0 * S); Y < Math.min(f.height, (changed.y1 + 1) * S); Y++) {
+          const a = Y * f.width + Math.max(0, changed.x0 * S);
+          const b = Y * f.width + Math.min(f.width, (changed.x1 + 1) * S);
+          raw.heights.set(f.heights.subarray(a, b), a);
+          raw.wear.set(f.wear.subarray(a, b), a);
+          raw.deposits.set(f.deposits.subarray(a, b), a);
+          raw.flow.set(f.flow.subarray(a, b), a);
+        }
       }
+      applyHeld(map.carved!, raw, held, box);
       shader.refresh(box);
       painted = paintBox(shader, map, box, paint.scale);
     }
@@ -150,12 +156,16 @@ self.onmessage = (e: MessageEvent<BuildRequest | DetailRequest | { kept: true }>
     carver = carverFor(cfg);
     carveKey = key;
   }
-  const map = generateMap(cfg, new Rng(cfg.seed).fork('map'), { carver: carver!, dirty: fresh ? null : dirty, relief, erode });
+  // Built without the held land, which is then laid on here (and kept apart, for strokes to come).
+  const map = generateMap(cfg, new Rng(cfg.seed).fork('map'), { carver: carver!, dirty: fresh ? null : dirty, relief, erode, held: null });
+  const c = map.carved!;
+  const raw: LandMaps = { heights: Float32Array.from(c.heights), wear: Float32Array.from(c.wear), deposits: Float32Array.from(c.deposits), flow: Float32Array.from(c.flow) };
+  if (held) applyHeld(c, raw, held);
   const shader = new TerrainShader(map, paint.style, undefined, paint.contours);
   // Paint what the carving changed and whatever the editor asked for.
   const box: Box | null = fresh || paint.box === 'all' ? { x0: 0, y0: 0, x1: map.width - 1, y1: map.height - 1 } : union(carver!.changed, paint.box);
   const painted = box ? paintBox(shader, map, box, paint.scale) : null;
-  last = { map, heightmap: cfg.heightmap ?? '', shader, look };
+  last = { map, heightmap: cfg.heightmap ?? '', shader, look, raw };
   // The map is copied over (it is kept here, for showing strokes as drawn); the pixels handed over.
   const reply: BuildReply = { id, map, painted, detail: detailOf(painted) };
   post(reply, transfers(reply));

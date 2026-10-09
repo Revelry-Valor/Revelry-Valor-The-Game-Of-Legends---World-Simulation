@@ -4,7 +4,7 @@ import { copyField, type Box, type ChunkCarver } from '../engine/terrainbuild';
 import type { ReliefField } from '../engine/erosion';
 import type { MapData, WorldConfig } from '../engine/types';
 import { emptyWater, type WaterPlan } from '../engine/water';
-import { carveScale, carverFor, decodeHeights, decodeRelief, encodeHeights, encodeRelief, generateMap, keepCarving } from '../engine/worldgen';
+import { carveScale, carverFor, decodeHeights, decodeHeld, decodeRelief, encodeHeights, encodeHeld, encodeRelief, generateMap, keepCarving } from '../engine/worldgen';
 import BuilderWorker from './builder.worker?worker&inline';
 import type { BuildReply, Painted, PaintJob } from './builder.worker';
 import { drawCurrents, paintClimate, type ClimateLayer } from './render';
@@ -88,7 +88,8 @@ export class WorldEditor {
     const land = cfg.heightmap ? decodeHeights(cfg.heightmap, w, h) : null;
     const S = carveScale(w, h);
     const relief = cfg.relief ? decodeRelief(cfg.relief, w * S, h * S) : null;
-    this.editor = new TerrainEditor(land ?? new Float32Array(w * h), w, h, cfg.seed, S, relief);
+    const held = cfg.held ? decodeHeld(cfg.held, w * S, h * S) : null;
+    this.editor = new TerrainEditor(land ?? new Float32Array(w * h), w, h, cfg.seed, S, relief, held);
     // No land drawn yet: a blank ocean to start from.
     if (!land) this.editor.clear();
     try {
@@ -186,8 +187,11 @@ export class WorldEditor {
    */
   settings(shaped = true): WorldConfig {
     const S = this.editor.scale;
-    const relief = shaped && this.editor.relief.some((v) => v !== 0) ? encodeRelief(this.editor.relief, this.cfg.width * S, this.cfg.height * S) : undefined;
-    return { ...this.cfg, heightmap: this.heightmap(), relief, water: JSON.parse(JSON.stringify(this.water)), riverSources: undefined, terrainPreview: undefined };
+    const FW = this.cfg.width * S;
+    const FH = this.cfg.height * S;
+    const relief = shaped && this.editor.relief.some((v) => v !== 0) ? encodeRelief(this.editor.relief, FW, FH) : undefined;
+    const held = shaped && this.editor.held.weight.some((v) => v > 0) ? encodeHeld(this.editor.held, FW, FH) : undefined;
+    return { ...this.cfg, heightmap: this.heightmap(), relief, held, water: JSON.parse(JSON.stringify(this.water)), riverSources: undefined, terrainPreview: undefined };
   }
 
   /**
@@ -211,6 +215,7 @@ export class WorldEditor {
     const id = ++this.job;
     const cfg = this.settings(false);
     const relief = Float32Array.from(this.editor.relief);
+    const held = { weight: Float32Array.from(this.editor.held.weight), level: Float32Array.from(this.editor.held.level) };
     const wear = this.erode;
     this.erode = false;
     // Nothing of the land changed: an empty box, so nothing is carved again.
@@ -220,14 +225,14 @@ export class WorldEditor {
     this.dirty = null;
     this.fullCarve = false;
     if (this.worker) {
-      this.worker.postMessage({ id, cfg, relief, erode: wear, dirty, paint }, [relief.buffer]);
+      this.worker.postMessage({ id, cfg, relief, held, erode: wear, dirty, paint }, [relief.buffer, held.weight.buffer, held.level.buffer]);
       return;
     }
     // No background thread to be had: build and paint here, between frames.
     setTimeout(() => {
       const fresh = !this.localCarver || dirty === null;
       if (fresh) this.localCarver = carverFor(cfg);
-      const map = generateMap(cfg, new Rng(cfg.seed).fork('map'), { carver: this.localCarver!, dirty: fresh ? null : dirty, relief, erode: wear });
+      const map = generateMap(cfg, new Rng(cfg.seed).fork('map'), { carver: this.localCarver!, dirty: fresh ? null : dirty, relief, erode: wear, held });
       const changed = fresh ? null : this.localCarver!.changed;
       let box: Box | null = fresh || paint.box === 'all' ? { x0: 0, y0: 0, x1: map.width - 1, y1: map.height - 1 } : union(changed, paint.box);
       let painted: BuildReply['painted'] = null;
@@ -375,7 +380,15 @@ export class WorldEditor {
 
   /** Remember the land and water as they are, so the next change can be undone. */
   private remember(): void {
-    this.editor.beginStroke();
+    // The land as seen now, for Smooth and Ramp to work on.
+    const c = this.map?.carved;
+    let seen: { heights: Float32Array; wet: Uint8Array } | null = null;
+    if (c) {
+      const wet = Uint8Array.from(c.water);
+      if (c.lake) for (let i = 0; i < wet.length; i++) if (c.lake[i]) wet[i] = 1;
+      seen = { heights: c.heights, wet };
+    }
+    this.editor.beginStroke(seen);
     this.steps.push({ water: JSON.stringify(this.water), box: null });
     if (this.steps.length > 30) this.steps.shift();
   }
@@ -384,6 +397,8 @@ export class WorldEditor {
   private touched(box: Box): void {
     if (box.x1 < box.x0) return;
     this.dirty = union(this.dirty, box);
+    // Smooth and Ramp hold the land as they leave it: the carving doesn't change, but the map does.
+    if (this.tool === 'smooth' || this.tool === 'ramp') this.repaint = this.repaint === 'all' ? 'all' : union(this.repaint, box);
     const step = this.steps[this.steps.length - 1];
     if (step) step.box = union(step.box, box);
   }
@@ -395,7 +410,11 @@ export class WorldEditor {
     this.water = JSON.parse(step.water);
     this.pending = null;
     this.selected = null;
-    if (step.box) this.dirty = union(this.dirty, step.box);
+    if (step.box) {
+      this.dirty = union(this.dirty, step.box);
+      // Held land may have changed there too.
+      this.repaint = this.repaint === 'all' ? 'all' : union(this.repaint, step.box);
+    }
     if (waterChanged) this.repaint = 'all';
     this.request();
     return true;

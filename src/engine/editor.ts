@@ -1,5 +1,6 @@
 import { Noise2D } from './noise';
 import { Rng } from './rng';
+import type { Held } from './terrainbuild';
 
 /** The editor's tools: outline the land and seas, shape the terrain, and put water on it. */
 export type BrushTool =
@@ -34,8 +35,8 @@ export const BRUSHES: { id: BrushTool; group: ToolGroup; name: string; hint: str
   { id: 'lower', group: 'terrain', name: 'Lower', hint: 'Sink the ground, never below the lowest height and never into the sea (the coast is drawn on Land & Sea).' },
   { id: 'plateau', group: 'terrain', name: 'Plateau', hint: 'Level the ground to the height where the stroke began: plateaus, mesas, table lands.' },
   { id: 'cliff', group: 'terrain', name: 'Cliff', hint: 'Raise the land on the left of your stroke into a cliff, dropping sheer along the line you draw. Strength sets how tall, the height limit how high.' },
-  { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Blends the land under the brush together: knocks down the sharp highs, fills the dips, softens slopes. Go over it again to smooth it more.' },
-  { id: 'ramp', group: 'terrain', name: 'Ramp', hint: 'Click and drag along the way the ramp should go: it rises (or falls) evenly along your path, curves and all, from the height where you pressed to the height where you let go. Its sides blend into the land beside it. Wind it up a mountainside for a road or a pass.' },
+  { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Blends the land under the brush together, as you see it: the highs come down as the lows come up, slopes even out. Go over it again to smooth it more. What you smooth stays as you left it.' },
+  { id: 'ramp', group: 'terrain', name: 'Ramp', hint: 'Click and drag along the way the ramp should go: the whole width of the brush is laid to an even slope along your path, curves and all, from the height where you pressed to the height where you are now. Strength sets how fully. Wind it up a mountainside for a road or a pass. What it lays stays as you left it.' },
   { id: 'valley', group: 'terrain', name: 'Valley', hint: 'Cut a V-shaped valley along the stroke, never below the lowest height (and never into the sea).' },
   { id: 'river', group: 'water', name: 'River', hint: 'Click where the river rises, then click each point it should pass. It ends when it reaches the sea, a lake or another river, or press Enter. It finds the natural way between your points and cuts through anything in the way. Esc cancels; click a river to select it, Delete removes it.' },
   { id: 'lake', group: 'water', name: 'Lake', hint: 'Click a low spot: the hollow fills with water to where it would spill over. Set how high it stands with Water level. Click a lake to select it.' },
@@ -113,15 +114,26 @@ export class TerrainEditor {
   private wet: Uint8Array;
   private rough: Noise2D;
   private detail: Noise2D;
-  private undo: { heights: Float32Array; relief: Float32Array }[] = [];
+  /**
+   * Land held as Smooth and Ramp left it, on the fine grid: how firmly (0..1) and at what height.
+   * These two tools work on the land as it is seen (carved), and what they make stays.
+   */
+  readonly held: Held;
+  /** The land as seen when the stroke began (carved, held land laid on), and as the stroke has it now. */
+  private seen0: Float32Array | null = null;
+  private seen: Float32Array | null = null;
+  /** Where the land seen is water (sea or lake). */
+  private seenWet: Uint8Array | null = null;
+  private undo: { heights: Float32Array; relief: Float32Array; weight: Float32Array; level: Float32Array }[] = [];
   /** The crest a Mountains stroke has raised so far, and how far along it the stroke has come. */
   private ridgeLayer: Float32Array | null = null;
   private ridgeU = 0;
 
-  constructor(public heights: Float32Array, public width: number, public height: number, seed = 1, scale = 4, relief?: Float32Array | null) {
+  constructor(public heights: Float32Array, public width: number, public height: number, seed = 1, scale = 4, relief?: Float32Array | null, held?: Held | null) {
     this.scale = scale;
     const n = width * scale * height * scale;
     this.relief = relief && relief.length === n ? relief : new Float32Array(n);
+    this.held = held && held.weight.length === n ? held : { weight: new Float32Array(n), level: new Float32Array(n) };
     this.under = new Float32Array(n);
     this.wet = new Uint8Array(n);
     this.rough = new Noise2D(new Rng(seed).fork('brush-edge'));
@@ -129,12 +141,24 @@ export class TerrainEditor {
     this.layOut({ x0: 0, y0: 0, x1: width - 1, y1: height - 1 });
   }
 
-  /** Remember the land as it is, so the next stroke can be undone. */
-  beginStroke(): void {
-    this.undo.push({ heights: Float32Array.from(this.heights), relief: Float32Array.from(this.relief) });
-    if (this.undo.length > 20) this.undo.shift();
+  /**
+   * Remember the land as it is, so the next stroke can be undone. `seen` is the land as it is
+   * seen now (carved, at the fine grid) and where it is water, for Smooth and Ramp to work on.
+   */
+  beginStroke(seen?: { heights: Float32Array; wet: Uint8Array } | null): void {
+    this.undo.push({ heights: Float32Array.from(this.heights), relief: Float32Array.from(this.relief), weight: Float32Array.from(this.held.weight), level: Float32Array.from(this.held.level) });
+    if (this.undo.length > 12) this.undo.shift();
     this.ridgeLayer = null;
     this.ridgeU = 0;
+    const ok = seen && seen.heights.length === this.relief.length;
+    this.seen0 = ok ? Float32Array.from(seen.heights) : null;
+    this.seenWet = ok ? seen.wet : null;
+    // Held land is seen at its held height, even if the map shown hasn't caught up with it yet.
+    if (this.seen0) {
+      const { weight, level } = this.held;
+      for (let i = 0; i < weight.length; i++) if (weight[i] > 0 && !this.seenWet![i]) this.seen0[i] += (level[i] - this.seen0[i]) * weight[i];
+    }
+    this.seen = this.seen0 ? Float32Array.from(this.seen0) : null;
   }
 
   canUndo(): boolean {
@@ -146,6 +170,8 @@ export class TerrainEditor {
     if (!prev) return false;
     this.heights.set(prev.heights);
     this.relief.set(prev.relief);
+    this.held.weight.set(prev.weight);
+    this.held.level.set(prev.level);
     this.layOut({ x0: 0, y0: 0, x1: this.width - 1, y1: this.height - 1 });
     return true;
   }
@@ -159,6 +185,14 @@ export class TerrainEditor {
     const i = Y * W + X;
     if (this.wet[i]) return this.heights[Math.min(this.height - 1, Math.floor(y)) * this.width + Math.min(this.width - 1, Math.floor(x))];
     return this.under[i] + this.relief[i];
+  }
+
+  /** The land as seen at a point (tiles), as the stroke under way has it (Smooth and Ramp work on it). */
+  seenAt(x: number, y: number): number {
+    const S = this.scale;
+    const W = this.width * S;
+    const i = Math.max(0, Math.min(this.height * S - 1, Math.floor(y * S))) * W + Math.max(0, Math.min(W - 1, Math.floor(x * S)));
+    return this.seen ? this.seen[i] : this.under[i] + this.relief[i];
   }
 
   /** Lay the tiles of a box (and as far around as they reach) out on the fine grid, as the carving does. */
@@ -194,6 +228,7 @@ export class TerrainEditor {
           this.under[i] = 0;
           // Land under the sea keeps no shaping: painted back into land, it comes back flat.
           this.relief[i] = 0;
+          this.held.weight[i] = 0;
           continue;
         }
         this.wet[i] = 0;
@@ -266,17 +301,23 @@ export class TerrainEditor {
   }
 
   /**
-   * One dab of Smooth: each point under the brush moves towards the average of the land around it
-   * (over about a third of the brush's width), most in the middle of the brush and not at all at
-   * its edge, so sharp highs come down, dips fill and slopes even out. Only land is averaged.
+   * One dab of Smooth, on the land as it is seen: each point under the brush moves towards the
+   * average of the land around it (over about a third of the brush's width), most in the middle
+   * of the brush and not at all at its edge. Highs come down as the lows around them come up, so
+   * the land evens out without rising or sinking overall. Only land is averaged, and what Smooth
+   * leaves is held: the carving doesn't wear it again.
    */
   private blur(cx: number, cy: number, b: Brush): Box {
+    const seen = this.seen;
+    const wetAt = this.seenWet;
+    const none = { x0: 0, y0: 0, x1: -1, y1: -1 };
+    if (!seen || !wetAt) return none;
     const S = this.scale;
     const W = this.width * S;
     const H = this.height * S;
     const r = Math.max(0.25, b.radius);
     const k = Math.max(0.02, Math.min(1, b.strength));
-    const kr = Math.max(1, Math.round(r * S * 0.3));
+    const kr = Math.max(1, Math.round(r * S * 0.35));
     const { X0, Y0, X1, Y1, tiles } = this.cells(cx, cy, r);
     // The land around the brush, as far out as the averaging reaches.
     const ax0 = Math.max(0, X0 - kr);
@@ -290,62 +331,60 @@ export class TerrainEditor {
     for (let y = 0; y < ah; y++) {
       for (let x = 0; x < aw; x++) {
         const i = (ay0 + y) * W + ax0 + x;
-        if (this.wet[i]) continue;
-        v[y * aw + x] = this.under[i] + this.relief[i];
+        if (wetAt[i]) continue;
+        v[y * aw + x] = seen[i];
         m[y * aw + x] = 1;
       }
     }
-    // Averaged over a square, twice (rows then columns, then again): close to a soft round blur.
+    // Averaged over a square, rows then columns, twice: close to a soft round blur.
     const pass = (a: Float32Array) => {
       const t = new Float32Array(aw * ah);
       for (let y = 0; y < ah; y++) {
         let sum = 0;
-        for (let x = -kr; x <= kr; x++) if (x >= 0 && x < aw) sum += a[y * aw + x];
+        for (let x = 0; x <= kr && x < aw; x++) sum += a[y * aw + x];
         for (let x = 0; x < aw; x++) {
           t[y * aw + x] = sum;
-          const out = x - kr;
-          const inn = x + kr + 1;
-          if (out >= 0) sum -= a[y * aw + out];
-          if (inn < aw) sum += a[y * aw + inn];
+          if (x - kr >= 0) sum -= a[y * aw + x - kr];
+          if (x + kr + 1 < aw) sum += a[y * aw + x + kr + 1];
         }
       }
       const o = new Float32Array(aw * ah);
       for (let x = 0; x < aw; x++) {
         let sum = 0;
-        for (let y = -kr; y <= kr; y++) if (y >= 0 && y < ah) sum += t[y * aw + x];
+        for (let y = 0; y <= kr && y < ah; y++) sum += t[y * aw + x];
         for (let y = 0; y < ah; y++) {
           o[y * aw + x] = sum;
-          const out = y - kr;
-          const inn = y + kr + 1;
-          if (out >= 0) sum -= t[out * aw + x];
-          if (inn < ah) sum += t[inn * aw + x];
+          if (y - kr >= 0) sum -= t[(y - kr) * aw + x];
+          if (y + kr + 1 < ah) sum += t[(y + kr + 1) * aw + x];
         }
       }
       return o;
     };
-    let sv = pass(v);
-    let sm = pass(m);
-    // Normalise between the passes so the second averages heights, not sums.
-    const avg = new Float32Array(aw * ah);
-    for (let i = 0; i < avg.length; i++) avg[i] = sm[i] > 0 ? sv[i] / sm[i] : v[i];
-    for (let i = 0; i < avg.length; i++) avg[i] *= m[i];
-    sv = pass(avg);
-    sm = pass(m);
+    const avg = (val: Float32Array) => {
+      const sv = pass(val);
+      const sm = pass(m);
+      const out = new Float32Array(aw * ah);
+      for (let i = 0; i < out.length; i++) out[i] = m[i] > 0 && sm[i] > 0 ? sv[i] / sm[i] : v[i];
+      return out;
+    };
+    const once = avg(v);
+    for (let i = 0; i < once.length; i++) once[i] *= m[i];
+    const twice = avg(once);
     for (let Y = Y0; Y <= Y1; Y++) {
       const ty = (Y + 0.5) / S;
       for (let X = X0; X <= X1; X++) {
         const i = Y * W + X;
-        if (this.wet[i]) continue;
+        if (wetAt[i]) continue;
         const dx = (X + 0.5) / S - cx;
         const dy = ty - cy;
         const d = Math.sqrt(dx * dx + dy * dy) / r;
         if (d >= 1) continue;
-        const j = (Y - ay0) * aw + (X - ax0);
-        if (sm[j] <= 0) continue;
-        const e = this.under[i] + this.relief[i];
-        const target = sv[j] / sm[j];
-        const nv = e + (target - e) * smoothstep(0, 1, 1 - d) * k * 0.6;
-        this.relief[i] = Math.max(LAND_FLOOR, Math.min(1, nv)) - this.under[i];
+        const e = seen[i];
+        const target = twice[(Y - ay0) * aw + (X - ax0)];
+        const nv = Math.max(LAND_FLOOR, e + (target - e) * smoothstep(0, 1, 1 - d) * k * 0.85);
+        seen[i] = nv;
+        this.held.level[i] = nv;
+        this.held.weight[i] = 1;
       }
     }
     return tiles;
@@ -416,6 +455,8 @@ export class TerrainEditor {
           }
         }
         this.relief[i] = Math.max(LAND_FLOOR, Math.min(1, v)) - this.under[i];
+        // Reshaped: no longer held as smoothed.
+        if (v !== e) this.held.weight[i] = 0;
       }
     }
     return tiles;
@@ -488,6 +529,7 @@ export class TerrainEditor {
         const e = under + was;
         const hgt = Math.min(e + lift, Math.max(top, e));
         this.relief[i] = Math.max(LAND_FLOOR, Math.min(1, hgt)) - under;
+        this.held.weight[i] = 0;
       }
     }
     this.ridgeU = u0 + len;
@@ -495,22 +537,32 @@ export class TerrainEditor {
   }
 
   /**
-   * The Ramp drag: lays an even slope along the path dragged (`points`, in tiles), rising or
-   * falling from the height where the drag began to the height where it is now, evenly by the
-   * distance travelled along the path, curves and all: a road winding up a mountain, a switchback.
-   * It is as wide as the brush; its sides fade into the land beside it over the outer two thirds
-   * of the brush, so it meets the hillside like a natural spur. It works from the land as it was
-   * before the drag and puts back what the last move laid (prev), so the ramp follows the pen live.
-   * Sea is never touched. Returns the changed area in tiles (including what was put back).
+   * The Ramp drag, on the land as it is seen: an even slope along the path dragged (`points`, in
+   * tiles), from the height where the drag began to the height where it is now, evenly by the
+   * distance along the path, curves and all. The whole width of the brush is laid to the slope,
+   * by the brush's strength (fully at 1), fading into the land beside it only at the very edge.
+   * It works from the land as it was when the drag began and puts back what the last move laid
+   * (prev), so the ramp follows the pen live. What it leaves is held: the carving doesn't wear it.
+   * Returns the changed area in tiles (including what was put back).
    */
   ramp(points: [number, number][], b: Brush, prev: Box | null): Box {
     const S = this.scale;
     const W = this.width * S;
-    const base = this.undo[this.undo.length - 1]?.relief;
+    const was = this.undo[this.undo.length - 1];
+    const seen0 = this.seen0;
+    const seen = this.seen;
+    const wetAt = this.seenWet;
     const none = { x0: 0, y0: 0, x1: -1, y1: -1 };
-    if (!base) return prev ?? none;
+    if (!was || !seen0 || !seen || !wetAt) return prev ?? none;
     if (prev) {
-      for (let Y = prev.y0 * S; Y < (prev.y1 + 1) * S; Y++) for (let X = prev.x0 * S; X < (prev.x1 + 1) * S; X++) this.relief[Y * W + X] = base[Y * W + X];
+      for (let Y = prev.y0 * S; Y < (prev.y1 + 1) * S; Y++) {
+        for (let X = prev.x0 * S; X < (prev.x1 + 1) * S; X++) {
+          const i = Y * W + X;
+          seen[i] = seen0[i];
+          this.held.weight[i] = was.weight[i];
+          this.held.level[i] = was.level[i];
+        }
+      }
     }
     // The length along the path to each point.
     const along = [0];
@@ -518,10 +570,7 @@ export class TerrainEditor {
     const total = along[along.length - 1];
     if (points.length < 2 || total < 0.2) return prev ?? none;
     const r = Math.max(0.25, b.radius);
-    const at = (x: number, y: number) => {
-      const i = Math.max(0, Math.min(this.height * S - 1, Math.floor(y * S))) * W + Math.max(0, Math.min(W - 1, Math.floor(x * S)));
-      return this.wet[i] ? LAND_FLOOR : this.under[i] + base[i];
-    };
+    const at = (x: number, y: number) => seen0[Math.max(0, Math.min(this.height * S - 1, Math.floor(y * S))) * W + Math.max(0, Math.min(W - 1, Math.floor(x * S)))];
     const [sx, sy] = points[0];
     const [ex, ey] = points[points.length - 1];
     const ha = Math.max(LAND_FLOOR, at(sx, sy));
@@ -547,8 +596,10 @@ export class TerrainEditor {
       for (let Y = seg.Y0; Y <= seg.Y1; Y++) {
         const ty = (Y + 0.5) / S;
         for (let X = seg.X0; X <= seg.X1; X++) {
-          const j = (Y - Y0) * bw + (X - X0);
-          if (j < 0 || j >= dist.length) continue;
+          const x = X - X0;
+          const y = Y - Y0;
+          if (x < 0 || y < 0 || x >= bw || y >= bh) continue;
+          const j = y * bw + x;
           const px = (X + 0.5) / S - ax;
           const py = ty - ay;
           const t = len2 > 1e-9 ? Math.max(0, Math.min(1, (px * dx + py * dy) / len2)) : 0;
@@ -566,13 +617,15 @@ export class TerrainEditor {
         const dd = dist[j] / r;
         if (dd >= 1) continue;
         const i = (Y0 + y) * W + X0 + x;
-        if (this.wet[i]) continue;
-        const e = this.under[i] + base[i];
+        if (wetAt[i]) continue;
+        const e = seen0[i];
         const target = ha + (hb - ha) * pos[j];
-        // Full along the middle third, fading smoothly into the land beside it.
-        const side = 1 - smoothstep(0.33, 1, dd);
-        const v = e + (target - e) * side * (0.3 + 0.7 * k);
-        this.relief[i] = Math.max(LAND_FLOOR, Math.min(1, v)) - this.under[i];
+        // The whole width, fading into the land beside it only over the outer tenth.
+        const edge = 1 - smoothstep(0.9, 1, dd);
+        const v = Math.max(LAND_FLOOR, e + (target - e) * edge * (0.3 + 0.7 * k));
+        seen[i] = v;
+        this.held.level[i] = v;
+        this.held.weight[i] = 1;
       }
     }
     return union(prev, bx);
@@ -604,6 +657,7 @@ export class TerrainEditor {
       }
     }
     this.relief.fill(0);
+    this.held.weight.fill(0);
     this.layOut({ x0: 0, y0: 0, x1: w - 1, y1: h - 1 });
   }
 }

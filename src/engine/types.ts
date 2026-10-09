@@ -120,6 +120,8 @@ export interface WorldConfig {
   heightmap?: string;
   /** The land shaped by hand in the editor, on the fine grid it is carved on (see encodeRelief). */
   relief?: string;
+  /** Land held as the editor's Smooth and Ramp tools left it (see encodeHeld). */
+  held?: string;
   /** How the land is carved into terrain (see erodeRelief); unset settings take TERRAIN_DEFAULTS. */
   terrain?: {
     mountains?: number;

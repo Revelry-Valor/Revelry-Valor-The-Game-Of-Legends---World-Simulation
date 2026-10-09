@@ -2,7 +2,7 @@ import { BIOMES, Biome, Relief } from './data/biomes';
 import { RES_COUNT, Res } from './data/economy';
 import { MinHeap } from './heap';
 import { traceRivers } from './erosion';
-import { ChunkCarver, copyField, type Box } from './terrainbuild';
+import { ChunkCarver, applyHeld, copyField, type Box, type Held } from './terrainbuild';
 import type { ReliefField } from './erosion';
 import { applyWater } from './water';
 import { Noise2D } from './noise';
@@ -39,7 +39,7 @@ export function isWaterBiome(b: number): boolean {
 export function generateMap(
   cfg: WorldConfig,
   rng: Rng,
-  build?: { carver?: ChunkCarver; dirty?: Box | null; erode?: boolean; relief?: Float32Array | null },
+  build?: { carver?: ChunkCarver; dirty?: Box | null; erode?: boolean; relief?: Float32Array | null; held?: Held | null },
 ): MapData {
   const w = cfg.width;
   const h = cfg.height;
@@ -264,6 +264,9 @@ export function generateMap(
     curves = rivers.curves;
     lakeTiles = rivers.lake;
   }
+  // Land held as the Smooth and Ramp tools left it stays so, over the carving and its rivers.
+  const held = build?.held !== undefined ? build.held : cfg.held ? decodeHeld(cfg.held, carved.width, carved.height) : null;
+  if (held) applyHeld(carved, { heights: Float32Array.from(carved.heights), wear: Float32Array.from(carved.wear), deposits: Float32Array.from(carved.deposits), flow: Float32Array.from(carved.flow) }, held);
   for (let i = 0; i < size; i++) {
     // Rivers run on land: a river reaching the coast ends at its last land tile.
     if (elevation[i] < 0) river[i] = 0;
@@ -810,4 +813,17 @@ export function decodeRelief(code: string, W: number, H: number): Float32Array |
     out[at++] = q[k] / RELIEF_SCALE;
   }
   return out;
+}
+
+/** Pack held land (see Held) into a text code for the world's settings. */
+export function encodeHeld(held: Held, W: number, H: number): string {
+  return `${encodeRelief(held.weight, W, H)}|${encodeRelief(held.level, W, H)}`;
+}
+
+/** Unpack held land made for a grid of this size (null if it won't read). */
+export function decodeHeld(code: string, W: number, H: number): Held | null {
+  const [a, b] = code.split('|');
+  const weight = a ? decodeRelief(a, W, H) : null;
+  const level = b ? decodeRelief(b, W, H) : null;
+  return weight && level ? { weight, level } : null;
 }
