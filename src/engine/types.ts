@@ -118,6 +118,8 @@ export interface WorldConfig {
   oceanCurrents?: boolean;
   /** Land shaped by hand in the world editor: heights encoded with encodeHeights(); replaces the generated land. */
   heightmap?: string;
+  /** The land shaped by hand in the editor, on the fine grid it is carved on (see encodeRelief). */
+  relief?: string;
   /** How the land is carved into terrain (see erodeRelief); unset settings take TERRAIN_DEFAULTS. */
   terrain?: {
     mountains?: number;

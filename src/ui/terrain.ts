@@ -282,6 +282,41 @@ export class TerrainShader {
   private paperG: (fx: number, fy: number) => number;
   private paperB: (fx: number, fy: number) => number;
 
+  /** The carved land painted from. */
+  private relief!: ReliefField;
+
+  /** Everything the painter needs from the carved land, for the cells of a box (inclusive). */
+  private fillCells(X0: number, Y0: number, X1: number, Y1: number): void {
+    const relief = this.relief;
+    const scale = relief.scale;
+    const RW = relief.width;
+    const RH = relief.height;
+    const H = relief.heights;
+    const cells = this.cells;
+    for (let y = Math.max(0, Y0); y <= Math.min(RH - 1, Y1); y++) {
+      for (let x = Math.max(0, X0); x <= Math.min(RW - 1, X1); x++) {
+        const i = y * RW + x;
+        const xl = x > 0 ? i - 1 : i;
+        const xr = x < RW - 1 ? i + 1 : i;
+        const yu = y > 0 ? i - RW : i;
+        const yd = y < RH - 1 ? i + RW : i;
+        const o = i * 6;
+        cells[o] = H[i];
+        cells[o + 1] = ((H[xr] - H[xl]) / Math.max(1, xr - xl)) * scale;
+        cells[o + 2] = ((H[yd] - H[yu]) / Math.max(1, (yd - yu) / RW)) * scale;
+        cells[o + 3] = relief.wear[i];
+        cells[o + 4] = relief.deposits[i];
+        cells[o + 5] = relief.flow[i];
+      }
+    }
+  }
+
+  /** The carved land changed within a box of tiles: read it again there. */
+  refresh(box: { x0: number; y0: number; x1: number; y1: number }): void {
+    const S = this.relief.scale;
+    this.fillCells(box.x0 * S - 1, box.y0 * S - 1, (box.x1 + 1) * S, (box.y1 + 1) * S);
+  }
+
   /** `given` paints from land already carved (with other erosion settings) instead of the map's own. */
   constructor(private map: MapData, private style: MapStyle = 'drawn', given?: ReliefField, private contours = false) {
     const { width: w, height: h, size } = map;
@@ -333,25 +368,10 @@ export class TerrainShader {
     // reads it with one blend: height, slope across and down (per tile), wear, deposits and flow.
     const RW = relief.width;
     const RH = relief.height;
+    this.relief = relief;
     const cells = new Float32Array(RW * RH * 6);
-    const H = relief.heights;
-    for (let y = 0; y < RH; y++) {
-      for (let x = 0; x < RW; x++) {
-        const i = y * RW + x;
-        const xl = x > 0 ? i - 1 : i;
-        const xr = x < RW - 1 ? i + 1 : i;
-        const yu = y > 0 ? i - RW : i;
-        const yd = y < RH - 1 ? i + RW : i;
-        const o = i * 6;
-        cells[o] = H[i];
-        cells[o + 1] = ((H[xr] - H[xl]) / Math.max(1, xr - xl)) * scale;
-        cells[o + 2] = ((H[yd] - H[yu]) / Math.max(1, (yd - yu) / RW)) * scale;
-        cells[o + 3] = relief.wear[i];
-        cells[o + 4] = relief.deposits[i];
-        cells[o + 5] = relief.flow[i];
-      }
-    }
     this.cells = cells;
+    this.fillCells(0, 0, RW - 1, RH - 1);
     this.cellW = RW;
     this.cellH = RH;
     this.cellScale = scale;

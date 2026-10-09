@@ -94,11 +94,11 @@ Worlds are made by hand. A new world starts as a blank ocean and opens in the wo
 | Shallows | Shallow water: reefs, banks, sounds and lagoons. |
 | Deep sea | Deepen the sea: ocean basins and trenches. |
 
-**Terrain** shapes the land, and only the land: its tools never move a coast, never raise land out of the sea and never sink it below sea level (that is what Land & Sea is for). Every raising tool has a **Height limit** (in feet) that nothing it builds rises above, and the lowering tools a **Lowest height** they never cut below.
+**Terrain** shapes the land, and only the land: its tools never move a coast, never raise land out of the sea and never sink it below sea level (that is what Land & Sea is for). They work on the fine grid the land is carved on (four points to a tile each way on most maps), not on tiles, and only inside the brush's circle: a thin brush changes a thin strip, a wide one a wide area, and nothing around the brush moves. Every raising tool has a **Height limit** (in feet) that nothing it builds rises above, and the lowering tools a **Lowest height** they never cut below.
 
 | Brush | What it does |
 |---|---|
-| Mountains | Drag along a range: a sharp crest, rising with each pass up to the height limit. |
+| Mountains | Drag along a range, as Gaea's Draw and Ridge nodes make them: your stroke becomes the crest, with peaks and saddles along it, and spurs with side valleys between them running down its flanks. The range swells and narrows along its length within the brush. The spurs' spacing follows the brush's width, so a thin brush makes a small but complete ridge and a wide one a great range. Going back over it in the same stroke doesn't pile it up; each new stroke builds it higher, up to the height limit. |
 | Hills | A sponge brush: roughs up the land under it with lumps and hollows a couple of tiles across. Each pass makes it rougher, up to the height limit. |
 | Raise / Lower | Lift or sink the ground gently and evenly. |
 | Plateau | Level the ground to the height where the stroke began: plateaus, mesas, table lands. |
@@ -106,7 +106,9 @@ Worlds are made by hand. A new world starts as a blank ocean and opens in the wo
 | Smooth | Click and drag: lays an even slope from the height where you pressed to the height where you let go, up or down, as wide as the brush. It follows the pen live. The slope's edges fall away quickly, so the land beside it is left steeper. |
 | Valley | Cuts a V-shaped valley along the stroke, never below the lowest height or under the sea. |
 
-Erosion always works on the land you shape, as described above: mountain shapes, valleys and gullies carved by water, screes. Its settings are under **Erosion** on the Terrain tab. **Only the land you change is worked again.** The map is carved once when the editor opens. After that, each change is carved again in a small window around it and laid in only over the land the brush touched, fading out over three tiles, so everything else stays exactly as it was. The rain that wears the land falls in the same places every time, so unchanged land erodes just as before. The carving and the painting both run on a background thread and only the changed part of the map is painted again, so the pen never waits: drawing stays smooth while the land catches up a moment behind it. **Use this world** takes the land exactly as it was carved in the editor.
+Erosion always works on the land you shape, as described above: valleys and gullies carved by water, screes. Its settings are under **Erosion** on the Terrain tab. It brings out the shape you drew rather than wearing it away: as uplift balances erosion in real ranges, the land rises back towards its drawn shape as the streams cut, so streams with much water cut their valleys deep while the ridges between them keep their height, and raindrops cut gullies no deeper than gullies are. A thin ridge keeps most of its height.
+
+**Only what the brush touches changes.** While you drag, the land is shown at once as you draw it. When you let go, water wears the stroke. The land around it is carved twice, as it was before the stroke and as it is now, from the same piece of the map with the same rain. The difference between the two is what the stroke did, and it is added to the land on the cells the stroke touched and on no others. Everything else stays exactly as it was, so nothing appears or disappears around the brush and no box around it is redrawn. The wear and soil colours are scaled once for the whole map, so a change never shifts the colours of the land around it. The carving and painting run on a background thread, so the pen never waits. Close in, the part of the map in view is painted again at full screen resolution once the view settles. **Use this world** takes the land exactly as it was carved in the editor, and the shaped land is saved with the world.
 
 **Water** puts in rivers and lakes. A world made in the editor has only the rivers and lakes you draw.
 
@@ -139,11 +141,11 @@ src/engine/            deterministic simulation; no DOM, runs in Node or the bro
   world.ts             World state and the yearly tick
   worldgen.ts          terrain, latitude & climate, ocean currents, lakes, carved land and its rivers, biomes, resources; height codes for hand-shaped land
   systems/landwars.ts  land wars involving clans, warbands, occupation of land and the peace that settles it
-  terrainbuild.ts      carving the map in pieces, so only what changed is carved again
+  terrainbuild.ts      carving the map, then only the cells a change touched (by difference)
   water.ts             rivers and lakes drawn by hand: routes, gorges, lake fills
   erosion.ts           heightmap to landscape: mountain shapes, river valleys, raindrop erosion, crumbling slopes; wear, deposit and flow maps; rivers traced on the carved land
   geometry.ts          continuous positions: settlement sites, river courses, waypoints, smooth paths
-  editor.ts            the terrain tool (raise, lower, flatten) with undo
+  editor.ts            the editor's brushes: outline on tiles, terrain on the fine grid; undo
   data/                biomes, goods & production sectors, tech tree, races, culture traits (all plain data)
   systems/             territory, economy, trade, roads, caravans, access, agreements, migration, culture, politics, nobility,
                        diplomacy, cohesion, warAims, military, technology, events, setup

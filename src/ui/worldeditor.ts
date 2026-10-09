@@ -4,9 +4,9 @@ import { copyField, type Box, type ChunkCarver } from '../engine/terrainbuild';
 import type { ReliefField } from '../engine/erosion';
 import type { MapData, WorldConfig } from '../engine/types';
 import { emptyWater, type WaterPlan } from '../engine/water';
-import { carverFor, decodeHeights, encodeHeights, generateMap, keepCarving } from '../engine/worldgen';
+import { carveScale, carverFor, decodeHeights, decodeRelief, encodeHeights, encodeRelief, generateMap, keepCarving } from '../engine/worldgen';
 import BuilderWorker from './builder.worker?worker&inline';
-import type { BuildReply, PaintJob } from './builder.worker';
+import type { BuildReply, Painted, PaintJob } from './builder.worker';
 import { drawCurrents, paintClimate, type ClimateLayer } from './render';
 import { FEET_PER_UNIT, TerrainShader, drawContourLabels, drawRiverCurves, riverCurves, type MapStyle } from './terrain';
 
@@ -60,6 +60,12 @@ export class WorldEditor {
   /** A message for the panel (what just happened, or why not). */
   note = '';
   private terrain = document.createElement('canvas');
+  /** The part of the map in view, painted in full detail once the view settles (close in). */
+  private detail = document.createElement('canvas');
+  private detailView: { box: Box; scale: number; look: string } | null = null;
+  private detailWant = '';
+  private detailTimer = 0;
+  private detailJob = 0;
   private climate = document.createElement('canvas');
   private stroke: { x: number; y: number; level?: number; lastEdit?: [number, number]; start: [number, number]; ramp?: Box | null } | null = null;
   private steps: Step[] = [];
@@ -80,14 +86,20 @@ export class WorldEditor {
     this.water = cfg.water ? JSON.parse(JSON.stringify(cfg.water)) : emptyWater();
     const { width: w, height: h } = cfg;
     const land = cfg.heightmap ? decodeHeights(cfg.heightmap, w, h) : null;
-    this.editor = new TerrainEditor(land ?? new Float32Array(w * h), w, h, cfg.seed);
+    const S = carveScale(w, h);
+    const relief = cfg.relief ? decodeRelief(cfg.relief, w * S, h * S) : null;
+    this.editor = new TerrainEditor(land ?? new Float32Array(w * h), w, h, cfg.seed, S, relief);
     // No land drawn yet: a blank ocean to start from.
     if (!land) this.editor.clear();
     try {
       this.worker = new BuilderWorker();
-      this.worker.onmessage = (e: MessageEvent<BuildReply | { kept: ReliefField | null }>) => {
+      this.worker.onmessage = (e: MessageEvent<BuildReply | { kept: ReliefField | null } | { detailId: number; detail: Painted }>) => {
         if ('kept' in e.data) {
           this.keptWaiter?.(e.data.kept);
+          return;
+        }
+        if ('detailId' in e.data) {
+          this.receivedDetail(e.data.detailId, e.data.detail);
           return;
         }
         this.received(e.data);
@@ -168,20 +180,27 @@ export class WorldEditor {
     return encodeHeights(this.editor.heights, this.cfg.width, this.cfg.height);
   }
 
-  /** The world's settings as they now stand: land, water and all. */
-  settings(): WorldConfig {
-    return { ...this.cfg, heightmap: this.heightmap(), water: JSON.parse(JSON.stringify(this.water)), riverSources: undefined, terrainPreview: undefined };
+  /**
+   * The world's settings as they now stand: land, water and all. `shaped` false leaves out the
+   * land shaped on the fine grid (sent to the builder as it is, rather than as a code).
+   */
+  settings(shaped = true): WorldConfig {
+    const S = this.editor.scale;
+    const relief = shaped && this.editor.relief.some((v) => v !== 0) ? encodeRelief(this.editor.relief, this.cfg.width * S, this.cfg.height * S) : undefined;
+    return { ...this.cfg, heightmap: this.heightmap(), relief, water: JSON.parse(JSON.stringify(this.water)), riverSources: undefined, terrainPreview: undefined };
   }
 
   /**
    * Build the world again. `full` carves all the land afresh; otherwise only what changed since
    * the last build. A build asked for while one is under way waits its turn (only the latest runs).
    */
-  private request(full = false): void {
+  private request(full = false, erode = true): void {
     if (full) {
       this.dirty = null;
       this.fullCarve = true;
     }
+    // A stroke being drawn is shown as drawn; it is worn by water when it is finished.
+    this.erode = this.erode || erode;
     if (this.busy) {
       this.queued = true;
       return;
@@ -190,7 +209,10 @@ export class WorldEditor {
     this.queued = false;
     this.onStatus?.();
     const id = ++this.job;
-    const cfg = this.settings();
+    const cfg = this.settings(false);
+    const relief = Float32Array.from(this.editor.relief);
+    const wear = this.erode;
+    this.erode = false;
     // Nothing of the land changed: an empty box, so nothing is carved again.
     const dirty = this.fullCarve ? null : (this.dirty ?? { x0: 0, y0: 0, x1: -1, y1: -1 });
     const paint: PaintJob = { style: this.style, contours: this.contours, scale: SCALE, box: !this.map ? 'all' : this.repaint };
@@ -198,14 +220,14 @@ export class WorldEditor {
     this.dirty = null;
     this.fullCarve = false;
     if (this.worker) {
-      this.worker.postMessage({ id, cfg, dirty, paint });
+      this.worker.postMessage({ id, cfg, relief, erode: wear, dirty, paint }, [relief.buffer]);
       return;
     }
     // No background thread to be had: build and paint here, between frames.
     setTimeout(() => {
       const fresh = !this.localCarver || dirty === null;
       if (fresh) this.localCarver = carverFor(cfg);
-      const map = generateMap(cfg, new Rng(cfg.seed).fork('map'), { carver: this.localCarver!, dirty: fresh ? null : dirty });
+      const map = generateMap(cfg, new Rng(cfg.seed).fork('map'), { carver: this.localCarver!, dirty: fresh ? null : dirty, relief, erode: wear });
       const changed = fresh ? null : this.localCarver!.changed;
       let box: Box | null = fresh || paint.box === 'all' ? { x0: 0, y0: 0, x1: map.width - 1, y1: map.height - 1 } : union(changed, paint.box);
       let painted: BuildReply['painted'] = null;
@@ -222,12 +244,18 @@ export class WorldEditor {
   }
 
   private fullCarve = false;
+  /** Whether the next build wears the land with water (false while a stroke is being drawn). */
+  private erode = false;
 
   private received(reply: BuildReply): void {
     if (reply.id !== this.job) return;
     this.busy = false;
-    const map = reply.map;
+    // A stroke being drawn is shown without building the world again: the map stays as it was.
+    const map = reply.map ?? this.map;
+    if (!map) return;
     this.map = map;
+    // A new world built: the view in detail may need painting from it (say, in a new style).
+    if (reply.map && !this.detailView) this.detailWant = '';
     // Lay in only the part of the map that was painted again.
     const p = reply.painted;
     if (p) {
@@ -236,6 +264,12 @@ export class WorldEditor {
         this.terrain.height = map.height * SCALE;
       }
       this.terrain.getContext('2d')!.putImageData(new ImageData(p.pixels as Uint8ClampedArray<ArrayBuffer>, p.width, p.height), p.box.x0 * SCALE, p.box.y0 * SCALE);
+    }
+    // The same, in full detail where it shows close in.
+    const d = reply.detail;
+    const dv = this.detailView;
+    if (d && dv && d.scale === dv.scale) {
+      this.detail.getContext('2d')!.putImageData(new ImageData(d.pixels as Uint8ClampedArray<ArrayBuffer>, d.width, d.height), (d.box.x0 - dv.box.x0) * dv.scale, (d.box.y0 - dv.box.y0) * dv.scale);
     }
     // A lake clicked where there is no hollow to hold it: say what to do instead.
     const sel = this.selected;
@@ -246,6 +280,54 @@ export class WorldEditor {
     if (this.layer !== 'terrain') this.paintClimate();
     this.onChange?.();
     if (this.queued) this.request();
+  }
+
+  private receivedDetail(id: number, d: Painted): void {
+    if (id !== this.detailJob || !d.scale) return;
+    this.detail.width = d.width;
+    this.detail.height = d.height;
+    this.detail.getContext('2d')!.putImageData(new ImageData(d.pixels as Uint8ClampedArray<ArrayBuffer>, d.width, d.height), 0, 0);
+    this.detailView = { box: d.box, scale: d.scale, look: `${this.style}|${this.contours}` };
+    this.onChange?.();
+  }
+
+  /**
+   * Close in, the map's own image is too coarse: once the view settles, have the part in view
+   * painted in full detail (and kept so as the land changes under it).
+   */
+  private wantDetail(view: { zoom: number; ox: number; oy: number }, cw: number, ch: number): void {
+    const map = this.map;
+    if (!this.worker || !map) return;
+    const dpr = window.devicePixelRatio || 1;
+    const scale = Math.min(28, Math.ceil(view.zoom * dpr));
+    const look = `${this.style}|${this.contours}`;
+    if (scale <= SCALE * 1.25) {
+      if (this.detailView || this.detailWant) {
+        this.detailView = null;
+        this.detailWant = '';
+        clearTimeout(this.detailTimer);
+        this.detailJob++;
+        this.worker.postMessage({ detail: null });
+      }
+      return;
+    }
+    const box = {
+      x0: Math.max(0, Math.floor(view.ox) - 2),
+      y0: Math.max(0, Math.floor(view.oy) - 2),
+      x1: Math.min(map.width - 1, Math.ceil(view.ox + cw / view.zoom) + 2),
+      y1: Math.min(map.height - 1, Math.ceil(view.oy + ch / view.zoom) + 2),
+    };
+    const dv = this.detailView;
+    // What is painted already covers the view, at this scale and look: nothing to do.
+    if (dv && dv.scale === scale && dv.look === look && box.x0 >= dv.box.x0 && box.y0 >= dv.box.y0 && box.x1 <= dv.box.x1 && box.y1 <= dv.box.y1) return;
+    const key = `${box.x0},${box.y0},${box.x1},${box.y1},${scale},${look}`;
+    if (key === this.detailWant) return;
+    this.detailWant = key;
+    clearTimeout(this.detailTimer);
+    this.detailTimer = window.setTimeout(() => {
+      this.detailJob++;
+      this.worker?.postMessage({ detail: { id: this.detailJob, box, scale, look } });
+    }, 250);
   }
 
   /** Change a climate setting (latitudes, tilt, currents) and rebuild. */
@@ -267,6 +349,8 @@ export class WorldEditor {
     if (style === this.style && contours === this.contours) return;
     this.style = style;
     this.contours = contours;
+    this.detailView = null;
+    this.detailWant = '';
     this.repaint = 'all';
     this.request();
   }
@@ -483,7 +567,7 @@ export class WorldEditor {
     // Smooth lays its slope as you drag.
     if (tool === 'smooth') return;
     this.touched(this.editor.dab(x, y, this.brush()));
-    this.request();
+    this.request(false, false);
   }
 
   move(x: number, y: number): void {
@@ -495,24 +579,20 @@ export class WorldEditor {
       return;
     }
     if (this.tool === 'smooth') {
-      const base = this.editor.strokeBase();
-      if (!base) return;
-      s.ramp = this.editor.ramp(s.start[0], s.start[1], x, y, this.brush(), base, s.ramp ?? null);
+      s.ramp = this.editor.ramp(s.start[0], s.start[1], x, y, this.brush(), s.ramp ?? null);
       this.touched(s.ramp);
-      s.x = x;
-      s.y = y;
-      this.request();
-      return;
-    }
-    this.touched(this.editor.line(s.x, s.y, x, y, this.brush()));
+    } else this.touched(this.editor.line(s.x, s.y, x, y, this.brush()));
     s.x = x;
     s.y = y;
-    this.request();
+    this.request(false, false);
   }
 
   end(): void {
     if (!this.stroke) return;
+    const water = this.tool === 'lakeAdd' || this.tool === 'lakeRemove';
     this.stroke = null;
+    // The stroke is finished: now water wears what it made.
+    if (!water) this.request();
   }
 
   private paintWater(x: number, y: number): void {
@@ -561,6 +641,11 @@ export class WorldEditor {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.terrain, x0, y0, map.width * z, map.height * z);
+    const dv = this.detailView;
+    if (this.layer === 'terrain' && dv && dv.look === `${this.style}|${this.contours}`) {
+      ctx.drawImage(this.detail, x0 + dv.box.x0 * z, y0 + dv.box.y0 * z, (dv.box.x1 - dv.box.x0 + 1) * z, (dv.box.y1 - dv.box.y0 + 1) * z);
+    }
+    this.wantDetail(view, cw, ch);
     if (this.layer !== 'terrain' && !this.stroke) {
       ctx.drawImage(this.climate, x0, y0, map.width * z, map.height * z);
       if (this.layer === 'currents') drawCurrents(ctx, map, view, cw, ch);

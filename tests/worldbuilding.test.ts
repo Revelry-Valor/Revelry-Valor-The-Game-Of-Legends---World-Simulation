@@ -101,33 +101,36 @@ describe('world building', () => {
     const hts = new Float32Array(W * H).fill(0.01);
     const ed = new TerrainEditor(hts, W, H, 1);
     const raise = { tool: 'raise' as const, radius: 8, strength: 1, top: 1 };
+    const at = (x: number, y: number) => ed.heightAt(x + 0.5, y + 0.5);
     ed.beginStroke();
     for (let k = 0; k < 2; k++) ed.line(60, 50, 100, 50, raise);
-    expect(hts[50 * W + 80]).toBeGreaterThan(0.05);
-    expect(hts[10 * W + 10]).toBeCloseTo(0.01, 5);
+    expect(at(80, 50)).toBeGreaterThan(0.05);
+    expect(at(10, 10)).toBeCloseTo(0.01, 5);
     // The middle of the stroke rises most: a range is highest along its spine.
-    expect(hts[50 * W + 80]).toBeGreaterThan(hts[55 * W + 80]);
-    const raised = hts[50 * W + 80];
+    expect(at(80, 49.6)).toBeGreaterThan(at(80, 55));
+    const raised = at(80, 50);
     ed.beginStroke();
-    for (let k = 0; k < 12; k++) ed.dab(80, 50, { tool: 'lower', radius: 3, strength: 1, floor: 0 });
+    for (let k = 0; k < 12; k++) ed.dab(80.5, 50.5, { tool: 'lower', radius: 3, strength: 1, floor: 0 });
     // Lowered, but never into the sea: the coast belongs to the Land & Sea tools.
-    expect(hts[50 * W + 80]).toBeLessThan(raised);
-    expect(hts[50 * W + 80]).toBeGreaterThan(0);
+    expect(at(80, 50)).toBeLessThan(raised);
+    expect(at(80, 50)).toBeGreaterThan(0);
     ed.undoStroke();
-    expect(hts[50 * W + 80]).toBeCloseTo(raised, 6);
+    expect(at(80, 50)).toBeCloseTo(raised, 6);
     // A narrow brush makes a narrower rise than a wide one.
     ed.beginStroke();
-    for (let k = 0; k < 4; k++) ed.dab(30, 20, { tool: 'raise', radius: 2, strength: 1 });
-    expect(hts[20 * W + 30]).toBeGreaterThan(0.05);
-    expect(hts[20 * W + 34]).toBeCloseTo(0.01, 5);
+    for (let k = 0; k < 4; k++) ed.dab(30.5, 20.5, { tool: 'raise', radius: 2, strength: 1 });
+    expect(at(30, 20)).toBeGreaterThan(0.05);
+    expect(at(33, 20)).toBeCloseTo(0.01, 5);
     ed.beginStroke();
     for (let k = 0; k < 6; k++) ed.dab(70, 50, raise);
     const level = strokeLevel('plateau', ed.heightAt(70, 50))!;
     expect(strokeLevel('raise', 0.5)).toBeUndefined();
     for (let k = 0; k < 5; k++) ed.dab(70, 50, { tool: 'plateau', radius: 4, strength: 1, level });
     // However often the tool passes, the top settles level: a plateau.
-    expect(hts[50 * W + 70]).toBeCloseTo(level, 2);
-    expect(hts[50 * W + 69]).toBeCloseTo(level, 2);
+    expect(ed.heightAt(70, 50)).toBeCloseTo(level, 2);
+    expect(ed.heightAt(69, 50)).toBeCloseTo(level, 2);
+    // The outline's tiles are never touched by the Terrain tools.
+    expect(hts.every((v) => v === 0.01 || Math.abs(v - 0.01) < 1e-9)).toBe(true);
   });
 
   it('carves a range into ridges and valleys, leaving the water alone', () => {

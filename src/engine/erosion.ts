@@ -19,6 +19,8 @@ export interface ReliefField {
   lake?: Uint8Array;
   /** Signed distance to the nearest lake shore in tiles, positive on the water (-3/3 far away). */
   lakeSd?: Float32Array;
+  /** The land as shaped before erosion (when asked for with keepShaped). */
+  shaped?: Float32Array;
   width: number;
   height: number;
   scale: number;
@@ -48,6 +50,15 @@ export interface ErosionOptions {
   rain?: number;
   /** Where this piece of land sits on the whole map, in tiles (so a piece carves like the whole). */
   offset?: [number, number];
+  /**
+   * Land shaped by hand on the fine grid (the editor's Terrain tools), as heights added to the
+   * land laid out from the tiles: `scale` cells to a tile, the same size as the result.
+   */
+  relief?: Float32Array | null;
+  /** Leave the wear, deposit and flow maps unscaled (to be scaled with normaliseMaps). */
+  raw?: boolean;
+  /** Keep a copy of the land as shaped, before any erosion (as `shaped` on the result). */
+  keepShaped?: boolean;
 }
 
 /** A min-heap of cell indices ordered by height. */
@@ -408,11 +419,14 @@ function crumble(g: Grid, s: number, rounds: number, deposits: Float32Array): vo
 }
 
 /** Scale a data map to 0..1 against its own high values, and soften it a little. */
-function normalise(a: Float32Array, fixed: Uint8Array, W: number, H: number, curve: (v: number) => number): void {
-  const vals: number[] = [];
-  for (let i = 0; i < a.length; i += 7) if (!fixed[i] && a[i] > 0) vals.push(a[i]);
-  vals.sort((x, y) => x - y);
-  const top = vals.length ? vals[Math.floor(vals.length * 0.97)] : 1;
+function normalise(a: Float32Array, fixed: Uint8Array, W: number, H: number, curve: (v: number) => number, given?: number): number {
+  let top = given;
+  if (top === undefined) {
+    const vals: number[] = [];
+    for (let i = 0; i < a.length; i += 7) if (!fixed[i] && a[i] > 0) vals.push(a[i]);
+    vals.sort((x, y) => x - y);
+    top = vals.length ? vals[Math.floor(vals.length * 0.97)] : 1;
+  }
   const tmp = Float32Array.from(a);
   for (let Y = 0; Y < H; Y++) {
     for (let X = 0; X < W; X++) {
@@ -430,6 +444,7 @@ function normalise(a: Float32Array, fixed: Uint8Array, W: number, H: number, cur
       a[i] = clamp01(curve(sum / n / (top || 1)));
     }
   }
+  return top;
 }
 
 /**
@@ -456,9 +471,13 @@ export function erodeRelief(surface: Float32Array, water: Uint8Array, w: number,
   const wear = new Float32Array(n);
   const deposits = new Float32Array(n);
   const flow = new Float32Array(n);
-  const done = (): ReliefField => ({ heights: hts, wear, deposits, flow, water: fixed, width: W, height: H, scale: s });
-  if (stage === 'layout') return done();
+  if (stage === 'layout') return { heights: hts, wear, deposits, flow, water: fixed, width: W, height: H, scale: s };
   addMountains(g, s, rng.fork('mountains'), opts.mountains ?? TERRAIN_DEFAULTS.mountains, opts.offset?.[0] ?? 0, opts.offset?.[1] ?? 0);
+  // The land shaped by hand goes on top, as drawn: its ridges are already mountain-shaped.
+  const relief = opts.relief;
+  if (relief) for (let i = 0; i < n; i++) if (!fixed[i] && relief[i] !== 0) hts[i] = Math.max(0.001, hts[i] + relief[i]);
+  const shaped = opts.keepShaped ? Float32Array.from(hts) : undefined;
+  const done = (): ReliefField => ({ heights: hts, wear, deposits, flow, water: fixed, width: W, height: H, scale: s, shaped });
   if (stage === 'mountains' || strength <= 0) return done();
 
   // 3 to 5 happen first on a grid half as fine: water gathers from further, the raindrops cut
@@ -494,59 +513,89 @@ export function erodeRelief(surface: Float32Array, water: Uint8Array, w: number,
   const cflow = new Float32Array(cn);
   // At the tiles' own resolution (a quick preview) there is only the one grid, worked a little less.
   const quick = s === 1;
-  erodeGrid(coarse, cfixed, CW, CH, quick ? 18 : 30, K, 0.03, 0.5, rng.fork('valleys'));
+  erodeGrid(coarse, cfixed, CW, CH, quick ? 18 : 30, K, 0.03, 0.5, rng.fork('valleys'), was, UPLIFT);
   for (let i = 0; i < cn; i++) if (was[i] > coarse[i]) cwear[i] += (was[i] - coarse[i]) * 0.5;
   if (stage === 'full') {
+    // The rain scours gullies and lays down fans, but never wears the land more than gully-deep:
+    // the big valleys are the streams' work, and a ridge keeps its height.
+    const preRain = Float32Array.from(coarse);
     rainfall(cg, rng.fork('rain'), cs, { drops: (opts.rain ?? (quick ? 1.5 : 3)) * strength, strength: Math.min(1.5, strength), softness, downcutting, ox: (opts.offset?.[0] ?? 0) * cs, oy: (opts.offset?.[1] ?? 0) * cs }, cwear, cdep, cflow);
+    const gully = 0.012 + 0.006 * strength;
+    for (let i = 0; i < cn; i++) {
+      const d = coarse[i] - preRain[i];
+      if (d < -gully) coarse[i] = preRain[i] - gully;
+      else if (d > gully * 0.6) coarse[i] = preRain[i] + gully * 0.6;
+    }
     crumble(cg, cs, 3, cdep);
   }
-  // Carry the change and the maps up to the full grid, smoothly.
-  const up = (Y: number, X: number, a: Float32Array) => {
-    const cy = Math.min(CH - 1, Math.max(0, (Y + 0.5) / f - 0.5));
-    const cx = Math.min(CW - 1, Math.max(0, (X + 0.5) / f - 0.5));
-    const y0 = Math.floor(cy);
-    const x0 = Math.floor(cx);
-    const y1 = Math.min(CH - 1, y0 + 1);
-    const x1 = Math.min(CW - 1, x0 + 1);
-    const ty = cy - y0;
-    const tx = cx - x0;
-    const v = (k: number) => a[k];
-    return (v(y0 * CW + x0) * (1 - tx) + v(y0 * CW + x1) * tx) * (1 - ty) + (v(y1 * CW + x0) * (1 - tx) + v(y1 * CW + x1) * tx) * ty;
-  };
-  // The height change is carried up along smooth curves, so no creases show along the coarse cells.
+  // Carry the change up to the full grid along smooth curves (so no creases show along the coarse
+  // cells), and the maps up straight; both a row at a time and then a column at a time.
   const delta = new Float32Array(cn);
   for (let i = 0; i < cn; i++) delta[i] = coarse[i] - was[i];
-  const cat = (p0: number, p1: number, p2: number, p3: number, t: number) =>
-    p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
-  const dAt = (x: number, y: number) => delta[(y < 0 ? 0 : y >= CH ? CH - 1 : y) * CW + (x < 0 ? 0 : x >= CW ? CW - 1 : x)];
-  const upSmooth = (Y: number, X: number) => {
-    const cy = (Y + 0.5) / f - 0.5;
-    const cx = (X + 0.5) / f - 0.5;
-    const y1 = Math.floor(cy);
-    const x1 = Math.floor(cx);
-    const ty = cy - y1;
-    const tx = cx - x1;
-    const row = (yy: number) => cat(dAt(x1 - 1, yy), dAt(x1, yy), dAt(x1 + 1, yy), dAt(x1 + 2, yy), tx);
-    return cat(row(y1 - 1), row(y1), row(y1 + 1), row(y1 + 2), ty);
-  };
-  for (let Y = 0; Y < H; Y++) {
-    for (let X = 0; X < W; X++) {
-      const i = Y * W + X;
-      if (fixed[i]) continue;
-      hts[i] = Math.max(0.001, hts[i] + upSmooth(Y, X));
-      wear[i] = up(Y, X, cwear);
-      deposits[i] = up(Y, X, cdep);
-      flow[i] = up(Y, X, cflow);
+  const cubic = (n: number, N: number) => {
+    // For each fine index: the coarse index before it and the four Catmull-Rom weights.
+    const at = new Int32Array(n * 4);
+    const wt = new Float32Array(n * 4);
+    for (let X = 0; X < n; X++) {
+      const c = (X + 0.5) / f - 0.5;
+      const c1 = Math.floor(c);
+      const t = c - c1;
+      for (let k = 0; k < 4; k++) at[X * 4 + k] = Math.min(N - 1, Math.max(0, c1 - 1 + k));
+      wt[X * 4] = 0.5 * (-t + 2 * t * t - t * t * t);
+      wt[X * 4 + 1] = 0.5 * (2 - 5 * t * t + 3 * t * t * t);
+      wt[X * 4 + 2] = 0.5 * (t + 4 * t * t - 3 * t * t * t);
+      wt[X * 4 + 3] = 0.5 * (-t * t + t * t * t);
     }
-  }
+    return { at, wt };
+  };
+  const linear = (n: number, N: number) => {
+    const at = new Int32Array(n * 2);
+    const wt = new Float32Array(n * 2);
+    for (let X = 0; X < n; X++) {
+      const c = Math.min(N - 1, Math.max(0, (X + 0.5) / f - 0.5));
+      const c0 = Math.floor(c);
+      at[X * 2] = c0;
+      at[X * 2 + 1] = Math.min(N - 1, c0 + 1);
+      wt[X * 2] = 1 - (c - c0);
+      wt[X * 2 + 1] = c - c0;
+    }
+    return { at, wt };
+  };
+  const upscale = (a: Float32Array, cx: { at: Int32Array; wt: Float32Array }, cy: { at: Int32Array; wt: Float32Array }, k: number, add: boolean, out: Float32Array) => {
+    const rows = new Float32Array(CH * W);
+    for (let y = 0; y < CH; y++) {
+      for (let X = 0; X < W; X++) {
+        let v = 0;
+        for (let q = 0; q < k; q++) v += a[y * CW + cx.at[X * k + q]] * cx.wt[X * k + q];
+        rows[y * W + X] = v;
+      }
+    }
+    for (let Y = 0; Y < H; Y++) {
+      for (let X = 0; X < W; X++) {
+        const i = Y * W + X;
+        if (fixed[i]) continue;
+        let v = 0;
+        for (let q = 0; q < k; q++) v += rows[cy.at[Y * k + q] * W + X] * cy.wt[Y * k + q];
+        out[i] = add ? Math.max(0.001, out[i] + v) : v;
+      }
+    }
+  };
+  const cx4 = cubic(W, CW);
+  const cy4 = cubic(H, CH);
+  const cx2 = linear(W, CW);
+  const cy2 = linear(H, CH);
+  upscale(delta, cx4, cy4, 4, true, hts);
+  upscale(cwear, cx2, cy2, 2, false, wear);
+  upscale(cdep, cx2, cy2, 2, false, deposits);
+  upscale(cflow, cx2, cy2, 2, false, flow);
   const before = Float32Array.from(hts);
-  if (!quick) erodeGrid(hts, fixed, W, H, 6, K, 0.02, 0.5, rng.fork('streams'));
+  if (!quick) erodeGrid(hts, fixed, W, H, 6, K, 0.02, 0.5, rng.fork('streams'), before, UPLIFT);
   for (let i = 0; i < n; i++) if (!fixed[i] && before[i] > hts[i]) wear[i] += before[i] - hts[i];
-  return finish(g, wear, deposits, flow, done);
+  return finish(g, wear, deposits, flow, done, opts.raw);
 }
 
 /** Soften the grid's stair-steps, and scale the data maps to 0..1. */
-function finish(g: Grid, wear: Float32Array, deposits: Float32Array, flow: Float32Array, done: () => ReliefField): ReliefField {
+function finish(g: Grid, wear: Float32Array, deposits: Float32Array, flow: Float32Array, done: () => ReliefField, raw = false): ReliefField {
   const { hts, fixed, W, H } = g;
   const tmp = Float32Array.from(hts);
   for (let Y = 1; Y < H - 1; Y++) {
@@ -557,14 +606,38 @@ function finish(g: Grid, wear: Float32Array, deposits: Float32Array, flow: Float
       hts[i] = Math.max(0.0005, tmp[i] * 0.5 + b * 0.5);
     }
   }
-  normalise(wear, fixed, W, H, (v) => Math.sqrt(v));
-  normalise(deposits, fixed, W, H, (v) => Math.sqrt(v));
-  normalise(flow, fixed, W, H, (v) => Math.log1p(v * 20) / Math.log1p(20));
-  return done();
+  if (raw) return done();
+  const f = done();
+  normaliseMaps(f);
+  return f;
 }
 
-/** Rounds of stream cutting and slope creep on one grid; `fixed` cells (water) are outlets. */
-function erodeGrid(hts: Float32Array, fixed: Uint8Array, W: number, H: number, iters: number, K: number, D: number, M: number, rng: Rng): void {
+/**
+ * Scale a carving's wear, deposit and flow maps to 0..1. Each is scaled against its own high values
+ * unless `tops` gives the scales to use: pieces of one map carved apart are scaled alike with the
+ * scales of the whole, so their colours match. Returns the scales used.
+ */
+export function normaliseMaps(f: ReliefField, tops?: [number, number, number]): [number, number, number] {
+  const { water, width: W, height: H } = f;
+  return [
+    normalise(f.wear, water, W, H, (v) => Math.sqrt(v), tops?.[0]),
+    normalise(f.deposits, water, W, H, (v) => Math.sqrt(v), tops?.[1]),
+    normalise(f.flow, water, W, H, (v) => Math.log1p(v * 20) / Math.log1p(20), tops?.[2]),
+  ];
+}
+
+/**
+ * How strongly the land rises back towards its shape each round of stream cutting, as uplift
+ * balances erosion in real ranges: streams with much water still cut their valleys deep, but
+ * the ridges between them keep their height, so the land keeps the shape it was drawn with.
+ */
+const UPLIFT = 0.12;
+
+/**
+ * Rounds of stream cutting and slope creep on one grid; `fixed` cells (water) are outlets.
+ * With `keep`, the land rises back towards it by `uplift` of the difference each round.
+ */
+function erodeGrid(hts: Float32Array, fixed: Uint8Array, W: number, H: number, iters: number, K: number, D: number, M: number, rng: Rng, keep?: Float32Array, uplift = 0): void {
   const n = W * H;
   const wander = 0.6;
   const order = new Int32Array(n);
@@ -670,6 +743,7 @@ function erodeGrid(hts: Float32Array, fixed: Uint8Array, W: number, H: number, i
         }
       }
     }
+    if (keep && uplift > 0) for (let i = 0; i < n; i++) if (!fixed[i]) hts[i] += (keep[i] - hts[i]) * uplift;
   }
 }
 

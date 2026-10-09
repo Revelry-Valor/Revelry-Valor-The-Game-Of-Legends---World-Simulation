@@ -3,6 +3,9 @@ import { erodeRelief } from '../src/engine/erosion';
 import { applyWater, hollowAt } from '../src/engine/water';
 import { TerrainEditor } from '../src/engine/editor';
 import { ChunkCarver } from '../src/engine/terrainbuild';
+import { carveScale, decodeRelief, encodeHeights, encodeRelief, generateMap } from '../src/engine/worldgen';
+import { defaultConfig } from '../src/engine/config';
+import { Rng } from '../src/engine/rng';
 
 /** Land falling east to the sea, with a bowl in the west and a ridge across the middle. */
 function land(w = 60, h = 40) {
@@ -109,9 +112,18 @@ describe('land and sea brushes', () => {
     expect(hts[20 * w + 45]).toBeLessThan(0);
     for (let k = 0; k < 6; k++) ed.dab(10, 5, { tool: 'deep', radius: 4, strength: 1, roughness: 0 });
     expect(hts[5 * w + 10]).toBeLessThan(-0.3);
-    for (let k = 0; k < 40; k++) ed.dab(20, 20, { tool: 'mountains', radius: 4, strength: 1, top: 0.3 });
-    expect(Math.max(...hts)).toBeLessThanOrEqual(0.3 + 1e-6);
-    expect(hts[20 * w + 20]).toBeGreaterThan(0.25);
+    const tilesBefore = Float32Array.from(hts);
+    // Each stroke over a peak builds it higher, never past the height limit.
+    for (let k = 0; k < 40; k++) {
+      ed.beginStroke();
+      ed.dab(20, 20, { tool: 'mountains', radius: 4, strength: 1, top: 0.3 });
+    }
+    let top = 0;
+    for (let y = 14; y < 26; y += 0.25) for (let x = 14; x < 26; x += 0.25) top = Math.max(top, ed.heightAt(x, y));
+    expect(top).toBeLessThanOrEqual(0.3 + 1e-6);
+    expect(top).toBeGreaterThan(0.25);
+    // The Terrain tools shape the fine grid on top of the outline; the outline's tiles are untouched.
+    expect(Array.from(hts)).toEqual(Array.from(tilesBefore));
     ed.dab(20, 20, { tool: 'sea', radius: 2, strength: 1, roughness: 0 });
     expect(hts[20 * w + 20]).toBeLessThan(0);
   });
@@ -134,7 +146,7 @@ describe('carving piece by piece', () => {
     // Change a little land.
     const dirty = { x0: 30, y0: 22, x1: 35, y1: 27 };
     for (let y = dirty.y0; y <= dirty.y1; y++) for (let x = dirty.x0; x <= dirty.x1; x++) surface[y * w + x] += 0.1;
-    a.carve(surface, sea, dirty);
+    a.carve(surface, sea, null, dirty);
     // The change is there...
     let rise = 0;
     let cells = 0;
@@ -143,16 +155,53 @@ describe('carving piece by piece', () => {
       cells++;
     }
     expect(rise / cells).toBeGreaterThan(0.008);
-    // ...and nothing more than a few tiles from it moved at all.
+    // ...and only where the land laid out from the changed tiles changed (they reach 2 tiles out).
+    let moved = 0;
     for (let Y = 0; Y < a.field.height; Y++) {
       for (let X = 0; X < a.field.width; X++) {
         const tx = (X + 0.5) / 2;
         const ty = (Y + 0.5) / 2;
-        const out = tx < dirty.x0 - 3 || tx > dirty.x1 + 4 || ty < dirty.y0 - 3 || ty > dirty.y1 + 4;
+        const out = tx < dirty.x0 - 2 || tx > dirty.x1 + 3 || ty < dirty.y0 - 2 || ty > dirty.y1 + 3;
         if (out) expect(a.field.heights[Y * a.field.width + X]).toBe(before[Y * a.field.width + X]);
+        else if (a.field.heights[Y * a.field.width + X] !== before[Y * a.field.width + X]) moved++;
       }
     }
-    expect(a.changed).toEqual({ x0: dirty.x0 - 3, y0: dirty.y0 - 3, x1: dirty.x1 + 3, y1: dirty.y1 + 3 });
+    expect(moved).toBeGreaterThan(0);
+  });
+
+  it('shows a stroke as drawn while it is drawn, and wears it with water only on the cells it touched', () => {
+    const w = 60;
+    const h = 40;
+    const S = 2;
+    const surface = new Float32Array(w * h).fill(0.02);
+    const sea = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) sea[x] = sea[(h - 1) * w + x] = 1;
+    const a = new ChunkCarver(w, h, { scale: S, seed: 5 });
+    const relief = new Float32Array(w * S * h * S);
+    a.carve(surface, sea, relief);
+    const before = Float32Array.from(a.field.heights);
+    // A round hill drawn on the fine grid: radius 3 tiles around (30, 20).
+    const inside = (X: number, Y: number) => Math.hypot((X + 0.5) / S - 30, (Y + 0.5) / S - 20) < 3;
+    for (let Y = 0; Y < h * S; Y++) for (let X = 0; X < w * S; X++) if (inside(X, Y)) relief[Y * w * S + X] = 0.15 * (1 - Math.hypot((X + 0.5) / S - 30, (Y + 0.5) / S - 20) / 3);
+    const box = { x0: 27, y0: 17, x1: 33, y1: 23 };
+    a.carve(surface, sea, relief, box, false);
+    const shown = Float32Array.from(a.field.heights);
+    a.carve(surface, sea, relief, box, true);
+    let changedOutside = 0;
+    let worn = 0;
+    for (let Y = 0; Y < h * S; Y++) {
+      for (let X = 0; X < w * S; X++) {
+        const i = Y * w * S + X;
+        if (!inside(X, Y)) {
+          if (a.field.heights[i] !== before[i] || shown[i] !== before[i]) changedOutside++;
+        } else if (Math.abs(a.field.heights[i] - shown[i]) > 1e-4) worn++;
+      }
+    }
+    // Shown as drawn at once (the hill is up)...
+    expect(shown[20 * S * w * S + 30 * S] - before[20 * S * w * S + 30 * S]).toBeGreaterThan(0.1);
+    // ...worn by water once finished, and nothing outside the hill changed at either step.
+    expect(worn).toBeGreaterThan(0);
+    expect(changedOutside).toBe(0);
   });
 });
 
@@ -168,9 +217,11 @@ describe('the terrain tools', () => {
       for (let k = 0; k < 10; k++) ed.line(18, 20, 42, 21, { tool, radius: 9, strength: 1, top: 0.6, floor: 0, level: 0.3 });
     }
     ed.beginStroke();
-    ed.ramp(10, 20, 50, 20, { tool: 'smooth', radius: 12, strength: 1 }, ed.strokeBase()!, null);
+    ed.ramp(10, 20, 50, 20, { tool: 'smooth', radius: 12, strength: 1 }, null);
     expect(Array.from(hts.map((v) => (v >= 0 ? 1 : 0)))).toEqual(Array.from(coast));
     expect(hts[2 * w + 2]).toBeCloseTo(-0.12, 5);
+    // The land stays above the sea everywhere the tools went.
+    for (let y = 10; y < 30; y += 0.25) for (let x = 20; x < 40; x += 0.25) if (hts[Math.floor(y) * w + Math.floor(x)] >= 0) expect(ed.heightAt(x, y)).toBeGreaterThan(0);
   });
 });
 
@@ -182,7 +233,7 @@ describe('the hills sponge', () => {
     const ed = new TerrainEditor(hts, w, h, 3);
     for (let k = 0; k < 4; k++) ed.line(10, 20, 50, 20, { tool: 'hills', radius: 8, strength: 0.6, top: 1 });
     const row: number[] = [];
-    for (let x = 14; x < 46; x++) row.push(hts[20 * w + x]);
+    for (let x = 14; x < 46; x++) row.push(ed.heightAt(x + 0.5, 20.5));
     const lo = Math.min(...row);
     const hi = Math.max(...row);
     expect(hi).toBeGreaterThan(0.13);
@@ -192,7 +243,9 @@ describe('the hills sponge', () => {
     for (let i = 2; i < row.length; i++) if ((row[i] - row[i - 1]) * (row[i - 1] - row[i - 2]) < 0) turns++;
     expect(turns).toBeGreaterThanOrEqual(4);
     // Outside the brush, nothing changed.
-    expect(hts[2 * w + 30]).toBeCloseTo(0.1, 6);
+    expect(ed.heightAt(30.5, 2.5)).toBeCloseTo(0.1, 6);
+    // Only inside the brush: just past its edge, the land is as it was.
+    expect(ed.heightAt(30.5, 20 + 8.2)).toBeCloseTo(0.1, 6);
   });
 });
 
@@ -205,19 +258,70 @@ describe('the smooth drag', () => {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) hts[y * w + x] = 0.05 + (0.4 * x) / (w - 1) + 0.06 * Math.sin(x * 1.3) * Math.cos(y * 0.9);
     const ed = new TerrainEditor(hts, w, h, 1);
     ed.beginStroke();
-    const base = ed.strokeBase()!;
+    const at = (x: number, y: number) => ed.heightAt(x, y);
+    const off = at(23.1, 10.1);
+    const a = at(10.5, 20.5);
+    const b = at(50.5, 20.5);
+    const far = at(30.1, 35.1);
     // First the pen goes one way, then ends somewhere else: the first slope is put back.
-    let box = ed.ramp(10.5, 20.5, 30.5, 5.5, { tool: 'smooth', radius: 4, strength: 1 }, base, null);
-    box = ed.ramp(10.5, 20.5, 50.5, 20.5, { tool: 'smooth', radius: 4, strength: 1 }, base, box);
-    expect(hts[10 * w + 23]).toBeCloseTo(base[10 * w + 23], 6);
-    const a = base[20 * w + 10];
-    const b = base[20 * w + 50];
-    for (let x = 12; x <= 48; x += 4) {
-      const want = a + ((b - a) * (x + 0.5 - 10.5)) / 40;
-      expect(hts[20 * w + x]).toBeCloseTo(want, 3);
-    }
+    let box = ed.ramp(10.5, 20.5, 30.5, 5.5, { tool: 'smooth', radius: 4, strength: 1 }, null);
+    box = ed.ramp(10.5, 20.5, 50.5, 20.5, { tool: 'smooth', radius: 4, strength: 1 }, box);
+    expect(at(23.1, 10.1)).toBeCloseTo(off, 6);
+    for (let x = 12.5; x <= 48.5; x += 4) expect(at(x, 20.5)).toBeCloseTo(a + ((b - a) * (x - 10.5)) / 40, 2);
     // Away from the line, untouched.
-    expect(hts[35 * w + 30]).toBeCloseTo(base[35 * w + 30], 6);
+    expect(at(30.1, 35.1)).toBeCloseTo(far, 6);
     expect(box.x1).toBeGreaterThanOrEqual(50);
+  });
+});
+
+describe('the mountains ridge', () => {
+  it('raises a crest along the stroke, as narrow as the brush, and nothing outside it', () => {
+    const w = 60;
+    const h = 40;
+    const hts = new Float32Array(w * h).fill(0.02);
+    const ed = new TerrainEditor(hts, w, h, 4);
+    ed.beginStroke();
+    ed.line(15, 20, 45, 20, { tool: 'mountains', radius: 2, strength: 0.6, top: 1 });
+    // High along the crest, all the way along...
+    for (let x = 18; x <= 42; x += 3) expect(ed.heightAt(x, 20.1)).toBeGreaterThan(0.06);
+    // ...falling away down its flanks...
+    for (let x = 18; x <= 42; x += 3) expect(ed.heightAt(x, 21.5)).toBeLessThan(ed.heightAt(x, 20.1));
+    // ...and nothing beyond the brush's reach (2 tiles) changed at all.
+    for (let x = 10; x < 50; x += 0.5) {
+      expect(ed.heightAt(x, 22.3)).toBeCloseTo(0.02, 6);
+      expect(ed.heightAt(x, 17.7)).toBeCloseTo(0.02, 6);
+    }
+    expect(ed.heightAt(12.6, 20.1)).toBeCloseTo(0.02, 6);
+    // Going back over it in the same stroke doesn't pile it up; a new stroke builds it higher.
+    // (one pass at this strength rises at most about 0.12 above the land).
+    for (let k = 0; k < 3; k++) ed.line(45, 20, 15, 20, { tool: 'mountains', radius: 2, strength: 0.6, top: 1 });
+    const once = ed.heightAt(30, 20.1);
+    expect(once).toBeLessThan(0.02 + 0.13);
+    ed.beginStroke();
+    ed.line(15, 20, 45, 20, { tool: 'mountains', radius: 2, strength: 0.6, top: 1 });
+    expect(ed.heightAt(30, 20.1)).toBeGreaterThan(once + 0.03);
+  });
+
+  it('is kept with the world, and the world stands as high as the land shaped on it', () => {
+    const W = 120;
+    const H = 80;
+    const S = 4;
+    const relief = new Float32Array(W * H);
+    for (let i = 0; i < relief.length; i += 37) relief[i] = ((i % 200) - 100) / 400;
+    const back = decodeRelief(encodeRelief(relief, W, H), W, H)!;
+    for (let i = 0; i < relief.length; i++) expect(back[i]).toBeCloseTo(relief[i], 4);
+    expect(decodeRelief(encodeRelief(relief, W, H), W + 1, H)).toBeNull();
+    // A world of flat land, with a block raised by hand on the fine grid.
+    const w = 30;
+    const h = 20;
+    const tiles = new Float32Array(w * h).fill(0.02);
+    for (let x = 0; x < w; x++) tiles[x] = tiles[(h - 1) * w + x] = -0.1;
+    const fine = new Float32Array(w * S * h * S);
+    for (let Y = 8 * S; Y < 12 * S; Y++) for (let X = 10 * S; X < 14 * S; X++) fine[Y * w * S + X] = 0.3;
+    const cfg = defaultConfig({ seed: 2, width: w, height: h, heightmap: encodeHeights(tiles, w, h), relief: encodeRelief(fine, w * S, h * S) });
+    expect(carveScale(w, h)).toBe(S);
+    const map = generateMap(cfg, new Rng(2).fork('map'));
+    expect(map.elevation[10 * w + 12]).toBeGreaterThan(0.25);
+    expect(map.elevation[3 * w + 3]).toBeLessThan(0.1);
   });
 });

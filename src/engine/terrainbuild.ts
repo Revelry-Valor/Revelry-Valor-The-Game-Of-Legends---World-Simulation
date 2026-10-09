@@ -1,4 +1,4 @@
-import { erodeRelief, type ErosionOptions, type ReliefField } from './erosion';
+import { erodeRelief, normaliseMaps, type ErosionOptions, type ReliefField } from './erosion';
 
 /** A rectangle of tiles, inclusive. */
 export interface Box {
@@ -14,8 +14,8 @@ const CHUNK = 32;
 const MARGIN = 7;
 /** ...and blended into its neighbours across this many tiles either side of the seam. */
 const FEATHER = 4;
-/** A change is laid in over the land it touched, fading out over this many tiles around it. */
-const PATCH_FADE = 3;
+/** How far, in tiles, a change to the tiles reaches into the land laid out from them. */
+const SPREAD = 3;
 
 interface Chunk {
   /** The tiles this piece is responsible for. */
@@ -25,19 +25,38 @@ interface Chunk {
   field: ReliefField | null;
 }
 
+/** What the land is carved from: tile heights, the sea, and the land shaped by hand on the fine grid. */
+interface Inputs {
+  surface: Float32Array;
+  sea: Uint8Array;
+  relief: Float32Array | null;
+}
+
 /**
- * Carves the map's land, piece by piece the first time. After that, a change is carved again in a
- * small window around it and laid in only over the land that changed (fading out over a few tiles),
- * so the rest of the map stays exactly as it was however much is drawn.
+ * Carves the map's land: all of it the first time (in pieces, blended at the seams), and after that
+ * only the land a change touched.
  *
- * Each piece is carved with a margin of land around it and blended into its neighbours over a few
- * tiles, so the seams don't show; the mountain shapes come from the same noise across the map.
+ * A change is worked out as a difference. The land around it is carved twice, as it was and as it
+ * is now, from the same piece of map with the same rain; the difference between the two is what
+ * the change did, and it is added to the land as it was, on the cells the change touched and on no
+ * others. Everything else stays exactly as it was. While a stroke is still being drawn (`erode`
+ * false) the change is shown at once as drawn, and worn by water when it is finished.
  */
 export class ChunkCarver {
   readonly scale: number;
   readonly field: ReliefField;
   private chunks: Chunk[] = [];
   private sea: Uint8Array | null = null;
+  /** The land as last carved in full (before any change still being drawn). */
+  private base: { heights: Float32Array; wear: Float32Array; deposits: Float32Array; flow: Float32Array } | null = null;
+  /** What that carving was carved from. */
+  private done: Inputs | null = null;
+  /** The scales of the wear, deposit and flow maps over the whole map. */
+  private tops: [number, number, number] | undefined;
+  /** Tiles changed by a stroke still being drawn, since the land was last carved. */
+  private pending: Box | null = null;
+  /** The land as shaped (before carving) at the last carving, around the stroke being drawn. */
+  private shapedCache: { win: Box; f: ReliefField } | null = null;
   /** The tiles the last carve changed (null if none). */
   changed: Box | null = null;
   private nx: number;
@@ -73,62 +92,56 @@ export class ChunkCarver {
   setOptions(opts: ErosionOptions): void {
     this.opts = { ...opts, scale: this.scale };
     for (const c of this.chunks) c.field = null;
+    this.base = null;
+    this.done = null;
   }
 
   /**
-   * Carve the land (tile heights, sea below 0). With `dirty`, only the pieces whose land reaches
-   * into that box are carved again; without it (or the first time), all of them.
+   * Carve the land (tile heights, sea below 0, and the land shaped by hand on the fine grid). With
+   * `dirty`, only the land changed within that box is carved again; without it (or the first time),
+   * all of it. `erode` false shows a change as drawn, to be worn by water on a later call.
    */
-  carve(surface: Float32Array, sea: Uint8Array, dirty?: Box | null): ReliefField {
-    // Once the map has been carved, a change is carved in a small window around it and laid in
-    // only where the land changed, fading out over a few tiles: everything else stays as it was.
-    if (dirty && this.chunks.every((c) => c.field)) return this.patch(surface, sea, dirty);
-    const todo: number[] = [];
-    this.chunks.forEach((c, k) => {
-      if (!c.field || !dirty || overlaps(c.ext, dirty)) todo.push(k);
-    });
+  carve(surface: Float32Array, sea: Uint8Array, relief: Float32Array | null = null, dirty?: Box | null, erode = true): ReliefField {
+    const now: Inputs = { surface, sea, relief };
+    if (!dirty || !this.base || !this.done) return this.full(now);
     this.sea = sea;
     this.changed = null;
-    if (!todo.length) return this.field;
-    const { w } = this;
-    for (const k of todo) {
-      const c = this.chunks[k];
-      const cw = c.ext.x1 - c.ext.x0 + 1;
-      const ch = c.ext.y1 - c.ext.y0 + 1;
-      const surf = new Float32Array(cw * ch);
-      const water = new Uint8Array(cw * ch);
-      for (let y = 0; y < ch; y++) {
-        for (let x = 0; x < cw; x++) {
-          const t = (c.ext.y0 + y) * w + c.ext.x0 + x;
-          surf[y * cw + x] = surface[t];
-          water[y * cw + x] = sea[t];
-        }
-      }
-      c.field = erodeRelief(surf, water, cw, ch, { ...this.opts, scale: this.scale, offset: [c.ext.x0, c.ext.y0] });
+    const box = union(dirty.x1 >= dirty.x0 && dirty.y1 >= dirty.y0 ? dirty : null, this.pending);
+    if (!box) return this.field;
+    if (!erode) {
+      // Only what this step of the stroke changed needs showing; earlier steps are shown already.
+      if (dirty.x1 >= dirty.x0 && dirty.y1 >= dirty.y0) this.preview(dirty, now);
+      this.pending = box;
+    } else {
+      this.commit(box, now);
+      this.pending = null;
+      this.shapedCache = null;
     }
-    // Blend again everywhere a re-carved piece reaches.
-    let box: Box | null = null;
-    for (const k of todo) {
-      const c = this.chunks[k].core;
-      const b = { x0: c.x0 - FEATHER, y0: c.y0 - FEATHER, x1: c.x1 + FEATHER, y1: c.y1 + FEATHER };
-      box = box ? { x0: Math.min(box.x0, b.x0), y0: Math.min(box.y0, b.y0), x1: Math.max(box.x1, b.x1), y1: Math.max(box.y1, b.y1) } : b;
-    }
-    this.blend(box!);
-    this.changed = { x0: Math.max(0, box!.x0), y0: Math.max(0, box!.y0), x1: Math.min(this.w - 1, box!.x1), y1: Math.min(this.h - 1, box!.y1) };
     return this.field;
   }
 
-  /** Carve the land around a changed box and lay it in over the box, fading out around it. */
-  private patch(surface: Float32Array, sea: Uint8Array, dirty: Box): ReliefField {
-    this.sea = sea;
-    this.changed = null;
-    if (dirty.x1 < dirty.x0 || dirty.y1 < dirty.y0) return this.field;
+  /** Carve the whole map, piece by piece. */
+  private full(now: Inputs): ReliefField {
     const { w, h } = this;
-    const S = this.scale;
+    this.sea = now.sea;
+    for (const c of this.chunks) c.field = this.carveWindow(c.ext, now, true);
+    this.blend({ x0: 0, y0: 0, x1: w - 1, y1: h - 1 });
+    // The data maps are scaled over the whole map once, and every later change with the same scales.
+    this.tops = normaliseMaps(this.field);
+    for (const c of this.chunks) c.field = null;
     const f = this.field;
-    const W = f.width;
-    const reach = MARGIN + PATCH_FADE;
-    const win = { x0: Math.max(0, dirty.x0 - reach), y0: Math.max(0, dirty.y0 - reach), x1: Math.min(w - 1, dirty.x1 + reach), y1: Math.min(h - 1, dirty.y1 + reach) };
+    this.base = { heights: Float32Array.from(f.heights), wear: Float32Array.from(f.wear), deposits: Float32Array.from(f.deposits), flow: Float32Array.from(f.flow) };
+    this.done = copyInputs(now);
+    this.pending = null;
+    this.shapedCache = null;
+    this.changed = { x0: 0, y0: 0, x1: w - 1, y1: h - 1 };
+    return f;
+  }
+
+  /** Carve one piece of the map (tiles `win`), as it would be carved as part of the whole. */
+  private carveWindow(win: Box, inp: Inputs, raw: boolean, stage?: 'mountains', keepShaped = false): ReliefField {
+    const { w } = this;
+    const S = this.scale;
     const cw = win.x1 - win.x0 + 1;
     const ch = win.y1 - win.y0 + 1;
     const surf = new Float32Array(cw * ch);
@@ -136,31 +149,126 @@ export class ChunkCarver {
     for (let y = 0; y < ch; y++) {
       for (let x = 0; x < cw; x++) {
         const t = (win.y0 + y) * w + win.x0 + x;
-        surf[y * cw + x] = surface[t];
-        water[y * cw + x] = sea[t];
+        surf[y * cw + x] = inp.surface[t];
+        water[y * cw + x] = inp.sea[t];
       }
     }
-    const r = erodeRelief(surf, water, cw, ch, { ...this.opts, scale: S, offset: [win.x0, win.y0] });
-    // Weight 1 over the changed tiles, falling to 0 over PATCH_FADE tiles around them.
-    const out = { x0: Math.max(0, dirty.x0 - PATCH_FADE), y0: Math.max(0, dirty.y0 - PATCH_FADE), x1: Math.min(w - 1, dirty.x1 + PATCH_FADE), y1: Math.min(h - 1, dirty.y1 + PATCH_FADE) };
-    const fade = (v: number, lo: number, hi: number) => (v < lo ? Math.max(0, 1 - (lo - v) / PATCH_FADE) : v > hi ? Math.max(0, 1 - (v - hi) / PATCH_FADE) : 1);
-    for (let Y = out.y0 * S; Y < (out.y1 + 1) * S; Y++) {
-      const wy = fade((Y + 0.5) / S, dirty.y0, dirty.y1 + 1);
-      for (let X = out.x0 * S; X < (out.x1 + 1) * S; X++) {
-        const k = wy * fade((X + 0.5) / S, dirty.x0, dirty.x1 + 1);
-        if (k <= 0) continue;
-        const kk = k * k * (3 - 2 * k);
+    let relief: Float32Array | null = null;
+    if (inp.relief) {
+      const W = w * S;
+      const RW = cw * S;
+      relief = new Float32Array(RW * ch * S);
+      for (let Y = 0; Y < ch * S; Y++) relief.set(inp.relief.subarray((win.y0 * S + Y) * W + win.x0 * S, (win.y0 * S + Y) * W + (win.x1 + 1) * S), Y * RW);
+    }
+    const r = erodeRelief(surf, water, cw, ch, { ...this.opts, scale: S, offset: [win.x0, win.y0], relief, raw, stage, keepShaped });
+    if (!raw && stage !== 'mountains') normaliseMaps(r, this.tops);
+    return r;
+  }
+
+  /**
+   * Show a change as drawn, before water wears it: the land as carved, plus what the change added,
+   * over the tiles of `box`. The land as it was shaped is kept around the stroke, so each step of
+   * the stroke shapes only its own few tiles.
+   */
+  private preview(box: Box, now: Inputs): void {
+    const { w, h } = this;
+    const S = this.scale;
+    const grow = (b: Box, d: number): Box => ({ x0: Math.max(0, b.x0 - d), y0: Math.max(0, b.y0 - d), x1: Math.min(w - 1, b.x1 + d), y1: Math.min(h - 1, b.y1 + d) });
+    // Shaped with SPREAD tiles of land around the box, so the box itself is shaped as part of the whole.
+    const win = grow(box, SPREAD);
+    const c = this.shapedCache;
+    if (!c || win.x0 < c.win.x0 || win.y0 < c.win.y0 || win.x1 > c.win.x1 || win.y1 > c.win.y1) {
+      const cw = grow(c ? union(c.win, win)! : win, 16);
+      this.shapedCache = { win: cw, f: this.carveWindow(cw, this.done!, true, 'mountains') };
+    }
+    const cache = this.shapedCache!;
+    const is = this.carveWindow(win, now, true, 'mountains');
+    // The land as it was over the same window, from the cache.
+    const was: ReliefField = { ...is, heights: new Float32Array(is.heights.length), water: new Uint8Array(is.water.length) };
+    const ox = (win.x0 - cache.win.x0) * S;
+    const oy = (win.y0 - cache.win.y0) * S;
+    for (let y = 0; y < is.height; y++) {
+      for (let x = 0; x < is.width; x++) {
+        const k = (y + oy) * cache.f.width + x + ox;
+        was.heights[y * is.width + x] = cache.f.heights[k];
+        was.water[y * is.width + x] = cache.f.water[k];
+      }
+    }
+    this.lay(win, was, is, null, null, box);
+  }
+
+  /** Wear a change with water: the land around it carved as it was and as it is, the difference laid in where it changed. */
+  private commit(box: Box, now: Inputs): void {
+    const { w, h } = this;
+    const win = { x0: Math.max(0, box.x0 - SPREAD - MARGIN), y0: Math.max(0, box.y0 - SPREAD - MARGIN), x1: Math.min(w - 1, box.x1 + SPREAD + MARGIN), y1: Math.min(h - 1, box.y1 + SPREAD + MARGIN) };
+    const wasC = this.carveWindow(win, this.done!, false, undefined, true);
+    const isC = this.carveWindow(win, now, false, undefined, true);
+    this.lay(win, { ...wasC, heights: wasC.shaped! }, { ...isC, heights: isC.shaped! }, wasC, isC);
+    const f = this.field;
+    const b = this.base!;
+    // What is shown now is the land as carved.
+    b.heights.set(f.heights);
+    b.wear.set(f.wear);
+    b.deposits.set(f.deposits);
+    b.flow.set(f.flow);
+    this.done = copyInputs(now);
+  }
+
+  /**
+   * Lay a change into the land, on the cells it touched and no others: where the land as shaped
+   * (before carving) differs between `was` and `is`. Carved (`wasC`, `isC`), the change is what the
+   * carving did differently; otherwise it is the change as drawn.
+   */
+  private lay(win: Box, was: ReliefField, is: ReliefField, wasC: ReliefField | null, isC: ReliefField | null, only?: Box): void {
+    const S = this.scale;
+    const f = this.field;
+    const b = this.base!;
+    const W = f.width;
+    let changed: Box | null = null;
+    // Within `only` (tiles), if given: the rest of the window is there to shape it as part of the whole.
+    const ys = only ? (only.y0 - win.y0) * S : 0;
+    const ye = only ? (only.y1 + 1 - win.y0) * S : is.height;
+    const xs = only ? (only.x0 - win.x0) * S : 0;
+    const xe = only ? (only.x1 + 1 - win.x0) * S : is.width;
+    for (let y = ys; y < ye; y++) {
+      const Y = win.y0 * S + y;
+      for (let x = xs; x < xe; x++) {
+        const X = win.x0 * S + x;
+        const j = y * is.width + x;
         const i = Y * W + X;
-        const j = (Y - win.y0 * S) * r.width + (X - win.x0 * S);
-        f.heights[i] += (r.heights[j] - f.heights[i]) * kk;
-        f.wear[i] += (r.wear[j] - f.wear[i]) * kk;
-        f.deposits[i] += (r.deposits[j] - f.deposits[i]) * kk;
-        f.flow[i] += (r.flow[j] - f.flow[i]) * kk;
+        const dp = is.heights[j] - was.heights[j];
+        const wet = is.water[j] !== was.water[j];
+        if (dp === 0 && !wet) {
+          // Untouched: as carved (undoing anything an earlier preview showed here).
+          f.heights[i] = b.heights[i];
+          f.wear[i] = b.wear[i];
+          f.deposits[i] = b.deposits[i];
+          f.flow[i] = b.flow[i];
+          continue;
+        }
+        if (wasC && isC) {
+          // Faded in by how much the land changed, so the edge of a stroke meets the land around it.
+          const k0 = wet ? 1 : Math.min(1, Math.abs(dp) / 0.004);
+          const k = k0 * k0 * (3 - 2 * k0);
+          f.heights[i] = Math.max(0, b.heights[i] + k * (isC.heights[j] - wasC.heights[j]) + (1 - k) * dp);
+          f.wear[i] = clamp01(b.wear[i] + k * (isC.wear[j] - wasC.wear[j]));
+          f.deposits[i] = clamp01(b.deposits[i] + k * (isC.deposits[j] - wasC.deposits[j]));
+          f.flow[i] = clamp01(b.flow[i] + k * (isC.flow[j] - wasC.flow[j]));
+        } else {
+          f.heights[i] = Math.max(0, b.heights[i] + dp);
+          f.wear[i] = b.wear[i];
+          f.deposits[i] = b.deposits[i];
+          f.flow[i] = b.flow[i];
+        }
+        const tx = Math.floor(X / S);
+        const ty = Math.floor(Y / S);
+        changed = union(changed, { x0: tx, y0: ty, x1: tx, y1: ty });
       }
     }
-    this.seaMask(out);
-    this.changed = out;
-    return this.field;
+    // Cells shown changed by an earlier preview but no longer changed were put back above: repaint those too.
+    if (this.pending && !only) changed = union(changed, this.pending);
+    if (changed) this.seaMask(changed);
+    this.changed = changed;
   }
 
   /** Each cell of the box as the weighted sum of the pieces covering it (weights add up to 1). */
@@ -248,8 +356,14 @@ export class ChunkCarver {
   }
 }
 
-function overlaps(a: Box, b: Box): boolean {
-  return a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1;
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+function union(a: Box | null, b: Box | null): Box | null {
+  return !a ? b : !b ? a : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
+}
+
+function copyInputs(i: Inputs): Inputs {
+  return { surface: Float32Array.from(i.surface), sea: Uint8Array.from(i.sea), relief: i.relief ? Float32Array.from(i.relief) : null };
 }
 
 /** A copy of a carved field, to work water into without touching the original. */

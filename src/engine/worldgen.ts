@@ -36,7 +36,11 @@ export function isWaterBiome(b: number): boolean {
  * `build` lets the world editor carve only what changed: a carver kept between builds, and the
  * box of tiles that changed since the last one (null: everything).
  */
-export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: ChunkCarver; dirty?: Box | null }): MapData {
+export function generateMap(
+  cfg: WorldConfig,
+  rng: Rng,
+  build?: { carver?: ChunkCarver; dirty?: Box | null; erode?: boolean; relief?: Float32Array | null },
+): MapData {
   const w = cfg.width;
   const h = cfg.height;
   const size = w * h;
@@ -48,6 +52,22 @@ export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: Chunk
 
   // --- Elevation ---------------------------------------------------------
   const elevation = (cfg.heightmap && decodeHeights(cfg.heightmap, w, h)) || generateElevation(cfg, rng, nElev, nRidge);
+  // The land as outlined, before the land shaped by hand on the fine grid is added to it.
+  const outline = Float32Array.from(elevation);
+  const S = carveScale(w, h);
+  const handShaped = build?.relief !== undefined ? build.relief : cfg.relief ? decodeRelief(cfg.relief, w * S, h * S) : null;
+  if (handShaped) {
+    // Each tile is as high as the land shaped on it, on average.
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (elevation[i] < 0) continue;
+        let sum = 0;
+        for (let Y = y * S; Y < (y + 1) * S; Y++) for (let X = x * S; X < (x + 1) * S; X++) sum += handShaped[Y * w * S + X];
+        elevation[i] = Math.min(1, Math.max(0, elevation[i] + sum / (S * S)));
+      }
+    }
+  }
   const heights = Float32Array.from(elevation);
   const wasLand = new Uint8Array(size);
   for (let i = 0; i < size; i++) wasLand[i] = elevation[i] >= 0 ? 1 : 0;
@@ -196,11 +216,15 @@ export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: Chunk
   // outlet), and rivers down the valley floors. Those are the lakes and rivers the world lives by.
   const sea = new Uint8Array(size);
   const surface = new Float32Array(size);
+  const shaped = new Float32Array(size);
   const rainOn = new Float32Array(size);
   for (let i = 0; i < size; i++) {
     rainOn[i] = 0.05 + moisture[i];
     if (elevation[i] < 0) sea[i] = 1;
-    else surface[i] = elevation[i];
+    else {
+      surface[i] = outline[i];
+      shaped[i] = elevation[i];
+    }
   }
   const t = cfg.terrain ?? {};
   // Land carved in the world editor is used as it was carved there, so the world is the one drawn.
@@ -209,7 +233,7 @@ export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: Chunk
   if (kept) base = kept;
   else {
     const carver = build?.carver && build.carver.w === w && build.carver.h === h ? build.carver : carverFor(cfg);
-    base = carver.carve(surface, sea, build?.carver === carver ? build.dirty : null);
+    base = carver.carve(surface, sea, handShaped, build?.carver === carver ? build.dirty : null, build?.erode ?? true);
   }
   // The water works on a copy, so the carved land can be kept for the next build.
   const carved = copyField(base);
@@ -220,7 +244,7 @@ export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: Chunk
   let lakeTiles: Uint8Array;
   if (cfg.water) {
     // Water drawn by hand: only the rivers and lakes put there.
-    const wr = applyWater(carved, w, h, cfg.water, riverThreshold, { width: t.riverWidth, depth: t.riverDepth, seed: cfg.seed }, surface);
+    const wr = applyWater(carved, w, h, cfg.water, riverThreshold, { width: t.riverWidth, depth: t.riverDepth, seed: cfg.seed }, shaped);
     river.fill(0);
     river.set(wr.river);
     curves = wr.curves;
@@ -241,6 +265,8 @@ export function generateMap(cfg: WorldConfig, rng: Rng, build?: { carver?: Chunk
     lakeTiles = rivers.lake;
   }
   for (let i = 0; i < size; i++) {
+    // Rivers run on land: a river reaching the coast ends at its last land tile.
+    if (elevation[i] < 0) river[i] = 0;
     if (!lakeTiles[i] || elevation[i] < 0) continue;
     elevation[i] = -0.02;
     river[i] = 0;
@@ -413,7 +439,7 @@ const keptCarving = new Map<string, ReliefField>();
 /** What a world's carved land depends on: its land, size, seed and carving settings. */
 export function carvingKey(cfg: WorldConfig): string {
   const t = cfg.terrain ?? {};
-  return JSON.stringify([cfg.width, cfg.height, cfg.seed, t.mountains, t.erosion, t.softness, t.downcutting, cfg.heightmap ?? '']);
+  return JSON.stringify([cfg.width, cfg.height, cfg.seed, t.mountains, t.erosion, t.softness, t.downcutting, cfg.heightmap ?? '', cfg.relief ?? '']);
 }
 
 /** Keep the land as carved in the editor for the world about to be made from these settings. */
@@ -422,11 +448,16 @@ export function keepCarving(cfg: WorldConfig, field: ReliefField): void {
   keptCarving.set(carvingKey(cfg), field);
 }
 
+/** Cells per tile, each way, of the grid the land is carved and shaped on. */
+export function carveScale(w: number, h: number): number {
+  return clamp(Math.floor(Math.sqrt(400000 / (w * h))), 2, 4);
+}
+
 /** A carver for a world's land, with its carving settings. */
 export function carverFor(cfg: WorldConfig): ChunkCarver {
   const t = cfg.terrain ?? {};
   return new ChunkCarver(cfg.width, cfg.height, {
-    scale: clamp(Math.floor(Math.sqrt(400000 / (cfg.width * cfg.height))), 2, 4),
+    scale: carveScale(cfg.width, cfg.height),
     seed: cfg.seed,
     mountains: t.mountains,
     erosion: t.erosion,
@@ -717,6 +748,66 @@ export function decodeHeights(code: string, w: number, h: number): Float32Array 
       const bot = src[y1 * sw + x0] * (1 - tx) + src[y1 * sw + x1] * tx;
       out[y * w + x] = top * (1 - ty) + bot * ty;
     }
+  }
+  return out;
+}
+
+const RELIEF_SCALE = 30000;
+
+/**
+ * Pack the land shaped by hand on the fine grid into a text code for the world's settings. Most of
+ * it is untouched (0), so runs of zeros are stored as a count.
+ */
+export function encodeRelief(relief: Float32Array, W: number, H: number): string {
+  const out: number[] = [];
+  let zeros = 0;
+  for (let i = 0; i < W * H; i++) {
+    const q = Math.round(clamp(relief[i], -1, 1) * RELIEF_SCALE);
+    if (q === 0) {
+      zeros++;
+      continue;
+    }
+    while (zeros > 0) {
+      // A run of zeros: the marker -32768 and its length (up to 65535).
+      const n = Math.min(zeros, 65535);
+      out.push(-32768, n - 32768);
+      zeros -= n;
+    }
+    out.push(q);
+  }
+  while (zeros > 0) {
+    const n = Math.min(zeros, 65535);
+    out.push(-32768, n - 32768);
+    zeros -= n;
+  }
+  const bytes = new Uint8Array(Int16Array.from(out).buffer);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `${W}x${H}:${btoa(bin)}`;
+}
+
+/** Unpack a relief code made for a grid of this size (null if it won't read, or is for another size). */
+export function decodeRelief(code: string, W: number, H: number): Float32Array | null {
+  const m = /^(\d+)x(\d+):(.*)$/s.exec(code);
+  if (!m || +m[1] !== W || +m[2] !== H) return null;
+  let bin: string;
+  try {
+    bin = atob(m[3]);
+  } catch {
+    return null;
+  }
+  if (bin.length % 2) return null;
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const q = new Int16Array(bytes.buffer);
+  const out = new Float32Array(W * H);
+  let at = 0;
+  for (let k = 0; k < q.length && at < out.length; k++) {
+    if (q[k] === -32768) {
+      at += q[++k] + 32768;
+      continue;
+    }
+    out[at++] = q[k] / RELIEF_SCALE;
   }
   return out;
 }
