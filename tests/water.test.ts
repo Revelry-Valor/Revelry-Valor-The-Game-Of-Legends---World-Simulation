@@ -217,7 +217,7 @@ describe('the terrain tools', () => {
       for (let k = 0; k < 10; k++) ed.line(18, 20, 42, 21, { tool, radius: 9, strength: 1, top: 0.6, floor: 0, level: 0.3 });
     }
     ed.beginStroke();
-    ed.ramp(10, 20, 50, 20, { tool: 'smooth', radius: 12, strength: 1 }, null);
+    ed.ramp(10, 20, 50, 20, { tool: 'ramp', radius: 12, strength: 1 }, null);
     expect(Array.from(hts.map((v) => (v >= 0 ? 1 : 0)))).toEqual(Array.from(coast));
     expect(hts[2 * w + 2]).toBeCloseTo(-0.12, 5);
     // The land stays above the sea everywhere the tools went.
@@ -249,7 +249,7 @@ describe('the hills sponge', () => {
   });
 });
 
-describe('the smooth drag', () => {
+describe('the ramp drag', () => {
   it('lays an even slope from where it began to where it ends, and follows the pen', () => {
     const w = 60;
     const h = 40;
@@ -264,8 +264,8 @@ describe('the smooth drag', () => {
     const b = at(50.5, 20.5);
     const far = at(30.1, 35.1);
     // First the pen goes one way, then ends somewhere else: the first slope is put back.
-    let box = ed.ramp(10.5, 20.5, 30.5, 5.5, { tool: 'smooth', radius: 4, strength: 1 }, null);
-    box = ed.ramp(10.5, 20.5, 50.5, 20.5, { tool: 'smooth', radius: 4, strength: 1 }, box);
+    let box = ed.ramp(10.5, 20.5, 30.5, 5.5, { tool: 'ramp', radius: 4, strength: 1 }, null);
+    box = ed.ramp(10.5, 20.5, 50.5, 20.5, { tool: 'ramp', radius: 4, strength: 1 }, box);
     expect(at(23.1, 10.1)).toBeCloseTo(off, 6);
     for (let x = 12.5; x <= 48.5; x += 4) expect(at(x, 20.5)).toBeCloseTo(a + ((b - a) * (x - 10.5)) / 40, 2);
     // Away from the line, untouched.
@@ -323,5 +323,31 @@ describe('the mountains ridge', () => {
     const map = generateMap(cfg, new Rng(2).fork('map'));
     expect(map.elevation[10 * w + 12]).toBeGreaterThan(0.25);
     expect(map.elevation[3 * w + 3]).toBeLessThan(0.1);
+  });
+});
+
+describe('the smooth brush', () => {
+  it('blends the land under it: highs come down, dips fill, nothing outside the brush moves', () => {
+    const w = 60;
+    const h = 40;
+    const hts = new Float32Array(w * h).fill(0.05);
+    const ed = new TerrainEditor(hts, w, h, 1);
+    // Rough, bumpy hills to smooth.
+    for (let k = 0; k < 4; k++) {
+      ed.beginStroke();
+      ed.line(10, 20, 50, 20, { tool: 'hills', radius: 10, strength: 1, top: 1 });
+    }
+    const spread = () => {
+      const v: number[] = [];
+      for (let y = 17; y <= 23; y += 0.5) for (let x = 25; x <= 35; x += 0.5) v.push(ed.heightAt(x, y));
+      const mean = v.reduce((a, b) => a + b) / v.length;
+      return Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / v.length);
+    };
+    const before = spread();
+    const outside = ed.heightAt(30.1, 31.5);
+    ed.beginStroke();
+    for (let k = 0; k < 3; k++) ed.line(20, 20, 40, 20, { tool: 'smooth', radius: 8, strength: 1 });
+    expect(spread()).toBeLessThan(before * 0.6);
+    expect(ed.heightAt(30.1, 31.5)).toBeCloseTo(outside, 6);
   });
 });

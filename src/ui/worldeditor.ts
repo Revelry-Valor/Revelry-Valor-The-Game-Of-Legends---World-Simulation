@@ -564,8 +564,8 @@ export class WorldEditor {
       this.paintWater(x, y);
       return;
     }
-    // Smooth lays its slope as you drag.
-    if (tool === 'smooth') return;
+    // Ramp lays its slope as you drag.
+    if (tool === 'ramp') return;
     this.touched(this.editor.dab(x, y, this.brush()));
     this.request(false, false);
   }
@@ -578,7 +578,7 @@ export class WorldEditor {
       if (Math.hypot(x - lx, y - ly) >= Math.max(0.5, this.radius * 0.4)) this.paintWater(x, y);
       return;
     }
-    if (this.tool === 'smooth') {
+    if (this.tool === 'ramp') {
       s.ramp = this.editor.ramp(s.start[0], s.start[1], x, y, this.brush(), s.ramp ?? null);
       this.touched(s.ramp);
     } else this.touched(this.editor.line(s.x, s.y, x, y, this.brush()));
@@ -724,7 +724,7 @@ export class WorldEditor {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
       ctx.fillText(line === 0 ? 'Equator' : `${Math.abs(line)}°${line > 0 ? 'N' : 'S'}`, Math.max(4, x0 + 4), py - 7);
     }
-    if (this.stroke && this.tool === 'smooth') {
+    if (this.stroke && this.tool === 'ramp') {
       // The line the slope is laid along.
       const [ax, ay] = this.stroke.start;
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';

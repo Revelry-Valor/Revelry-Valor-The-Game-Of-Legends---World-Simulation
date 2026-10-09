@@ -14,6 +14,7 @@ export type BrushTool =
   | 'plateau'
   | 'cliff'
   | 'smooth'
+  | 'ramp'
   | 'valley'
   | 'river'
   | 'lake'
@@ -33,7 +34,8 @@ export const BRUSHES: { id: BrushTool; group: ToolGroup; name: string; hint: str
   { id: 'lower', group: 'terrain', name: 'Lower', hint: 'Sink the ground, never below the lowest height and never into the sea (the coast is drawn on Land & Sea).' },
   { id: 'plateau', group: 'terrain', name: 'Plateau', hint: 'Level the ground to the height where the stroke began: plateaus, mesas, table lands.' },
   { id: 'cliff', group: 'terrain', name: 'Cliff', hint: 'Raise the land on the left of your stroke into a cliff, dropping sheer along the line you draw. Strength sets how tall, the height limit how high.' },
-  { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Click and drag: lays an even slope from where you pressed to where you let go, up or down, as wide as the brush. The land beside it is left steeper.' },
+  { id: 'smooth', group: 'terrain', name: 'Smooth', hint: 'Blends the land under the brush together: knocks down the sharp highs, fills the dips, softens slopes. Go over it again to smooth it more.' },
+  { id: 'ramp', group: 'terrain', name: 'Ramp', hint: 'Click and drag: lays an even slope from where you pressed to where you let go, up or down, as wide as the brush. The land beside it is left steeper.' },
   { id: 'valley', group: 'terrain', name: 'Valley', hint: 'Cut a V-shaped valley along the stroke, never below the lowest height (and never into the sea).' },
   { id: 'river', group: 'water', name: 'River', hint: 'Click where the river rises, then click each point it should pass. It ends when it reaches the sea, a lake or another river, or press Enter. It finds the natural way between your points and cuts through anything in the way. Esc cancels; click a river to select it, Delete removes it.' },
   { id: 'lake', group: 'water', name: 'Lake', hint: 'Click a low spot: the hollow fills with water to where it would spill over. Set how high it stands with Water level. Click a lake to select it.' },
@@ -203,7 +205,8 @@ export class TerrainEditor {
 
   /** Apply one dab of the tool centred at (cx, cy) in tile coordinates. Returns the changed area (tiles). */
   dab(cx: number, cy: number, b: Brush): Box {
-    if (b.tool === 'river' || b.tool === 'lake' || b.tool === 'lakeAdd' || b.tool === 'lakeRemove' || b.tool === 'smooth') return { x0: 0, y0: 0, x1: -1, y1: -1 };
+    if (b.tool === 'river' || b.tool === 'lake' || b.tool === 'lakeAdd' || b.tool === 'lakeRemove' || b.tool === 'ramp') return { x0: 0, y0: 0, x1: -1, y1: -1 };
+    if (b.tool === 'smooth') return this.blur(cx, cy, b);
     if (b.tool === 'mountains') return this.ridge(cx, cy, cx, cy, b);
     if (!OUTLINE.has(b.tool)) return this.shape(cx, cy, b);
     const w = this.width;
@@ -262,7 +265,93 @@ export class TerrainEditor {
     return { X0, Y0, X1, Y1, tiles: { x0: Math.floor(X0 / S), y0: Math.floor(Y0 / S), x1: Math.floor(X1 / S), y1: Math.floor(Y1 / S) } };
   }
 
-  /** One dab of a Terrain tool other than Mountains and Smooth, on the fine grid, inside the circle exactly. */
+  /**
+   * One dab of Smooth: each point under the brush moves towards the average of the land around it
+   * (over about a third of the brush's width), most in the middle of the brush and not at all at
+   * its edge, so sharp highs come down, dips fill and slopes even out. Only land is averaged.
+   */
+  private blur(cx: number, cy: number, b: Brush): Box {
+    const S = this.scale;
+    const W = this.width * S;
+    const H = this.height * S;
+    const r = Math.max(0.25, b.radius);
+    const k = Math.max(0.02, Math.min(1, b.strength));
+    const kr = Math.max(1, Math.round(r * S * 0.3));
+    const { X0, Y0, X1, Y1, tiles } = this.cells(cx, cy, r);
+    // The land around the brush, as far out as the averaging reaches.
+    const ax0 = Math.max(0, X0 - kr);
+    const ay0 = Math.max(0, Y0 - kr);
+    const ax1 = Math.min(W - 1, X1 + kr);
+    const ay1 = Math.min(H - 1, Y1 + kr);
+    const aw = ax1 - ax0 + 1;
+    const ah = ay1 - ay0 + 1;
+    const v = new Float32Array(aw * ah);
+    const m = new Float32Array(aw * ah);
+    for (let y = 0; y < ah; y++) {
+      for (let x = 0; x < aw; x++) {
+        const i = (ay0 + y) * W + ax0 + x;
+        if (this.wet[i]) continue;
+        v[y * aw + x] = this.under[i] + this.relief[i];
+        m[y * aw + x] = 1;
+      }
+    }
+    // Averaged over a square, twice (rows then columns, then again): close to a soft round blur.
+    const pass = (a: Float32Array) => {
+      const t = new Float32Array(aw * ah);
+      for (let y = 0; y < ah; y++) {
+        let sum = 0;
+        for (let x = -kr; x <= kr; x++) if (x >= 0 && x < aw) sum += a[y * aw + x];
+        for (let x = 0; x < aw; x++) {
+          t[y * aw + x] = sum;
+          const out = x - kr;
+          const inn = x + kr + 1;
+          if (out >= 0) sum -= a[y * aw + out];
+          if (inn < aw) sum += a[y * aw + inn];
+        }
+      }
+      const o = new Float32Array(aw * ah);
+      for (let x = 0; x < aw; x++) {
+        let sum = 0;
+        for (let y = -kr; y <= kr; y++) if (y >= 0 && y < ah) sum += t[y * aw + x];
+        for (let y = 0; y < ah; y++) {
+          o[y * aw + x] = sum;
+          const out = y - kr;
+          const inn = y + kr + 1;
+          if (out >= 0) sum -= t[out * aw + x];
+          if (inn < ah) sum += t[inn * aw + x];
+        }
+      }
+      return o;
+    };
+    let sv = pass(v);
+    let sm = pass(m);
+    // Normalise between the passes so the second averages heights, not sums.
+    const avg = new Float32Array(aw * ah);
+    for (let i = 0; i < avg.length; i++) avg[i] = sm[i] > 0 ? sv[i] / sm[i] : v[i];
+    for (let i = 0; i < avg.length; i++) avg[i] *= m[i];
+    sv = pass(avg);
+    sm = pass(m);
+    for (let Y = Y0; Y <= Y1; Y++) {
+      const ty = (Y + 0.5) / S;
+      for (let X = X0; X <= X1; X++) {
+        const i = Y * W + X;
+        if (this.wet[i]) continue;
+        const dx = (X + 0.5) / S - cx;
+        const dy = ty - cy;
+        const d = Math.sqrt(dx * dx + dy * dy) / r;
+        if (d >= 1) continue;
+        const j = (Y - ay0) * aw + (X - ax0);
+        if (sm[j] <= 0) continue;
+        const e = this.under[i] + this.relief[i];
+        const target = sv[j] / sm[j];
+        const nv = e + (target - e) * smoothstep(0, 1, 1 - d) * k * 0.6;
+        this.relief[i] = Math.max(LAND_FLOOR, Math.min(1, nv)) - this.under[i];
+      }
+    }
+    return tiles;
+  }
+
+  /** One dab of a Terrain tool other than Mountains, Smooth and Ramp, on the fine grid, inside the circle exactly. */
   private shape(cx: number, cy: number, b: Brush): Box {
     const S = this.scale;
     const W = this.width * S;

@@ -1265,6 +1265,9 @@ function renderEditor(ed: WorldEditor): string {
   const brush = BRUSHES.find((b) => b.id === ed.tool)!;
   const num = (id: string, label: string, v: number, min: number, max: number, step: number, hint = '') =>
     `<label class="field" for="${id}"><span>${label} <output id="${id}-o">${v}</output></span><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${v}">${hint ? `<small>${hint}</small>` : ''}</label>`;
+  // A setting as a share of its usual value: 100% in the middle, down to `min`% and up to 200%.
+  const pct = (id: string, label: string, v: number | undefined, usual: number, min = 0) =>
+    num(id, `${label} (%)`, Math.round(((v ?? usual) / usual) * 100), min, 200, 5);
   const views: [EditorView, string][] = [['terrain', 'Terrain'], ['temperature', 'Temperature'], ['rainfall', 'Rainfall'], ['currents', 'Currents']];
   const tabs: [ToolGroup, string][] = [['outline', 'Land & Sea'], ['terrain', 'Terrain'], ['water', 'Water']];
   const tool = ed.tool;
@@ -1284,14 +1287,14 @@ function renderEditor(ed: WorldEditor): string {
       ${raising ? num('e-top', 'Height limit (ft)', ed.topFeet, 250, 15000, 250, 'Nothing this tool builds rises above this.') : ''}
       ${lowering ? num('e-floor', 'Lowest height (ft)', ed.floorFeet, 0, 12000, 250, 'This tool never cuts below this.') : ''}
       <details class="mini"><summary>Erosion</summary>
-        <p class="sub">Water wears the land you shape, as in Gaea: valleys, ridges, gullies and screes. Only the land around each change is worn again.</p>
+        <p class="sub">Water wears the land you shape, as in Gaea: valleys, ridges, gullies and screes. Only the land each change touched is worn again. 100% is the usual; turn a setting down for gentler land or up for wilder.</p>
         <div class="row">
-          ${num('e-mountains', 'Mountain shape', tr.mountains ?? TERRAIN_DEFAULTS.mountains, 0, 1.5, 0.05)}
-          ${num('e-erosion', 'Erosion strength', tr.erosion ?? TERRAIN_DEFAULTS.erosion, 0, 2, 0.05)}
+          ${pct('e-mountains', 'Mountain shape', tr.mountains, TERRAIN_DEFAULTS.mountains)}
+          ${pct('e-erosion', 'Erosion strength', tr.erosion, TERRAIN_DEFAULTS.erosion)}
         </div>
         <div class="row">
-          ${num('e-softness', 'Rock softness', tr.softness ?? TERRAIN_DEFAULTS.softness, 0, 1, 0.05)}
-          ${num('e-downcut', 'Downcutting', tr.downcutting ?? TERRAIN_DEFAULTS.downcutting, 0, 1, 0.05)}
+          ${pct('e-softness', 'Rock softness', tr.softness, TERRAIN_DEFAULTS.softness)}
+          ${pct('e-downcut', 'Downcutting', tr.downcutting, TERRAIN_DEFAULTS.downcutting)}
         </div>
       </details>`;
   } else {
@@ -1301,8 +1304,8 @@ function renderEditor(ed: WorldEditor): string {
       ${lakeLevel !== null ? num('e-level', 'Water level', Math.round(lakeLevel * 100), 5, 100, 1, '% of the way up the hollow: 100 fills it to where it would spill over.') : ''}
       ${ed.selected ? `<div class="row"><button type="button" id="e-delete">Delete ${ed.selected.kind}</button></div>` : ''}
       <div class="row">
-        ${num('e-rwidth', 'River width', tr.riverWidth ?? RIVER_DEFAULTS.width, 0.4, 2.5, 0.05)}
-        ${num('e-rdepth', 'Channel depth', tr.riverDepth ?? RIVER_DEFAULTS.depth, 0, 2, 0.05)}
+        ${pct('e-rwidth', 'River width', tr.riverWidth, RIVER_DEFAULTS.width, 20)}
+        ${pct('e-rdepth', 'Channel depth', tr.riverDepth, RIVER_DEFAULTS.depth)}
       </div>`;
   }
   return `
@@ -1410,12 +1413,13 @@ function wireEditor(ed: WorldEditor): void {
   };
   $('e-style').addEventListener('change', look);
   $('e-contours').addEventListener('change', look);
-  range('e-mountains', (v) => ed.setTerrain({ mountains: v }), false);
-  range('e-erosion', (v) => ed.setTerrain({ erosion: v }), false);
-  range('e-softness', (v) => ed.setTerrain({ softness: v }), false);
-  range('e-downcut', (v) => ed.setTerrain({ downcutting: v }), false);
-  range('e-rwidth', (v) => ed.setTerrain({ riverWidth: v }), false);
-  range('e-rdepth', (v) => ed.setTerrain({ riverDepth: v }), false);
+  // The carving settings are shown as a share of their usual values (100% = TERRAIN_DEFAULTS).
+  range('e-mountains', (v) => ed.setTerrain({ mountains: (TERRAIN_DEFAULTS.mountains * v) / 100 }), false);
+  range('e-erosion', (v) => ed.setTerrain({ erosion: (TERRAIN_DEFAULTS.erosion * v) / 100 }), false);
+  range('e-softness', (v) => ed.setTerrain({ softness: (TERRAIN_DEFAULTS.softness * v) / 100 }), false);
+  range('e-downcut', (v) => ed.setTerrain({ downcutting: (TERRAIN_DEFAULTS.downcutting * v) / 100 }), false);
+  range('e-rwidth', (v) => ed.setTerrain({ riverWidth: (RIVER_DEFAULTS.width * v) / 100 }), false);
+  range('e-rdepth', (v) => ed.setTerrain({ riverDepth: (RIVER_DEFAULTS.depth * v) / 100 }), false);
   range('e-latn', (v) => { ed.setClimate({ latNorth: v }); drawMap(); }, false);
   range('e-lats', (v) => { ed.setClimate({ latSouth: v }); drawMap(); }, false);
   range('e-tilt', (v) => { ed.setClimate({ axialTilt: v }); drawMap(); }, false);
