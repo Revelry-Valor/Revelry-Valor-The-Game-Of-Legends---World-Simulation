@@ -229,6 +229,50 @@ A separate tool. You draw lines along crests and edges by hand (never suggested 
 
 ---
 
+## 6A. Mana, ley lines, world tree roots and rifts
+
+Mana flows through the world along two kinds of lines. Both are metaphysical: they are not physical features on the land. Where lines meet, cross or run alongside each other, more mana is released, shown as a **mana heat map**.
+
+### Ley lines (the traditional kind)
+- **Nodes:** special structures such as pyramids, temples, towers (mage towers and schools of magic), dawn cities, and places of mass worship.
+- **Natural nodes:** volcanoes, whirlpools and similar features, the poles, and high-pressure zones.
+- Nodes connect to each other with ley lines, forming a loose web across the world.
+- **Growth:** early in the simulation there are few nodes. As towers, temples and places of worship are built, more connections appear, making more lines and more intersections.
+- Paths and intersections carry denser mana: the more lines meet, the stronger the spot on the heat map.
+
+### World tree roots (this world's own kind)
+- **Anchor:** you choose one place on the world as the main connection where the world tree's roots enter the world.
+- **Main roots:** spread out from the anchor across the surface, following mountain chains, deep seas and coastlines, and running generally away from the anchor.
+- **Sprouts:** smaller roots branch off toward nearby areas of note. For example, a mountain range next to one with a main root gets a sprout reaching out to it.
+- **Major features:** where roots hit a major feature such as a volcano, they sprout out in several directions.
+- **Building:** when things are built, roots branch out to connect to them, or deepen existing connections.
+- **Shared targets:** roots from different places can reach the same feature. For example, if mountains A and B both have roots, and mountain C lies between them, roots from both can reach C.
+- Wherever roots connect, cross, or travel alongside each other, more mana is released, on the same heat map as ley lines.
+
+### Rifts
+- **Permanent rifts** form where mana and intersections are strong enough and nothing is actively using the mana there (such as a city or a mountain range).
+- **Short-lived rifts** form the same way, and also when corruption gets too high. They also spawn randomly anywhere else.
+- **Resources:** rifts yield resources that are rare or impossible to find in the mortal plane. Different rifts give different resources, in different amounts. This makes them great sources of wealth, so settlements and trade routes shift toward them.
+- **Water:** some rifts release fresh water (see 6.8).
+- **Collecting:** nations and guilds gather rift resources with armies or adventuring parties, and sell them in settlements.
+
+### Holding a rift
+When a rift appears, the nation that controls the land can:
+- build an **encampment** around it;
+- let a **guild** build a guild encampment;
+- station a **military encampment**;
+- send a **party** every so often to keep its strength down;
+- or ignore it.
+
+How long the rift will last and how strong it is decide how often it must be looted or fought to stop the monsters on the other side spilling through.
+
+### When rifts go wrong
+1. **Rift break:** the rift becomes too strong.
+2. **Monster tide:** if a rift breaks with no defences, or the defences fall, monsters slowly spread out into the land, besieging what they reach.
+3. **Monster hordes:** then alphas and strong monster types come through, forming hordes that charge out and destroy settlements, if the tide's sieges hadn't already.
+
+---
+
 ## 7. Climate system
 
 Climate is built as a fixed chain of rule-based passes, run once for summer and once for winter, then the two seasons are compared to assign climate zones. The method follows Worldbuilding Pasta's climate series (Part VIa, Part VIb).
@@ -465,9 +509,13 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 ---
 
+## 8A. Map look
+
+- Styles as before: satellite (realistic) and paper (drawn).
+- Labels look like fantasy map labels. The more important the name, the larger and more artistic the lettering: regions and nations get the grandest designs.
+
 ## 9. Still to design
 
-- Temporary rifts: how often they appear and disappear, and what happens to their lakes and rivers.
-- Map look: styles and labels.
+- Temporary rifts: what happens to their lakes and rivers when they close.
 - The simulation side (section 8).
 - The order in which everything will be built once the design is complete.
