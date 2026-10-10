@@ -203,10 +203,14 @@ A separate tool. You draw lines along crests and edges by hand (never suggested 
 ### 6.8 Water: rivers, lakes, rifts and waterfalls
 **Rivers**
 - **Drawn by hand:** draw the course yourself.
-- **Auto mode:** click a start point and an end point, and the course is generated. You can end it at the point you click, or click water so it flows into the sea, a lake or another river.
+- **Point mode:**
+  1. Click where the river starts (its source).
+  2. Click points along the general path you want it to take. The order of the points is the direction it flows: the river runs from the first point down to the last.
+  3. It ends when you press Enter after the last point, or as soon as you place a point on water (sea, lake or another river).
+  4. The river is then generated through your points, following their direction.
+- **How the course is generated (decided):** with no heights, the river uses the painted features as terrain. Between your points it winds through low ground and the valleys between ranges, goes around mountains, hills and plateaus, and follows ravines and canyons where they lead the right way.
 - **Joining:** each river that flows into another makes the river below it bigger from that point on.
 - Rivers look realistic, winding naturally.
-- **Proposed (how auto mode finds a path without heights):** the path treats painted features as terrain: it winds through low ground and valleys between ranges, goes around mountains, hills and plateaus, and follows canyons where they lead the right way.
 
 **Lakes**
 - Placed by you, or created automatically by rifts and waterfalls. Rainfall never creates lakes on its own.
@@ -463,7 +467,6 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 ## 9. Still to design
 
-- Rivers: confirm the proposed auto-path method (6.8).
 - Temporary rifts: how often they appear and disappear, and what happens to their lakes and rivers.
 - Map look: styles and labels.
 - The simulation side (section 8).
