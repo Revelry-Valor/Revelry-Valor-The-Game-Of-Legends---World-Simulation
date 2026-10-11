@@ -498,14 +498,91 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 ---
 
-## 8. Simulation (later stages, to be designed)
+## 8. Simulation
 
-- **Territory:** claimed by moving through land. In the tribal era, a tribe claims hunting ground as it walks it. Growing or splitting tribes need more land and claim more.
-- Territory and settlements get much more work.
+### 8.1 Foundations
+- **No tiles.** Everything has a real position; areas are shapes.
+- **Time:** an active day-by-day mode, plus faster steps (week, month, year) and time skips (a month, a year, many years). The climate switches between its summer and winter versions.
+- **Groups, not individuals:** the simulation tracks groups (clans, tribes, settlements, armies, parties, caravans, guilds).
+- **Notable individuals** travel with those groups: rulers, heroes, guild masters, spies and others. For example, a spy has to make their way to another nation, travelling from city to city to get where they're needed.
+- **Existing systems all come back** (technology and eras, culture, religion, the market, wars and diplomacy), with changes made to each as we go.
+
+### 8.2 Species, races and the creator
+- **Species** set the biological base: the environments they live best in, and fixed traits.
+- **Races** are the individual peoples within a species, each a variation on the species, with its own preferences and traits.
+- **Race / species creator:** an expansive designer, so other users can make their own. It covers:
+  - body: size, limbs, strength, speed;
+  - diet;
+  - offspring (how many) and lifespan;
+  - environment preferences;
+  - for sentient species, these numbers give the base stats for armies, heroes and the like.
+- All the races of this world, and all the traits, will be designed together (a later step).
+- **Examples so far:**
+  - dwarves and the Rabbit race dig tunnels;
+  - avian races fly, live in giant trees and hunt from them;
+  - a goat-like race can cross high mountains and build settlements on mountainsides.
+
+### 8.3 Animals and beasts
+- Animal species are made in the same creator. They have no armies.
+- **Population:** not counted, but shown as a **density heat map** from none to abundant. Animals only live in environments that suit them.
+- **Uses**, set per species: food, labour, riding, and helping to hunt.
+- **Resources:** leather, feathers, horns and many more.
+- **Hunting:** more hunting means fewer animals. How easy a species is to hunt matters: one massive beast is far harder to bring down than a few deer.
+- **Domestication difficulty:** a barrier to ranching a species for its resources.
+- Animals affect how races adapt and change with their environment, and they decide where hunting grounds are good.
+
+### 8.4 Clans and tribes (to be reworked)
+- **Clans** are a government type. A clan holds one or more tribes, and gains more as new tribes form within it.
+- Clans can **split** or **merge**.
+- They still claim land by walking it, migrate between summer and winter grounds, and do everything they did before, with a different tone.
+- **Settling does not end the tribal era:** a few tribes settling down doesn't take the clan out of it. Leaving the tribal era needs more cultural development; once the clan has the technology for settling, all or most of its tribes settle.
+- **Never settling is valid too:** some clans never need to settle and stay on the move with herding grounds, like the Mongol clans. Both paths are valid for the races of this world.
+- Clans should last a long time, fighting for better territory and doing what people do. Much of this comes from the culture and technology trees, which will get a lot of work.
+- **Government types** in general (how they work, change and progress) need their own design step.
+
+### 8.5 Politics and aversions
+- Peoples have natural dislikes. For example, humans are less willing to live in an area dominated by another species. This can change over time.
+- Politics needs its own design step.
+
+### 8.6 Territory
+- Claimed by moving through land (see 8.4). Territory and settlements will get much more work.
+- **Rivers** can be claimed and lie inside territories and nations like any land. Fighting commonly ends at rivers because fortresses, or an army holding the far bank, stop the advance there.
+- Land regions to be designed later.
+
+### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
-- Land regions to be worked on later.
-- Tree settlements, Underdark tunnels, sky travel, airships and flying races (see sections 5 and 6).
-- What the simulation reads from the land: which feature is where (mountains, hills, forest, canyon and so on), climate from the climate points, Rain Shadow Pen height classes for cooling and travel difficulty, and travel blockers.
+- Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.
+
+### 8.8 Tree settlements
+- **At the base:** a settlement can form around the foot of the tree, on the surface.
+- **Inside:** some species are naturally hollow, and settlements can be built inside them.
+- **The crown:** a few great limbs stretch out like a spider-shaped island. The limbs act as land: settlements can be built along them. The core, where the limbs join, is where a city forms.
+- **No mining.** The bark isn't harvested: it is used to grow special plants that only grow in the environments these trees create.
+- **Hunting** from the trees is only for avian races, since they have to fly down to hunt.
+- Layers and views need another look to fit the tree crowns (see section 9).
+
+### 8.9 Underdark
+- You shape the tunnels and caverns as you see fit.
+- Races that live there, or want to dig down, then dig their own tunnels and can travel them. These tunnels are permanent.
+- A territory-claim system like the surface one, driven by digging.
+- Races dig in their own ways. For example, a spider race slowly mines at random, bringing resources up.
+
+### 8.10 Travel
+- **Low mountains** are very slow to cross. **High mountains** can't be crossed, unless a race is specially able to (such as the goat-like race). Other races must use roads to cross mountain lands.
+- **Canyons and ravines** block travel except at openings and bridges (see 6.6).
+- **Roads and bridges** come in grades; higher grades are better.
+  - The lowest-grade roads form on their own from people passing along a route.
+  - Nations build better roads and bridges when they need them.
+  - Better roads and bridges last longer, are preferred by travellers, and bring more travel and trade.
+- **Travel tunnels:** some races prefer to travel by shallow tunnels just under the surface, which they use like roads. These are separate from the Underdark.
+- One travel network across all layers: roads and paths, rivers, sea lanes, travel tunnels, Underdark tunnels, vines, and flight routes. Flying races reach the sky layers; airships come later with technology.
+
+### 8.11 Mana in the simulation
+- The initial mana channels and certain structures influence each other.
+- Cities with a large mana drain attract world tree roots (when that system is used) and form ley line connections.
+
+### 8.12 Names
+- A naming function is needed for land, regions and continents (see section 9).
 
 ---
 
@@ -516,6 +593,11 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 ## 9. Still to design
 
+- **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
+- **Layers and views:** another look, to fit giant tree crowns (a canopy level between the surface and the sky layers?).
+- **Naming:** how continents, regions, seas, mountains, rivers and settlements get their names.
+- **Government types:** how they work, change and progress.
+- **Politics** and aversions.
+- **Races and traits:** the full list, and the race/species creator.
 - Temporary rifts: what happens to their lakes and rivers when they close.
-- The simulation side (section 8).
 - The order in which everything will be built once the design is complete.
