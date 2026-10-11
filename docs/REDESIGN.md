@@ -73,6 +73,7 @@ The world can have up to five layers. The extra layers are optional and shown wh
 | **Underdark** | Caverns, tunnels and underground seas beneath the land |
 
 - Viewing a sky layer draws it over the land below. Each higher sky layer is drawn over the ones below it.
+- **Canopy view** (between the surface and sky layer 1): shows only the crowns of giant trees, with their limbs and settlements, drawn over the land the same way the sky layers are.
 
 ### Underdark
 - Drawn only where the land is above it; everything outside the land is sea.
@@ -582,7 +583,11 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - Cities with a large mana drain attract world tree roots (when that system is used) and form ley line connections.
 
 ### 8.12 Names
-- A naming function is needed for land, regions and continents (see section 9).
+- Each culture has its own naming style (its own sounds and word parts).
+- Places are named by cultures as they claim or conquer them, and can be renamed. Every name a place has had is recorded in its history.
+- You can rename anything.
+- Labels are sized and styled by importance (see 8A).
+- How regions, seas and continents are divided up: see section 9.
 
 ---
 
@@ -594,8 +599,7 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 ## 9. Still to design
 
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
-- **Layers and views:** another look, to fit giant tree crowns (a canopy level between the surface and the sky layers?).
-- **Naming:** how continents, regions, seas, mountains, rivers and settlements get their names.
+- **How regions, seas and continents are divided up.**
 - **Government types:** how they work, change and progress.
 - **Politics** and aversions.
 - **Races and traits:** the full list, and the race/species creator.
