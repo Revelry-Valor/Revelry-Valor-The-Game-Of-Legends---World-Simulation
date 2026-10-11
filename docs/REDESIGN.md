@@ -149,6 +149,21 @@ The world can have up to five layers. The extra layers are optional and shown wh
 
 Side ridges: both an automatic **Side ridges** slider (small natural ridges and valleys down both sides of a range) and spurs you draw by hand.
 
+### 6.2a Mountain zones
+Every mountain area has altitude zones, like the bands on a real mountain. They exist only in the simulation and in a view you can turn on; nothing is drawn by height.
+
+| Zone | Travel | Who can settle |
+|---|---|---|
+| Foothills | Slightly slow | Anyone |
+| Highlands | Slow | Most races: villages, mining camps, forts |
+| High mountains | Impassable except by roads, passes or able races | Only mountain-adapted races (such as the goat-like race) |
+| Peaks | Impassable | Nobody, except special cases |
+
+- **Automatic:** when you paint mountains, zones fill in by themselves: foothills along the outer edge, then highlands, then high mountains toward the middle, and peaks along the crest where the paint is boldest. Bigger, denser ranges get more high ground.
+- **Zone brush:** repaint zones by hand (for example a high plateau, or an easier crossing).
+- Zones also feed the climate (higher is colder, peaks hold snow) and animals (mountain species live higher up).
+- The Rain Shadow Pen stays separate, for rain only.
+
 **Ground cover** (forest, jungle, swamp, dunes, grassland, tundra, ice): either worked out from the climate automatically, or painted by hand. Painted cover overrides the climate in that spot.
 
 ### 6.3 Rain Shadow Pen
@@ -569,7 +584,7 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - Races dig in their own ways. For example, a spider race slowly mines at random, bringing resources up.
 
 ### 8.10 Travel
-- **Low mountains** are very slow to cross. **High mountains** can't be crossed, unless a race is specially able to (such as the goat-like race). Other races must use roads to cross mountain lands.
+- **Mountain zones** decide travel and settling (see 6.2a). Low ground is slow; high mountains can't be crossed except by roads, passes or specially able races (such as the goat-like race), who can also settle there. Other races must use roads to cross mountain lands.
 - **Canyons and ravines** block travel except at openings and bridges (see 6.6).
 - **Roads and bridges** come in grades; higher grades are better.
   - The lowest-grade roads form on their own from people passing along a route.
@@ -587,7 +602,23 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - Places are named by cultures as they claim or conquer them, and can be renamed. Every name a place has had is recorded in its history.
 - You can rename anything.
 - Labels are sized and styled by importance (see 8A).
-- How regions, seas and continents are divided up: see section 9.
+- How land and water are divided: see 8.13.
+
+### 8.13 Continents, seas and regions
+**Continents and islands** (automatic, with your override)
+- A landmass above a size threshold is a continent; smaller ones are islands. Clusters of islands form archipelagos.
+- You can override: draw a split line to make one landmass two continents (like Europe and Asia), or merge them.
+
+**Seas**
+- **Oceans:** the big open waters between continents.
+- **Seas:** split off automatically at narrow points (straits, gaps between landmasses), or where water is mostly surrounded by land (inland and enclosed seas).
+- **Bays and gulfs:** deep inlets of a coast.
+- A **Sea tool** draws boundaries and splits or merges waters.
+- Named by the cultures along their shores or sailing on them.
+
+**Both kinds of region**
+- **Natural regions (geography):** the land is split automatically along natural lines: mountain crests, major rivers, coastlines, and changes of climate or ground cover. Each gets a kind (Highlands, Steppe, Forest, Marshes, Desert and so on) and is named when a culture first settles or claims it. A **Region tool** redraws their borders.
+- **Political regions (provinces):** drawn by nations as they grow, often but not always following natural regions. They change with conquest, and every change is recorded in the history.
 
 ---
 
@@ -599,7 +630,6 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 ## 9. Still to design
 
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
-- **How regions, seas and continents are divided up.**
 - **Government types:** how they work, change and progress.
 - **Politics** and aversions.
 - **Races and traits:** the full list, and the race/species creator.
