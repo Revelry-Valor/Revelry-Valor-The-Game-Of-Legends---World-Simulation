@@ -267,7 +267,7 @@ Mana flows through the world along two kinds of lines. Both are metaphysical: th
 
 ### Rifts
 - **Permanent rifts** form where mana and intersections are strong enough and nothing is actively using the mana there (such as a city or a mountain range).
-- **Short-lived rifts** form the same way, and also when corruption gets too high. They also spawn randomly anywhere else.
+- **Short-lived rifts** form the same way, and also when corruption gets too high. They also spawn randomly anywhere else. They don't last long enough to create permanent rivers or lakes.
 - **Resources:** rifts yield resources that are rare or impossible to find in the mortal plane. Different rifts give different resources, in different amounts. This makes them great sources of wealth, so settlements and trade routes shift toward them.
 - **Water:** some rifts release fresh water (see 6.8).
 - **Collecting:** nations and guilds gather rift resources with armies or adventuring parties, and sell them in settlements.
@@ -581,6 +581,8 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 | Army | Clan warbands · Levies · Lords' retainers (samurai-like) · Standing army · Specialized troops · Mercenaries · Militia · Religious or magic orders |
 | Law | Custom · Lords' justice · Written law · Religious law · Magical oaths |
 
+**High princes:** a nobility rank, the highest under the king. They arise where a ruling family's hold on its lands stays strong even after its own king's defeat. As a decentralized way of ruling, high princes rule their own lands (and may have been kings themselves) but swear allegiance to one king.
+
 **Centralization** is not a fixed setting. It is the government's real ability to enforce its laws and keep control, and it changes during the simulation. Better roads, some technologies, and some cultural traits speed the flow of information and orders, letting a realm hold its land more tightly (see 8.4c).
 
 **Example, the Rabbit race:** Emperor (head) · military ruler and nobility (ruling class) · great lords with vassals (land) · hereditary (succession) · true line (legitimacy) · levies, lords' retainers and specialized troops (army).
@@ -674,5 +676,4 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
 - **Politics** and aversions.
 - **Races and traits:** the full list, and the race/species creator.
-- Temporary rifts: what happens to their lakes and rivers when they close.
 - The order in which everything will be built once the design is complete.
