@@ -556,6 +556,12 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - Clans should last a long time, fighting for better territory and doing what people do. Much of this comes from the culture and technology trees, which will get a lot of work.
 - **Government types** in general (how they work, change and progress) need their own design step.
 
+### 8.4a Preferred governments
+- Each people has an **agreed-upon government** it prefers, set as part of its culture. This keeps the world's development consistent with the story.
+- **Example, the Rabbit race:** inspired by Japan's shogunate period. An emperor of the true line heads a feudal system, and breakaway courts claim to be the true line instead. Through all of it, they keep leaning to the feudal system.
+- **Distance from the core:** the further a group is from the heart of its culture, the more it mixes with neighbouring cultures and starts becoming like them, including in how it is governed.
+- **Royal lines and claimants:** lines of succession are tracked, so rival claims to the true line can exist, be pressed, and lead to splits or wars.
+
 ### 8.5 Politics and aversions
 - Peoples have natural dislikes. For example, humans are less willing to live in an area dominated by another species. This can change over time.
 - Politics needs its own design step.
