@@ -562,6 +562,24 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Distance from the core:** the further a group is from the heart of its culture, the more it mixes with neighbouring cultures and starts becoming like them, including in how it is governed.
 - **Royal lines and claimants:** lines of succession are tracked, so rival claims to the true line can exist, be pressed, and lead to splits or wars.
 
+### 8.4b Government creator and built-in types
+- **Lock or pull**, set per culture:
+  - **Locked:** the people always keeps its preferred government; only the details change (which line rules, which lords hold power).
+  - **Strong pull:** it can change under pressure but tends to return. At the edges of the culture, it starts melding with neighbouring cultures.
+- **Government creator:** governments are built from parts (for example who is head, who holds real power, who holds the land, how succession works), so unique combinations can be built for the peoples of this world.
+- **Built-in types:** a preloaded set the AI uses under certain conditions. Created governments are for the cultures you choose to give them to.
+
+### 8.4c Cultural pull, enforcement and distance
+- Cultures pull and push on each other.
+- Nations can **enforce** their culture and **enforce cultural changes**.
+- **Reach of enforcement:** the further a place is from a power centre (the capital, or nobility able to enforce things), the more its people change through natural influences (neighbours, trade, migration) instead of what is enforced.
+- **Example:** a huge, highly centralized empire with poor connections: its far regions grow different from the core. If the nobility there start seeing themselves as set apart from the core, they may want to break away.
+
+### 8.4d Factions, infighting and breakaways
+- Nations contain **factions** that can fight among themselves while still part of the same nation, building toward a possible civil war.
+- When the differences become too great, a faction **breaks away**: starting a civil war, or leaving some other way.
+- Rival claims to a true line (8.4a) are one source of such factions.
+
 ### 8.5 Politics and aversions
 - Peoples have natural dislikes. For example, humans are less willing to live in an area dominated by another species. This can change over time.
 - Politics needs its own design step.
@@ -636,7 +654,7 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 ## 9. Still to design
 
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
-- **Government types:** how they work, change and progress.
+- **Government parts:** the full list of parts for the government creator, and the built-in types the AI uses and when.
 - **Politics** and aversions.
 - **Races and traits:** the full list, and the race/species creator.
 - Temporary rifts: what happens to their lakes and rivers when they close.
