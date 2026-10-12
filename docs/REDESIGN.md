@@ -569,6 +569,24 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Government creator:** governments are built from parts (for example who is head, who holds real power, who holds the land, how succession works), so unique combinations can be built for the peoples of this world.
 - **Built-in types:** a preloaded set the AI uses under certain conditions. Created governments are for the cultures you choose to give them to.
 
+**Government parts** (a government is one pick from each):
+
+| Part | Options |
+|---|---|
+| Head of state | Chief · Council of elders · King/Queen · Emperor · Khan · High priest · Archmage · Elected leader · Assembly · None (a council rules) |
+| Ruling class (who is set up in the government as its rulers, not merely who has influence) | Same as the head · Military ruler (shogun-like) · High princes · Nobility (great lords and lesser nobles) · Chancellor or vizier · Clergy · Mage council · Merchant houses |
+| Who holds the land | Clans and tribes · Great lords with vassals (feudal) · Appointed governors · Free cities · Temples · The state directly |
+| Succession | Elders choose · Hereditary (eldest, any child, or strongest claimant) · Challenge or combat · Chosen by the gods or temple · Merit (such as the strongest mage) · Election by lords · Election by the people |
+| Legitimacy | True line / sacred blood · Divine right · Strength · Wealth · Magic power · Consent of the people |
+| Army | Clan warbands · Levies · Lords' retainers (samurai-like) · Standing army · Specialized troops · Mercenaries · Militia · Religious or magic orders |
+| Law | Custom · Lords' justice · Written law · Religious law · Magical oaths |
+
+**Centralization** is not a fixed setting. It is the government's real ability to enforce its laws and keep control, and it changes during the simulation. Better roads, some technologies, and some cultural traits speed the flow of information and orders, letting a realm hold its land more tightly (see 8.4c).
+
+**Example, the Rabbit race:** Emperor (head) · military ruler and nobility (ruling class) · great lords with vassals (land) · hereditary (succession) · true line (legitimacy) · levies, lords' retainers and specialized troops (army).
+
+**Built-in types the AI uses:** Clan · Horde · Chiefdom · Petty kingdom · City-state · Theocracy · Magocracy · Feudal kingdom · Empire · Republic · Merchant republic · Elective monarchy · Gerontocracy. Chosen by conditions (for example a strong clergy faction toward theocracy, dense mana and towers toward magocracy, many conquered cultures toward empire). For cultures without a locked government, factions and these conditions drive change.
+
 ### 8.4c Cultural pull, enforcement and distance
 - Cultures pull and push on each other.
 - Nations can **enforce** their culture and **enforce cultural changes**.
@@ -654,7 +672,6 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 ## 9. Still to design
 
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
-- **Government parts:** the full list of parts for the government creator, and the built-in types the AI uses and when.
 - **Politics** and aversions.
 - **Races and traits:** the full list, and the race/species creator.
 - Temporary rifts: what happens to their lakes and rivers when they close.
