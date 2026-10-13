@@ -600,9 +600,78 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - When the differences become too great, a faction **breaks away**: starting a civil war, or leaving some other way.
 - Rival claims to a true line (8.4a) are one source of such factions.
 
-### 8.5 Politics and aversions
-- Peoples have natural dislikes. For example, humans are less willing to live in an area dominated by another species. This can change over time.
-- Politics needs its own design step.
+### 8.5 Politics
+
+**Opinion.** Every pair of peoples and powers has an opinion of each other, built from visible parts:
+- **Biology (species aversion):** natural dislike or comfort between species, from the race creator.
+- **Culture:** similar customs draw together, very different ones push apart; fades with long contact and trade.
+- **Religion:** same, related or rival faith.
+- **History:** remembered wars, betrayals, gifts, marriages and help in hard times. Memories fade slowly; grudges slower.
+- **Interests:** competing for the same land, rift or trade route lowers opinion; a shared enemy raises it.
+- **Leaders:** notable individuals' traits, friendships and rivalries.
+
+**Aversion and mixing**
+- Mixed settlements form naturally: through migration, through a settlement being fought over and changing hands, and through trade routes bringing other races travelling through.
+- Ruling over several races does **not** automatically cause tension. Tension depends on the actual factors at play (the opinion parts above, how each group is treated, the laws, the history).
+- Aversions can soften (long peace, trade, shared enemies, tolerant cultural traits) or harden (wars, atrocities).
+
+**Diplomacy**
+
+| Group | Option | What it does |
+|---|---|---|
+| War and peace | Truce | Ends fighting for a set time after a war |
+| | Peace treaty | Ends a war, with terms (land, payment, release of prisoners, claims given up) |
+| | Non-aggression pact | Promise not to attack, for a set time |
+| | Defensive pact | Join the war if the other is attacked |
+| | Full alliance | Fight together in all wars |
+| | Coalition | Many powers band together against one threat (a rising empire, a monster horde) |
+| | Military access | Armies may pass through |
+| | Lend troops / hire out mercenaries | Send forces to fight for another |
+| | Guarantee of independence | Promise to defend a smaller power |
+| | Demilitarized border | Neither side keeps forts or armies on a border |
+| Hierarchy | Vassalage | Keeps its rule but answers to the stronger |
+| | Tributary | Only pays, otherwise free |
+| | Protectorate | Defended in exchange for loyalty |
+| | Personal union | Two realms share one ruler, through marriage or inheritance |
+| | Release a vassal / grant independence | |
+| Trade and wealth | Trade agreement | Opens markets and routes, lowers tolls |
+| | Trade monopoly | Exclusive right to trade a good |
+| | Embargo | Cuts trade with a power |
+| | Loans and debts | Lend wealth; unpaid debts sour relations |
+| | Gifts and tribute | Buy goodwill |
+| | Rift pact | Share an encampment or rift resources on a border |
+| | Shared roads and bridges | Build and maintain together |
+| Family and people | Royal marriage | Binds families; creates claims to thrones; can lead to personal unions |
+| | Hostage / ward exchange | A noble child raised at the other court as a guarantee |
+| | Migration treaty | Allows settlers to move between realms |
+| | Refuge | Shelter exiles, pretenders or fleeing peoples |
+| Faith and knowledge | Religious pact | Shared holy sites, missionaries allowed or banned |
+| | Knowledge exchange | Share technology or magic |
+| | Mage tower pact | Share a ley line node or tower |
+| Information | Embassy | Better information, slowly better opinion |
+| | Border agreement | Fix a border, often along a river or crest |
+| | Arbitration | A third power or temple settles a dispute |
+
+**Breaking treaties**
+- Breaking a treaty without cause costs reputation with everyone, not just the victim.
+- **Justified breaks carry no penalty.** For example: you have a peace treaty with nation A and a defensive pact with nation B. If A attacks B, you may break the peace with A to defend B, with no repercussions.
+- Other justified breaks: the other side broke its terms first, attacked an ally or vassal, or made the treaty under deceit. Each treaty records its terms, so the simulation can tell a justified break from a betrayal.
+- Unjustified breaks are remembered as betrayals (see History above).
+
+**Royal marriages and family**
+- Royal and noble families are tracked: marriages, children and lines of succession.
+- Marriages bind families, create claims to thrones, and can produce personal unions.
+- Connects to true-line claimants (8.4a) and to high princes (8.4b).
+
+**Reasons for war:** claims to land or a throne (including true-line claims), holy war, revenge, liberating kin, seizing a rift or trade route, clan raids for hunting grounds, defending an ally. Wars without a good reason anger neighbours and their own people.
+
+**Inside a nation:** factions (8.4d); each noble house, high prince and governor has its own loyalty (distance from the centre, opinion of the ruler, treatment, ambition); factions can plot (install a claimant, gain a seat in the ruling class, break away).
+
+**Spies and intrigue:** spies are notable individuals who travel city to city to reach their target. Missions: gather information, steal technology, sabotage, assassinate, stir unrest, back a rival claimant. They can be caught, damaging relations.
+
+**Non-state powers:** guilds, temples, mage orders, and clans living inside a nation have their own opinions and agendas; they bargain with states, refuse service, or back factions.
+
+**God mode:** directly set opinions, force treaties and marriages, and start or end wars.
 
 ### 8.6 Territory
 - Claimed by moving through land (see 8.4). Territory and settlements will get much more work.
@@ -674,6 +743,6 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 ## 9. Still to design
 
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
-- **Politics** and aversions.
+- **Species aversions:** set per species pair in the creator, as general traits, or both.
 - **Races and traits:** the full list, and the race/species creator.
 - The order in which everything will be built once the design is complete.
