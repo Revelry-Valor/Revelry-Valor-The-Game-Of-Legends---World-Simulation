@@ -887,28 +887,28 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - Styles as before: satellite (realistic) and paper (drawn).
 - Labels look like fantasy map labels. The more important the name, the larger and more artistic the lettering: regions and nations get the grandest designs.
 
-## 10. Build order (proposed)
+## 10. Build order (decided)
 
-Each phase ends with something to open and try; the next phase starts only once it's approved.
+**A rewrite over the current sim:** the new version replaces the current code (the old version stays in the git history).
 
-| Phase | What gets built | What you can try |
+**Order, by dependency** (each layer only builds on what's already solid; each phase ends with something to open and try, approved before the next):
+
+| Phase | What gets built | Why here |
 |---|---|---|
-| 0. Foundations | Tile-free world model (real distances, layers), world settings, save/load, start screen (Create world / Continue sim), canvas expanding | Create a world (presets or custom size), save, load |
-| 1. Land & painting | Land & Sea brushes; painted feature brushes (mountains in three modes with zones, hills, plateaus, cliffs, canyons, forests and the rest); satellite and paper looks | Paint a continent and its features |
-| 2. Water | River point mode, joining rivers, lakes, waterfalls on the surface | Draw rivers through your features |
-| 3. Climate | Rain Shadow Pen, the summer/winter climate system, climate crystals, automatic ground cover | Climate zones, rain and currents from what you drew |
-| 4. Geography | Continents, seas, natural regions, Region and Sea tools, culture naming, fantasy labels | A named, labelled map |
-| 5. Species | Species/race creator, traits, beasts and density maps, the roster loaded | Browse and edit races; see where animals live |
-| 6. First peoples | Time controls (day to year), clans and tribes claiming land by walking, seasonal migration, hunting | Clans spreading across the world |
-| 7. Settlements & travel | Settling, settlements, travel network, roads and bridges, trade | Towns, roads and trade routes growing |
-| 8. Governments & politics | Government creator and built-in types, factions, cultural pull, diplomacy, royal families, spies | Nations forming, allying, splitting |
-| 9. Mana & rifts | Ley lines, world tree roots, mana heat map, rifts, monster tides and hordes | Rifts opening, held or breaking |
-| 10. Other layers | Underdark, canopy and giant tree cities, sky islands, vines, waterfalls between layers | Multi-layer worlds |
-| 11. Globe | 3D globe with flat and globe views side by side | A whole planet |
-
-Technology, religion, culture, the market and war return within the phases they belong to, reworked as they go.
-
-**To confirm:** this order; and whether the new version is built alongside the current game (proposed: in a new folder, so the old one keeps working until replaced) or replaces it directly.
+| 0. Foundations | World model with no tiles (real distances; flat and globe both planned into the coordinates from the start), world settings, layers, save/load, start screen (Create world / Continue sim), canvas expanding | Everything else sits on it; the globe must be possible from day one even though it's built last |
+| 1. Land & painting | Land & Sea, painted feature brushes (mountains with zones, hills, plateaus, cliffs, canyons, forests...), satellite and paper looks | Where the old version failed; everything visible depends on it |
+| 2. Water | River point mode, joining rivers, lakes, waterfalls on the surface | Needs painted features to route through |
+| 3. Climate | Rain Shadow Pen, summer/winter climate, climate crystals, automatic ground cover | Needs land, features and water |
+| 4. Geography | Continents, seas, natural regions, tools, labels (naming styles arrive with cultures) | Needs land and climate |
+| 5. Data creators | Resource maker, species/race and beast creator (roster loaded), traits, then tech editor, culture, government and faith/god creators | The simulation reads all of these |
+| 6. First peoples | Time controls, clans and tribes claiming land by walking, migration, hunting, beast densities | First living layer |
+| 7. Settlements, economy, travel | Settling, units-based economy, markets, trade, roads and bridges | Needs peoples |
+| 8. Culture & technology | Traditions, learned behaviours, tech tree, spread and loss | Needs settlements to hold and spread them |
+| 9. Governments, politics, religion | Governments, factions, diplomacy, royal families, spies, faiths, gods | Needs nations |
+| 10. War | Armies, phased battles, sieges, occupation, reports | Needs governments and economy |
+| 11. Mana & rifts | Ley lines, world tree roots, rifts, monster tides and hordes | Needs war and politics to respond |
+| 12. Other layers | Underdark, canopy and giant tree cities, sky islands, vines, waterfalls between layers | Extends a working surface world |
+| 13. Globe | 3D globe, flat and globe views side by side | Coordinates already support it |
 
 ## 9. Still to design
 
