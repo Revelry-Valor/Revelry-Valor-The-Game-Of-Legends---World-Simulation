@@ -728,6 +728,25 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 **Scope:** agreed as a starting point; it will be tuned while playing with it.
 
+### 8.4i War
+**Forces** (set by the government's army part and the culture's martial custom): clan warbands, levies, lords' retainers, standing armies, specialized troops (racial and trained units, for example Ory tunnel-fighters, avian sky scouts, Capra mountain troops, Shwana sea fighters), mercenaries, militia, religious and mage orders, and late in the tech tree mechanized infantry and vehicles.
+- Units are built from the race stat block (strength, toughness, morale from Willpower, march speed) plus equipment from technology and goods (weapons, armour, mounts, siege engines).
+- Raising an army costs people (soldiers lost are people lost at home), food, gear in units, and pay (coin or goods).
+- **Army size has no artificial cap:** a nation fields whatever forces it has the means to raise and keep. If it has the means to field a Roman-style army, it can.
+- **Heroes:** notable individuals who lead, duel, inspire and raid, with power levels (mage and priest heroes draw on mana); gods' champions are heroes.
+
+**On the map:** named armies move along the travel network at their race's march speed, slowed by terrain, season and supply; they eat from stores and the land, short supply brings attrition and desertion. Flying units cross blockers and reach the sky layers; tunnellers move under the surface; Underdark armies use their tunnels; fleets use sea lanes; airships later.
+
+**Battles are phased** (for example skirmish, clash, pursuit), each phase favouring different units (archers, cavalry, heroes), decided by numbers, unit quality, heroes, terrain, morale, leadership and surprise. Defenders have a strong edge at rivers and crests; fortresses on rivers and passes matter.
+- **What you see:** while two armies clash, the map shows that they are fighting. When the fighting between them stops, a full battle report is available.
+- Sieges (walls and forts by technology; starving out or storming; siege engines, later gunpowder), naval battles, later sky battles, and underground warfare (tunnelling under walls, cavern battles).
+
+**Occupation and peace:** occupied land striped as now; the occupier loots and taxes, the owner tries to liberate; peace terms from the diplomacy list; justified treaty breaks as decided; war weariness pushes toward peace.
+
+**Monsters:** rift breaks, monster tides and hordes are wars against monsters; coalitions can form against a horde. Monsters are made in the **beast creator** (as hostile beasts), with alphas as monster heroes. Guild parties and adventurers are small hero-led forces for rifts and monster hunting.
+
+**God mode:** spawn armies, start or end battles, trigger monster tides.
+
 ### 8.5 Politics
 
 **Opinion.** Every pair of peoples and powers has an opinion of each other, built from visible parts:
