@@ -624,6 +624,25 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **No eras as gates:** eras only label time. There is no "reach the next era" to unlock culture improvements.
 - **No pace setting** for now.
 
+**Structure (agreed)**
+1. **Pillars** (rarely change): **heritage** (origins: species and ancestral group; shared heritage eases acceptance) · **language** (naming style; shared language eases acceptance) · **ethos** (core outlook: warlike, communal, mystic, commercial, spiritual, stoic, egalitarian...) · **martial custom** (who fights: men, women, everyone, a warrior caste, none) · **lifestyle preferences** (settled, nomadic, seafaring, tree-dwelling, underground, sky-dwelling; from the environment, can blend).
+2. **Traditions** (traits), about **6 per culture**, each with a **severity**. Earned from how a people survives where it lives; living that life long enough earns the trait, leaving it fades it, and severity rises or falls over generations. Many need conditions (for example Horse Lords: horses and open grassland). Examples of severity:
+   - **Xenophobia / dealing with outside races:** the core of a people can be fiercely against other races anywhere near, while its border regions are only partly against them.
+   - **Seafaring:** *full* (most of their livelihood revolves around the sea) or *partial* (large fishing fleets and a navy, but also focused on the interior).
+   - Exact degrees for each trait are worked out as cultures are developed.
+3. **Specialties** (flavour on top, outside the ~6 limit, so they never take a place a culture needs for its development). Shared memories and their customs, for example a **rift tide fear**: everyone remembers it, and as a culture they do things because of it. Some affect the culture directly; most are flavour.
+4. **Learned behaviours** (the culture tree, like CK3 innovations): oral law, written law, granary customs, land ownership, feudal oaths, guild charters, coinage customs, ship-building, tunnel-building and so on. They spread by practice, need and contact (contact much faster); some need a technology, some push technology forward; they unlock behaviours (settling, government parts).
+5. **Acceptance** between cultures (grows with contact, trade, shared rule, shared heritage or language; shrinks with war and oppression); feeds opinion and aversion (8.5).
+6. **Change over time:** **divergence** (a part splits off when different enough, including single-city cultures) · **hybrid** (two cultures living together with high acceptance blend into a new one).
+
+**Who changes a culture: both rulers and nature**
+- **Rulers** can push for traditions and changes (only as far as their reach).
+- **It also happens naturally.**
+- **Main culture bonus:** inside a nation with a major main culture, other cultures get a push to conform to it.
+- **Big settlement pull:** small settlements next to a large one adopt the large one's culture, unless the smaller ones together are stronger, in which case it goes the other way.
+
+**Story cultures:** traditions and traits can be **locked** or **heavily encouraged** for chosen cultures, like governments.
+
 ### 8.5 Politics
 
 **Opinion.** Every pair of peoples and powers has an opinion of each other, built from visible parts:
