@@ -96,10 +96,10 @@ The sheet's **Classification** is a broad **kind** (shared traits); entries that
 |---|---|
 | Humanoid | **Human** → Human, Hatarin (guess) · **Elf** → Elf, Winter Elves (guess) · **Dwarf** · **Orc** · **Minotaur** (Minitour) · **Lora'An** · **Lykin** · **Jumper Aulis** · **Porcupine-folk** (Porkipines) · **Twittele leaf** |
 | Mammalian | **Ory** (the Rabbit race: shogunate-inspired, tunnels) · **Bear-folk** → Bear people, GoatBear? (guess) · **Canasalora** · **Catary** · **Centaur** (Centur) · **Halfling** · **Rodent-folk** → Molycin (mice), Retacy (ratmen), Kuma-Vel (ratkoon)? (guess) · **Moostifarion** · **Roxet** · **Squirrel-folk** → Squirrels, Flying Squirrels (guess) · **Velitrix** |
-| Avian | **Bird-folk** → Bird people, plus a few more races to define |
+| Avian | **Bird-folk** → Bird people, Owls, Seagulls, Eagles, Falcons, Crows, Ravens (stats needed for the new races) |
 | Capra | **Capra** (the goat-like mountain race) |
 | Reptilian | **Crocodile-folk** · **Dragonkin** · **Lizard-folk** → TacTu, Tazac (guess) |
-| Insectoid (new, stats needed) | **Spider-folk** · **Ant-folk** · **Bee-folk** · **Termite-folk** |
+| Insectoid (all sentient, stats needed) | **Spider-folk** · **Ant-folk** · **Bee-folk** · **Termite-folk** |
 | Fay | **Fay** → Fay, Fairy, Feylora, Lantu Fay (guess) · **Phaun** |
 | Dryad | **Dryad** → Dryad, Brambelwood, Ironwood, Ivory |
 | Giants | **Giants** · **Eliphantae** |
@@ -110,14 +110,15 @@ The sheet's **Classification** is a broad **kind** (shared traits); entries that
 
 ## Notes on races
 - **Ory:** the Rabbit race (shogunate-inspired government, see REDESIGN 8.4a).
-- **Bird-folk:** their own Avian kind, with a few races within (to define).
+- **Bird-folk:** their own Avian kind. Races: Bird people, Owls, Seagulls, Eagles, Falcons, Crows, Ravens.
+- **Insect races** (ants, bees, termites, spiders) are sentient.
 - **Spider-folk:** prefer deep forests; can live in the Underdark but don't mine it; incredibly solitary; hunt the insect races (ants, bees, termites).
 - **Taluty:** small jungle people living in small communities; great clockmakers and spies.
 - **Nova, Zatatari, Oni:** set aside, to come back to later.
 - **Tuning:** missing values (fighting age, lifespan, affinities and so on) will be filled in and adjusted while the simulation is tested, until races give the outcomes wanted. Adjusting races is part of the process.
 
 ## How the stats translate
-The sheet's numbers come from another game system. Here they are used as **relative values**, translated into simulation terms. Proposed, using Humans as the yardstick:
+The sheet's numbers come from another game system. Here they are used as **relative values**, translated into simulation terms, using Humans as the yardstick (agreed):
 
 | Stat | Becomes |
 |---|---|
