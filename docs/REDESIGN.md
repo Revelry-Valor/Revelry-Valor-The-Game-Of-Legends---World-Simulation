@@ -643,6 +643,18 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 **Story cultures:** traditions and traits can be **locked** or **heavily encouraged** for chosen cultures, like governments.
 
+### 8.4f Technology (decided so far)
+- **Separate from culture, but linked:** technology is what a people *can* make; culture decides whether they *do*. Each can push the other.
+- **Branches, not eras:** technologies are grouped by field, each a line of levels (for example stone, copper, bronze, iron, steel). Proposed fields: food and land (including canopy/bark and fungus farming, domestication per species); materials and crafts (including clockwork); building (including tunnel, cliff and tree building, sky docks, roads and bridges by grade); travel (riding per mount species, sailing, flight gear, airships); knowledge; commerce; war; rift and mana lore (not a magic system).
+- **The top end:** later stages reach steam technology and steampunk-style things, with a separate **mana tech** line alongside. The end of the tree: airships, trains, and mechanized infantry and vehicles. (To be discussed in depth.)
+- **Gunpowder** exists.
+- **Who holds knowledge:** it depends on the culture, but usually a **settlement** holds a technology, and it spreads to the settlements that need or can use it.
+  - **Losing it:** if a nation's only settlement able to build trains is lost, the nation loses that ability, unless it can rediscover it, retake the settlement, or has kept the knowledge in a **nation's tech library**, which lets it move production elsewhere.
+- **Technology can be lost** (collapse, isolation, plague, losing the settlements that hold it).
+- **Discovery:** practice, need, and contact (much faster), helped by Intelligence, curious cultures and fitting species; some technologies need resources or places (bronze needs copper and tin; sailing needs water).
+- **Rift materials:** not necessarily better than ordinary materials (for example ordinary iron and rift iron), but rifts give access to better and different resources, possibly super-rare metals.
+- **Tech editor**, together with a **resource maker**, so new technologies and resources can be added.
+
 ### 8.5 Politics
 
 **Opinion.** Every pair of peoples and powers has an opinion of each other, built from visible parts:
