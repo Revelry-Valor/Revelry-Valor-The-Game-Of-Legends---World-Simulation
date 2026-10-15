@@ -88,31 +88,47 @@ Fixes made: "Mediam" spelled Medium; the Flying Squirrels total was summing the 
 | Zatatari (Magic hunters | Large | ? | 25 | 10 | 10 | 10 | 14 | 8 | 10 | 10 | 30 | 6 | 30 | 0 | 0 | 5 | 0 | 168 | ? | ? |  |  | (were faltay but swiched sides)) |
 | Oni | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? |  |  |  |
 
-## Draft grouping into species (guess, to be confirmed)
+## Grouping into species
 
-The sheet's **Classification** looks like a broad *kind* (Mammalian, Reptilian, Fay...), too broad to be a species (bear-folk and squirrel-folk can't be one species). Proposal: Classification = **kind** (shared traits); entries that are clearly variants of one people = **races of one species**.
+The sheet's **Classification** is a broad **kind** (shared traits); entries that are variants of one people are **races of one species**. Groupings marked (guess) still need confirming.
 
-| Kind | Proposed species → races |
+| Kind | Species → races |
 |---|---|
-| Humanoid | **Human** → Human, Hatarin (sheet says "Human") · **Elf** → Elf, Winter Elves · **Dwarf** · **Orc** · **Minotaur** (Minitour) · **Lora'An** · **Lykin** · **Jumper Aulis** · **Porcupine-folk** (Porkipines) · **Twittele leaf** |
-| Mammalian | **Bear-folk** → Bear people, GoatBear? · **Bird-folk** (Bird people) · **Canasalora** · **Catary** · **Centaur** (Centur) · **Halfling** · **Rodent-folk** → Molycin (mice), Retacy (ratmen), Kuma-Vel (ratkoon)? · **Moostifarion** · **Ory** · **Roxet** · **Squirrel-folk** → Squirrels, Flying Squirrels · **Velitrix** |
+| Humanoid | **Human** → Human, Hatarin (guess) · **Elf** → Elf, Winter Elves (guess) · **Dwarf** · **Orc** · **Minotaur** (Minitour) · **Lora'An** · **Lykin** · **Jumper Aulis** · **Porcupine-folk** (Porkipines) · **Twittele leaf** |
+| Mammalian | **Ory** (the Rabbit race: shogunate-inspired, tunnels) · **Bear-folk** → Bear people, GoatBear? (guess) · **Canasalora** · **Catary** · **Centaur** (Centur) · **Halfling** · **Rodent-folk** → Molycin (mice), Retacy (ratmen), Kuma-Vel (ratkoon)? (guess) · **Moostifarion** · **Roxet** · **Squirrel-folk** → Squirrels, Flying Squirrels (guess) · **Velitrix** |
+| Avian | **Bird-folk** → Bird people, plus a few more races to define |
 | Capra | **Capra** (the goat-like mountain race) |
-| Reptilian / Lizard | **Crocodile-folk** · **Dragonkin** · **Lizard-folk** → TacTu, Tazac |
-| Fay | **Fay** → Fay, Fairy, Feylora, Lantu Fay · **Phaun** |
+| Reptilian | **Crocodile-folk** · **Dragonkin** · **Lizard-folk** → TacTu, Tazac (guess) |
+| Insectoid (new, stats needed) | **Spider-folk** · **Ant-folk** · **Bee-folk** · **Termite-folk** |
+| Fay | **Fay** → Fay, Fairy, Feylora, Lantu Fay (guess) · **Phaun** |
 | Dryad | **Dryad** → Dryad, Brambelwood, Ironwood, Ivory |
-| Giant | **Giant** → Giants · **Eliphantae** |
+| Giants | **Giants** · **Eliphantae** |
 | Construct | **Gargoyle** · **Toy Soldier** · **Vasaleth** (Lora'An constructs) |
 | Fishman | **Shwana** (Sea Folk) |
-| Nova | **Dream** · **Honor** · **Wrath** |
-| Unclassified | **Rathy** ("ANY") · **Taluty** · **Zatatari** · **Oni** |
+| Other | **Taluty** · **Rathy** ("ANY") |
+| Set aside for later | **Nova** (Dream, Honor, Wrath): very special, rely on other aspects of the world · **Zatatari** · **Oni** |
 
-## Open questions
-- Which entry is the **Rabbit race** (the shogunate people)? Is it **Ory**?
-- **Bird people** are classified Mammalian: should that be a separate Avian kind?
-- Is **Lizard** the same kind as **Reptilian**? **Giant** vs **Giants**?
-- What are the **Nova** (Dream, Honor, Wrath)?
-- Missing data: Dream (size); Taluty (size, classification); Zatatari (classification); Rathy ("ANY"); Wrath and Oni (no stats).
-- **Fighting age and lifespan** are only filled in for Humans (fighting age 18).
-- **Affinities** are missing for many races. They name magic affinities (Air, Water, Moon, Stone, Wild, Life, Earth, Death, Artificer, Fire, Elemental, Mystic, Primal, Battle, Void, Arcane, Chaos, Runic Enchantments): the magic system needs its own design step.
-- The **spider race** (Underdark miners) isn't in the list.
-- Stat scale: are these relative values (as I'd use them), or tied to a rule system (for example speed in feet per turn)?
+## Notes on races
+- **Ory:** the Rabbit race (shogunate-inspired government, see REDESIGN 8.4a).
+- **Bird-folk:** their own Avian kind, with a few races within (to define).
+- **Spider-folk:** prefer deep forests; can live in the Underdark but don't mine it; incredibly solitary; hunt the insect races (ants, bees, termites).
+- **Taluty:** small jungle people living in small communities; great clockmakers and spies.
+- **Nova, Zatatari, Oni:** set aside, to come back to later.
+- **Tuning:** missing values (fighting age, lifespan, affinities and so on) will be filled in and adjusted while the simulation is tested, until races give the outcomes wanted. Adjusting races is part of the process.
+
+## How the stats translate
+The sheet's numbers come from another game system. Here they are used as **relative values**, translated into simulation terms. Proposed, using Humans as the yardstick:
+
+| Stat | Becomes |
+|---|---|
+| Speed | Marching speed of armies, tribes and caravans: Speed 30 (Human) = an ordinary day's march; 40 is a third faster, 20 a third slower |
+| Flying · Climbing · Swimming · Leaping | Which travel routes a race can use, and how fast (flying crosses layers and impassable ground; climbing helps in mountains and trees) |
+| Stamina | How long they can march or work before resting |
+| Health · Natural Armor · Strength · Agility · Constitution | Fighting strength of soldiers and heroes |
+| Willpower | Morale: how long troops hold before breaking |
+| Intelligence | Learning and technology speed |
+| Wisdom | Leadership, judgement, diplomacy |
+| Mana | Power level of hero mages |
+| Size | Food needs, how many fit in a unit, what they can ride |
+
+**No magic system.** Affinities are kept as descriptions for now. Hero mages only get a basic power level (from Mana and the other stats).
