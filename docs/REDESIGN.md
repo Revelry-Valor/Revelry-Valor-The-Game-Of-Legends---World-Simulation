@@ -658,6 +658,35 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Rift materials:** not necessarily better than ordinary materials (for example ordinary iron and rift iron), but rifts give access to better and different resources, possibly super-rare metals.
 - **Tech editor**, together with a **resource maker**, so new technologies and resources can be added.
 
+### 8.4g Religion
+**Faith structure** (CK3-inspired, like culture)
+- **Identity:** name, symbols, followers (cultures and races).
+- **Nature of belief:** animism, ancestor worship, polytheism, monotheism, nature or world-tree worship, mana or rift reverence, philosophy, or a mix.
+- **Tenets:** about 3 core beliefs, with severity (for example sanctity of nature, holy war, pacifism, ancestor rule, rift abhorrence or reverence, asceticism).
+- **Doctrines:** who leads, who can be clergy, views on other faiths (tolerant to hostile), marriage rules, views on other species, attitude to mana.
+- **Holy sites:** places on the map (temple cities, giant trees, volcanoes, rifts, world tree root crossings); holding them strengthens the faith, losing them hurts.
+
+**In the simulation**
+- **Organization:** from loose (local shamans) to organized (temples, priesthood, a head of faith), growing with culture and technology.
+- **Fervour:** rises with holy wars won and holy sites held; falls with corruption, defeat, rival faiths.
+- **Spread and conversion:** temples, missionaries, trade, migration, conquest, royal marriages; gradual, faster under a pushing ruler, slower where the old faith is strong; rulers enforce, tolerate or persecute.
+- **Splits:** heresies, reformations, syncretism (blended faiths).
+- **Links:** temples and places of mass worship are ley line nodes (8.4 mana); faiths can revere, fear or fight rifts (rift-warden orders, cults); theocracies and divine-right legitimacy; clergy as ruling class or faction; religion in opinion, holy war as a reason for war, religious pacts; religious orders as non-state powers.
+
+**The gods are real**
+- Gods exist. Some act in the world often, others rarely. They do the good things: **miracles, heroes and blessings**.
+- **The heart of this world: the gods are playing games with the people of the world.**
+- Religion is also belief: faith works as belief whether or not a god acts.
+- **The active-gods part can be turned off** for users who want religion as belief only.
+
+**Faiths are set from the beginning** (not formed during the simulation). The author already has many faiths, some still in progress, to build from.
+
+**Faith creator**, like the culture and government creators. Story faiths can be locked or heavily encouraged.
+
+**Priests and mana:** some hero types, such as priests, draw on faith, but in the simulation it is kept as **mana** (no separate faith power).
+
+**God mode:** found a faith, spark a reformation or heresy, convert a settlement, desecrate a holy site.
+
 ### 8.5 Politics
 
 **Opinion.** Every pair of peoples and powers has an opinion of each other, built from visible parts:
