@@ -538,6 +538,20 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
   - avian races fly, live in giant trees and hunt from them;
   - a goat-like race can cross high mountains and build settlements on mountainsides.
 
+### 8.2a Creator structure (agreed)
+- **Two kinds of species:** **sentient** and **beasts**.
+- **Species** set the biological base and fixed traits; **races** are peoples within a species, varying it within limits; **cultures** belong to groups of people, not biology (one race can have several cultures; a culture can span races).
+- **Sections:**
+  1. **Body:** size and build; limbs (arms, legs, wings, tail; hands, claws, talons, tentacles); strength, speed, endurance, agility; senses (night vision, keen smell, tremor sense...); natural weapons and armour; movement (walk, climb, dig, swim, fly with range, mountain-adapted).
+  2. **Life:** lifespan and age of adulthood; offspring per birth and how often; diet (plant, meat, both, special such as mana, minerals or sunlight) and food needs; active by day, night or dusk.
+  3. **Environment:** preferred climates, ground covers and mountain zones, and tolerance of others; preferred layer (surface, underdark, trees, sky); heat, cold, wet, dry and altitude tolerance; special needs or benefits (mana density, near water).
+  4. **Mind and society** (sentient only): intelligence and learning speed; social structure tendency (pack, clan, hive, solitary); lifestyle (settled, semi-nomadic, nomadic); temperament; magic affinity; building styles (ground, tunnel, tree, cliff, sky).
+  5. **Relations:** general aversion/affinity trait (wary, welcoming, indifferent) plus optional per-species overrides; interbreeding and its results.
+  6. **War and heroes** (sentient only): base stats for soldiers and heroes from the numbers above; racial troop types (feeding "specialized troops").
+- **Beasts** use sections 1–3 and 5, plus uses (food, labour, riding, hunting help), resources, hunting difficulty, domestication difficulty and the density heat map (8.3).
+- **Traits:** tags with effects (for example Tunneler, Avian, Mountain-born, Night-eyed, Long-lived, Fertile, Hardy, Mana-sensitive, Herd-keeper, Seafarer). Species have fixed traits; races add or swap a few. A trait editor lets users make new ones.
+- **The species list starts fresh** (nothing carried over from the current game). The first list is coming from the world's author.
+
 ### 8.3 Animals and beasts
 - Animal species are made in the same creator. They have no armies.
 - **Population:** not counted, but shown as a **density heat map** from none to abundant. Animals only live in environments that suit them.
@@ -743,6 +757,5 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 ## 9. Still to design
 
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
-- **Species aversions:** set per species pair in the creator, as general traits, or both.
-- **Races and traits:** the full list, and the race/species creator.
+- **Species and races:** fill in the list (author's list coming).
 - The order in which everything will be built once the design is complete.
