@@ -678,8 +678,12 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **The heart of this world: the gods are playing games with the people of the world.**
 - Religion is also belief: faith works as belief whether or not a god acts.
 - **The active-gods part can be turned off** for users who want religion as belief only.
+- **Gods as actors:** each god is an actor in the simulation with its own personality, goals, favoured peoples and rivalries with other gods (for example a war god nudging its followers toward conflict, competing with a harvest god).
+- **What gods can do:** miracles, blessings, heroes; omens and visions; prophecies that come true; choosing champions (raising a notable individual as their hero); appearing in person; proxy wars through their followers.
+- **How often:** a world setting for how active the gods are (distant to meddling), plus an activity level per god.
+- **God creator:** gods are built in the program (part of the faith creator), with all the options needed so other users can build their own religions and gods. The author's own faiths are entered the same way.
 
-**Faiths are set from the beginning** (not formed during the simulation). The author already has many faiths, some still in progress, to build from.
+**Faiths are set from the beginning** (not formed during the simulation). The author has many faiths, some in progress, and will build them with the creator.
 
 **Faith creator**, like the culture and government creators. Story faiths can be locked or heavily encouraged.
 
