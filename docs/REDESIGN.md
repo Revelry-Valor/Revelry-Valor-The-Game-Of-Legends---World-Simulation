@@ -754,6 +754,29 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - Styles as before: satellite (realistic) and paper (drawn).
 - Labels look like fantasy map labels. The more important the name, the larger and more artistic the lettering: regions and nations get the grandest designs.
 
+## 10. Build order (proposed)
+
+Each phase ends with something to open and try; the next phase starts only once it's approved.
+
+| Phase | What gets built | What you can try |
+|---|---|---|
+| 0. Foundations | Tile-free world model (real distances, layers), world settings, save/load, start screen (Create world / Continue sim), canvas expanding | Create a world (presets or custom size), save, load |
+| 1. Land & painting | Land & Sea brushes; painted feature brushes (mountains in three modes with zones, hills, plateaus, cliffs, canyons, forests and the rest); satellite and paper looks | Paint a continent and its features |
+| 2. Water | River point mode, joining rivers, lakes, waterfalls on the surface | Draw rivers through your features |
+| 3. Climate | Rain Shadow Pen, the summer/winter climate system, climate crystals, automatic ground cover | Climate zones, rain and currents from what you drew |
+| 4. Geography | Continents, seas, natural regions, Region and Sea tools, culture naming, fantasy labels | A named, labelled map |
+| 5. Species | Species/race creator, traits, beasts and density maps, the roster loaded | Browse and edit races; see where animals live |
+| 6. First peoples | Time controls (day to year), clans and tribes claiming land by walking, seasonal migration, hunting | Clans spreading across the world |
+| 7. Settlements & travel | Settling, settlements, travel network, roads and bridges, trade | Towns, roads and trade routes growing |
+| 8. Governments & politics | Government creator and built-in types, factions, cultural pull, diplomacy, royal families, spies | Nations forming, allying, splitting |
+| 9. Mana & rifts | Ley lines, world tree roots, mana heat map, rifts, monster tides and hordes | Rifts opening, held or breaking |
+| 10. Other layers | Underdark, canopy and giant tree cities, sky islands, vines, waterfalls between layers | Multi-layer worlds |
+| 11. Globe | 3D globe with flat and globe views side by side | A whole planet |
+
+Technology, religion, culture, the market and war return within the phases they belong to, reworked as they go.
+
+**To confirm:** this order; and whether the new version is built alongside the current game (proposed: in a new folder, so the old one keeps working until replaced) or replaces it directly.
+
 ## 9. Still to design
 
 - **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
