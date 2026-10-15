@@ -691,6 +691,43 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 **God mode:** found a faith, spark a reformation or heresy, convert a settlement, desecrate a holy site.
 
+### 8.4h Market and economy
+**Units**
+- Everything is counted in **units**. One unit of an item satisfies a set number of people (for example one unit of grain feeds so many people for a month); a workshop needs a set number of units of inputs to make one unit of output.
+
+**Resources and goods**
+- **Resource maker** (with the tech editor): where a resource is found (feature, climate, layer, beast, rift), how it is gathered, its rarity, its uses.
+- Raw resources (grain, game, fish, timber, stone, ores, salt, wool...), new sources (giant tree fruits and bark crops, fungus, volcanic stone and ash soil, small crystals, beast parts such as leather, feathers, horns), and rift resources (varied, not necessarily better, sometimes super-rare metals).
+- Goods are made from resources by recipes that come from technology (tools, weapons, cloth, pottery, ships, clockwork, steam parts...).
+
+**Production**
+- Settlements work resources within reach; farming is simulated inside the settlement.
+- Workers are split between jobs by need, opportunity and culture; technology, culture and race traits improve output.
+- Settlements specialize naturally (mining towns, ports, market towns, rift camps, tree farms).
+
+**Trade**
+- Each settlement has a local market: supply, demand, prices that rise with shortage and fall with surplus.
+- Caravans, trading families, guilds and state convoys carry goods along the travel network; price differences make trade pay.
+- Better roads and bridges, safe routes and treaties raise trade; monster tides, wars, embargoes and dangerous whirlpools cut it. Routes shift (for example toward a new permanent rift).
+
+**Money**
+- **One currency**, to keep it simple, but what it's worth varies widely from place to place.
+- **Barter first:** cultures trade in what they have (fabrics and horns in one place, jewels in another). They only push toward coin when forced to: for example a people who can't trade their jewels directly sells them to another nation for coin, to buy what they need elsewhere.
+- Banking, loans and debts come later, with technology and culture.
+- Taxes and tribute collected by whoever the government's parts say (state, lords, temples, clans). Wealth gathers in settlements, noble houses, guilds, temples and trading families, and feeds their political power.
+
+**Guilds:** merchant, craft, mage, adventurer and rift guilds; non-state powers that control trades, hold rift encampments, send parties, lend money, back factions, span nations and can outlast them.
+
+**Rift economy:** rifts pull settlements, routes and guild encampments toward them; their resources are collected by armies, guilds and parties and sold in settlements; a rift breaking or closing can end a local boom.
+
+**Food and famine:** as in the current game: seasonal harvests, stores that spoil, famine in bad years.
+
+**Slavery and forced labour** exist in this world (affecting the economy, politics and culture).
+
+**Market views:** a **local view** when a nation or settlement is selected, and a **global view**.
+
+**Scope:** agreed as a starting point; it will be tuned while playing with it.
+
 ### 8.5 Politics
 
 **Opinion.** Every pair of peoples and powers has an opinion of each other, built from visible parts:
