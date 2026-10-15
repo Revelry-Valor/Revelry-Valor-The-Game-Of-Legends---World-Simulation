@@ -910,8 +910,9 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 | 12. Other layers | Underdark, canopy and giant tree cities, sky islands, vines, waterfalls between layers | Extends a working surface world |
 | 13. Globe | 3D globe, flat and globe views side by side | Coordinates already support it |
 
-## 9. Still to design
+## 11. Still to design (details, when their phase comes)
 
-- **Mountain height for travel:** the painted Mountains brush has no height, so what decides whether a range is "low" (slow) or "high" (impassable)? Options: the Rain Shadow Pen height class, a low/high setting on the brush, or both.
-- **Species and races:** fill in the list (author's list coming).
-- The order in which everything will be built once the design is complete.
+- Steam and mana tech in depth: the top of the tech tree, and fuel for both.
+- Missing species stats (new avian and insect races, Taluty size, fighting ages, lifespans, affinities); Nova, Zatatari and Oni later.
+- The author's faiths and gods, entered with the faith creator.
+- Exact severity degrees for each culture tradition.

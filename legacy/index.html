@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Revelry &amp; Valor World Forge</title>
+    <meta name="description" content="Simulate a living fantasy world: settlements, migration, trade, technology, races, cultures and nations." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpath d=%22M8 1l6 7-6 7-6-7z%22 fill=%22%238f6118%22/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+SC:wght@500;700&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <p class="kicker">Revelry &amp; Valor</p>
+        <h1 id="world-name">Aerth</h1>
+        <p class="when"><span id="year">Year 0</span> · <span id="era">Stone Age</span></p>
+      </div>
+      <div class="controls" role="group" aria-label="Time">
+        <button id="play" class="primary" type="button" aria-pressed="false">Play</button>
+        <button id="realtime" type="button" aria-pressed="false" title="Advance month by month and watch armies and caravans move">Real time</button>
+        <button id="step1" type="button">+1 yr</button>
+        <button id="step10" type="button">+10</button>
+        <button id="step100" type="button">+100</button>
+        <button id="step500" type="button">+500</button>
+        <label class="speed" for="speed">Speed <input id="speed" type="range" min="1" max="60" value="10" /> <output id="speed-out">10 yr/s</output></label>
+      </div>
+      <dl class="stats" id="stats"></dl>
+      <div class="views" role="group" aria-label="Views">
+        <button id="create-world" type="button" title="Shape the land: paint coasts, raise mountains, cut valleys">Create world</button>
+        <button type="button" data-overlay="nation" aria-pressed="false">Nation view</button>
+        <button type="button" data-overlay="tech" aria-pressed="false">Tech tree</button>
+        <button id="theme" type="button" class="ghost" title="Switch colour theme">Auto</button>
+      </div>
+    </header>
+    <main class="app">
+      <section class="map-pane" aria-label="World map">
+        <div class="map-tools">
+          <div class="seg" role="group" aria-label="Map layer">
+            <button type="button" data-layer="terrain" aria-pressed="false">Terrain</button>
+            <button type="button" data-layer="political" aria-pressed="true">Realms</button>
+            <button type="button" data-layer="nations" aria-pressed="false">Nations</button>
+            <button type="button" data-layer="culture" aria-pressed="false">Cultures</button>
+            <button type="button" data-layer="race" aria-pressed="false">Races</button>
+            <button type="button" data-layer="temperature" aria-pressed="false">Temperature</button>
+            <button type="button" data-layer="rainfall" aria-pressed="false">Rainfall</button>
+            <button type="button" data-layer="currents" aria-pressed="false">Currents</button>
+            <button type="button" data-layer="resource" aria-pressed="false">Resources</button>
+          </div>
+          <label id="resource-pick" hidden>Resource <select id="resource"></select></label>
+          <p id="land-legend" class="land-legend" hidden></p>
+          <label class="toggle" for="t-routes"><input id="t-routes" type="checkbox" /> Trade routes</label>
+          <label class="toggle" for="t-labels"><input id="t-labels" type="checkbox" /> Names</label>
+          <label class="toggle" for="t-ruins"><input id="t-ruins" type="checkbox" /> Ruins</label>
+          <label class="toggle" for="t-roads"><input id="t-roads" type="checkbox" /> Roads</label>
+          <label class="toggle" for="t-caravans"><input id="t-caravans" type="checkbox" /> Caravans</label>
+          <label class="toggle" for="t-armies"><input id="t-armies" type="checkbox" /> Armies</label>
+          <label class="toggle" for="map-style">Style <select id="map-style"><option value="drawn">Drawn map</option><option value="topo">Topographic</option><option value="parchment">Parchment</option><option value="satellite">Satellite</option></select></label>
+          <label class="toggle" for="t-contours"><input id="t-contours" type="checkbox" /> Contours</label>
+          <button id="fit" type="button" class="ghost">Fit map</button>
+        </div>
+        <canvas id="map"></canvas>
+        <p class="hint">Scroll to zoom · drag to pan · click to inspect · Esc to clear · ◆ capital · ▲ army · ● caravan · ■ convoy · ✕ battle · △ settlers · tent ▲ in a clan's colour: wandering tribe (a pale dot beside it: herders) · pale wash: a clan's hunting grounds · coloured ring: occupied · red ring: cut off from its capital · dashed border: bound to the selected nation</p>
+        <p id="busy" class="busy" hidden></p>
+        <div id="overlay" class="overlay" hidden>
+          <div class="overlay-bar">
+            <h2 id="overlay-title">Nation</h2>
+            <label for="overlay-nation">Showing <select id="overlay-nation"></select></label>
+            <button id="overlay-close" type="button">Close (Esc)</button>
+          </div>
+          <div id="overlay-body" class="overlay-body"></div>
+          <div id="tt-detail" class="tt-detail" hidden></div>
+        </div>
+      </section>
+      <aside class="side">
+        <nav class="tabs" role="tablist" aria-label="Panels">
+          <button type="button" role="tab" data-tab="inspect">Inspect</button>
+          <button type="button" role="tab" data-tab="market">Market</button>
+          <button type="button" role="tab" data-tab="realms">Realms</button>
+          <button type="button" role="tab" data-tab="peoples">Peoples</button>
+          <button type="button" role="tab" data-tab="chronicle">Chronicle</button>
+          <button type="button" role="tab" data-tab="charts">Charts</button>
+          <button type="button" role="tab" data-tab="setup">Setup</button>
+        </nav>
+        <div id="panel" class="panel" role="tabpanel"></div>
+      </aside>
+    </main>
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
+</html>
