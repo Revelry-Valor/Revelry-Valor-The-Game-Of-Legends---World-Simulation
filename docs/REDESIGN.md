@@ -614,6 +614,16 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - When the differences become too great, a faction **breaks away**: starting a civil war, or leaving some other way.
 - Rival claims to a true line (8.4a) are one source of such factions.
 
+### 8.4e Culture (decided so far)
+- **Two separate trees:** a **technology tree** (what a people can make) and a **culture tree** (how a people lives). They influence each other: progress in one can push a nation to make or change things in the other.
+- **Culture is made of traits and learned behaviours.** Some traits have **degrees of severity** (for example mild, strong, extreme).
+- **Scale:** a culture can be a single city or nation-wide.
+- **Survival first:** a culture is built on the best way its people find to survive, given their environment and many other circumstances.
+- **Inspiration:** Crusader Kings III's culture system.
+- **No paths:** there are lifestyles and preferences, not set paths. Preferences change a great deal about how people live, which is why they come from the environment.
+- **No eras as gates:** eras only label time. There is no "reach the next era" to unlock culture improvements.
+- **No pace setting** for now.
+
 ### 8.5 Politics
 
 **Opinion.** Every pair of peoples and powers has an opinion of each other, built from visible parts:
