@@ -650,7 +650,10 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Gunpowder** exists.
 - **Who holds knowledge:** it depends on the culture, but usually a **settlement** holds a technology, and it spreads to the settlements that need or can use it.
   - **Losing it:** if a nation's only settlement able to build trains is lost, the nation loses that ability, unless it can rediscover it, retake the settlement, or has kept the knowledge in a **nation's tech library**, which lets it move production elsewhere.
+  - **Keeping a tech library** needs writing and a library, archive or academy building. It can be destroyed (a burned archive loses what only it held).
 - **Technology can be lost** (collapse, isolation, plague, losing the settlements that hold it).
+- **Steam and mana tech:** a nation can pursue both lines, but usually has little reason to push both when one suffices.
+- **Fuel** for steam and mana tech: to be designed when we get there.
 - **Discovery:** practice, need, and contact (much faster), helped by Intelligence, curious cultures and fitting species; some technologies need resources or places (bronze needs copper and tin; sailing needs water).
 - **Rift materials:** not necessarily better than ordinary materials (for example ordinary iron and rift iron), but rifts give access to better and different resources, possibly super-rare metals.
 - **Tech editor**, together with a **resource maker**, so new technologies and resources can be added.
