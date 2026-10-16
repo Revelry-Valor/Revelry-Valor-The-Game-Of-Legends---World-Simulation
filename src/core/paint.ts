@@ -33,6 +33,13 @@ export type BrushId =
   | 'saltflats'
   | 'glacier'
   | 'beach'
+  // Water
+  | 'river'
+  | 'lake'
+  | 'waterfall'
+  // Volcanic
+  | 'volcano'
+  | 'lava'
   // Sea features
   | 'whirlpool'
   // Mountain zones (by hand)
@@ -55,7 +62,7 @@ export type BrushKind = 'area' | 'line' | 'point';
 export interface BrushInfo {
   id: BrushId;
   name: string;
-  group: 'Land & Sea' | 'Relief' | 'Ground cover' | 'Sea' | 'Mountain zones';
+  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Mountain zones';
   kind: BrushKind;
   hint: string;
   /** Default brush settings. Size is the brush's width in miles. */
@@ -80,6 +87,11 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'ravine', name: 'Ravine', group: 'Relief', kind: 'line', hint: 'A narrow, deep crack in the earth. Blocks travel.', sizeMi: 2, strength: 0.8, softness: 0.2, roughness: 0.5, detailMi: 1 },
   { id: 'crater', name: 'Crater', group: 'Relief', kind: 'point', hint: 'Click to place an impact crater. Bigger means a bigger meteor: big craters get flat floors, terraced walls, a central peak and rays. A new crater blasts away what was there, older craters included.', sizeMi: 12, strength: 0.8, softness: 0.3, roughness: 0.25, detailMi: 3 },
   { id: 'erode', name: 'Erosion', group: 'Relief', kind: 'area', hint: 'A spray brush that wears the land: cuts gullies into mountains, lowers peaks and makes coasts ragged.', sizeMi: 50, strength: 0.5, softness: 0.5, roughness: 0.5, detailMi: 6 },
+  { id: 'river', name: 'River', group: 'Water', kind: 'line', hint: 'Points: click the source, then points along the way; press Enter or click on water to finish. The river finds its own course through the land. Draw: drag the course yourself. A river that ends in another makes it bigger downstream.', sizeMi: 12, strength: 0.3, softness: 0.3, roughness: 0, detailMi: 1 },
+  { id: 'lake', name: 'Lake', group: 'Water', kind: 'area', hint: 'Fresh water. Paint the shape of the lake.', sizeMi: 30, strength: 1, softness: 0.3, roughness: 0.5, detailMi: 3 },
+  { id: 'waterfall', name: 'Waterfall', group: 'Water', kind: 'point', hint: 'Rivers make waterfalls by themselves where they run over a cliff or plateau rim. Click to place one by hand: a pool forms below it and the land around turns green and fertile.', sizeMi: 1, strength: 0.8, softness: 0.3, roughness: 0, detailMi: 1 },
+  { id: 'volcano', name: 'Volcano', group: 'Volcanic', kind: 'point', hint: 'Click to place a volcano. The size is its width at the base. Active volcanoes glow and feed lava flows; they bring obsidian, sulfur, pumice, basalt, rich ash soil, hot springs, gems and rare metals.', sizeMi: 25, strength: 0.8, softness: 0.3, roughness: 0.4, detailMi: 3 },
+  { id: 'lava', name: 'Lava flow', group: 'Volcanic', kind: 'line', hint: 'Drawn like a river: Points or Draw, from a volcano downhill. Cooled flows are black rock; flows from an active volcano glow.', sizeMi: 4, strength: 0.8, softness: 0.3, roughness: 0.6, detailMi: 1 },
   { id: 'forest', name: 'Forest', group: 'Ground cover', kind: 'area', hint: 'A canopy of treetops. Painted cover overrides the climate here.', sizeMi: 60, strength: 0.9, softness: 0.3, roughness: 0.6, detailMi: 6 },
   { id: 'jungle', name: 'Jungle', group: 'Ground cover', kind: 'area', hint: 'Dense tropical canopy.', sizeMi: 60, strength: 0.9, softness: 0.3, roughness: 0.6, detailMi: 6 },
   { id: 'grassland', name: 'Grassland', group: 'Ground cover', kind: 'area', hint: 'Open grass and steppe.', sizeMi: 80, strength: 0.8, softness: 0.6, roughness: 0.5, detailMi: 10 },
@@ -133,6 +145,16 @@ export interface Stroke {
   zone?: ZoneId;
   /** Whirlpools: dangerous to ships. */
   dangerous?: boolean;
+  /** Rivers and lava flows: drawn by hand, or routed through clicked points. */
+  route?: 'draw' | 'points';
+  /** Rivers and lava flows in point mode: the points that were clicked (x, y pairs). */
+  ctrl?: number[];
+  /** Rivers: the river this one flows into, and how far along that river it joins (km). */
+  joins?: { id: number; at: number };
+  /** Rivers: where along the course (km) it falls over a cliff or rim, and where it lands. */
+  falls?: { at: number; to: number }[];
+  /** Volcanoes and lava flows: still active (glowing). */
+  active?: boolean;
 }
 
 export interface Surface {
@@ -158,14 +180,21 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'cliffs' ? { side: 1 as const } : {}),
     ...(id === 'zone' ? { zone: 2 as ZoneId } : {}),
     ...(id === 'whirlpool' ? { dangerous: true } : {}),
+    ...(id === 'river' || id === 'lava' ? { route: 'points' as const, variation: 0 } : {}),
+    ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
   };
 }
+
+/** How far a river's water, banks and waterfall pools can reach from its course, km. */
+export const RIVER_REACH = 25;
 
 /** How far a stroke can reach from its path, in km (for finding what it touches). */
 export function strokeReach(s: Stroke): number {
   const r = s.size / 2;
   // Craters throw ejecta and rays well past their rim; cliffs cast shadows below their face.
-  const extra = s.brush === 'crater' ? 4 : s.brush === 'whirlpool' ? 1.1 : s.brush === 'cliffs' ? 3 : s.brush === 'canyon' ? 2.3 : s.brush === 'plateau' ? 1.55 : (1 + s.variation * 0.35) * (1 + s.roughness * 0.5) + 0.05;
+  // Rivers reach as far as their widest stretch and the green banks and waterfall pools beside it.
+  if (s.brush === 'river') return RIVER_REACH;
+  const extra = s.brush === 'volcano' ? 1.6 : s.brush === 'waterfall' ? 40 : s.brush === 'crater' ? 4 : s.brush === 'whirlpool' ? 1.1 : s.brush === 'cliffs' ? 3 : s.brush === 'canyon' ? 2.3 : s.brush === 'plateau' ? 1.55 : (1 + s.variation * 0.35) * (1 + s.roughness * 0.5) + 0.05;
   return r * extra;
 }
 

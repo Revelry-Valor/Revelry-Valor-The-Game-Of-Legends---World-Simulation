@@ -49,6 +49,15 @@ const SAT = {
   path: hex('#c2a77a'),
   scree: hex('#a99f8e'),
   crack: hex('#33261d'),
+  lush: hex('#3f7a2c'),
+  river: hex('#2d6a86'),
+  lakeShallow: hex('#3f8fa0'),
+  lakeDeep: hex('#1d4f6e'),
+  basalt: hex('#4a4440'),
+  ash: hex('#7c766e'),
+  lava: hex('#2a2624'),
+  glowHot: hex('#ffd36a'),
+  glow: hex('#ff5a1a'),
   zone: [hex('#000000'), hex('#e3cf6b'), hex('#d68b37'), hex('#a8402a'), hex('#e9ecff')] as RGB[],
 };
 const COVER_SAT: Record<CoverBrush, RGB> = {
@@ -154,9 +163,24 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
           if (f.face[k] > 0) c = mix(c, strataColour(f.strata[k], false), f.face[k]);
           if (f.ravine[k] > 0) c = mix(c, SAT.crack, smooth(0.2, 0.8, f.ravine[k]) * 0.9);
           if (f.ramp[k] > 0) c = mix(c, SAT.path, f.ramp[k] * 0.2 + f.track[k] * 0.45);
+          // River banks and waterfall oases: lush green, even in desert.
+          if (f.wet[k] > 0) c = mix(c, SAT.lush, f.wet[k] * 0.55 * (1 - f.face[k]));
+          // Volcanoes: dark basalt with paler ash streaks; lava flows black and ropy.
+          if (f.volcano[k] > 0) c = mix(c, mix(SAT.basalt, SAT.ash, 0.5 + 0.5 * fbm(x, y, 2, px, seed + 57, 4)), f.volcano[k] * 0.85);
+          if (f.lava[k] > 0) c = mix(c, mix(SAT.lava, SAT.basalt, 0.4 * (fbm(x, y, 0.8, px, seed + 58, 4) + 1)), f.lava[k]);
           const fs = f.face[k] > 0 ? 1 + (f.faceShade[k] - 1) * f.face[k] : 1;
           const lit = (0.55 + 0.45 * bright) * fs * (1 - f.shadow[k] * 0.6);
           c = [c[0] * lit, c[1] * lit, c[2] * lit];
+          // Fresh water lies flat: rivers and lakes are not shaded by the slopes.
+          const wa = f.water[k];
+          if (wa > 0) {
+            const wc = f.waterKind[k] === 2 ? mix(SAT.lakeShallow, SAT.lakeDeep, smooth(0, 0.8, f.waterDepth[k])) : SAT.river;
+            c = mix(c, wc, wa);
+          }
+          if (f.foam[k] > 0) c = mix(c, [236, 244, 246], f.foam[k] * (0.6 + 0.4 * (fbm(x, y, 0.15, px, seed + 59, 3) > 0 ? 1 : 0.5)));
+          // Active lava glows (lit from within).
+          const gl = f.lavaGlow[k];
+          if (gl > 0) c = mix(c, mix(SAT.glow, SAT.glowHot, smooth(0.5, 1, gl)), Math.min(1, gl * 1.2));
           col = mix(sea, c, land);
         }
       } else {
@@ -189,6 +213,14 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
           if (f.ejecta[k] > 0) c = mix(c, [250, 244, 226], f.ejecta[k] * 0.4);
           // Ramps: a dashed track.
           if (f.track[k] > 0.3 && Math.sin((x + y) / Math.max(px * 3, 0.3)) > 0) c = mix(c, PAPER.ink, f.track[k] * 0.6);
+          if (f.wet[k] > 0) c = mix(c, COVER_PAPER.forest, f.wet[k] * 0.3);
+          if (f.volcano[k] > 0) c = mix(c, PAPER.shade, f.volcano[k] * 0.35);
+          if (f.lava[k] > 0) c = mix(c, PAPER.ink, f.lava[k] * (fbm(x, y, 0.6, px, seed + 58, 3) > 0 ? 0.75 : 0.5));
+          if (f.lavaGlow[k] > 0) c = mix(c, [200, 70, 30], f.lavaGlow[k] * 0.6);
+          // Rivers and lakes in blue ink.
+          const wa = f.water[k];
+          if (wa > 0) c = mix(c, f.waterKind[k] === 2 ? PAPER.sea : [70, 110, 140], wa);
+          if (f.foam[k] > 0.3) c = mix(c, [250, 250, 245], f.foam[k] * 0.7);
           col = mix(sea, c, land);
         }
         // Inked coastline.

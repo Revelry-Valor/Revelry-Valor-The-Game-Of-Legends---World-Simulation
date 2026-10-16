@@ -21,8 +21,9 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 |---|---|---|
 | 0 | Foundations: world settings, layers, save/load, start screen, canvas expanding | Done |
 | 1 | Land & painting: Land & Sea, feature brushes, mountain zones, satellite and paper looks | Done (for review) |
-| 2 | Water: rivers, lakes, waterfalls | Next |
-| 3–13 | Climate, geography, data creators, peoples, settlements, culture & tech, politics, war, mana, other layers, globe | Planned |
+| 2 | Water: rivers (point and draw), joining, lakes, waterfalls; volcanoes and lava | Done (for review) |
+| 3 | Climate | Next |
+| 4–13 | geography, data creators, peoples, settlements, culture & tech, politics, war, mana, other layers, globe | Planned |
 
 ### What Phase 0 does
 
@@ -78,6 +79,23 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 - **Moving around:** drag with the Move tool, hold Space, or drag with the right mouse button;
   scroll or pinch to zoom.
 - **Keys:** Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo, Ctrl+S save, E erase, [ and ] brush size.
+
+### What Phase 2 does
+
+- **Rivers, Points:** click the source, then points along the way; press Enter, or click on water
+  (sea, lake or another river) to finish. The course is found through the painted land: it
+  winds through low ground and valleys, goes around mountains, hills and plateaus, follows
+  canyons, and meanders where the land is flat. **Draw:** drag the course yourself.
+- Rivers grow downstream, and one that ends in another makes it bigger from there on (a click
+  near a river snaps onto it). "Water at the source" sets how big it starts.
+- **Waterfalls** form by themselves where a river runs off a plateau, over a cliff or into a
+  gorge: white water down the face, a pool at the foot, and green, fertile ground around (an
+  oasis in a desert). They can also be placed by hand.
+- **Lakes:** a brush for fresh water. Green banks along every river.
+- **Volcanoes** (active or dormant): cones scored by gullies, with a glowing crater when active.
+  **Lava flows** are drawn like rivers; active ones glow through cracks in a dark crust.
+- The map readout shows rivers (and their width), lakes, waterfalls, well-watered and volcanic
+  ground.
 
 ## Developing
 

@@ -48,9 +48,11 @@ export function createToolPanel(changed: () => void): ToolPanel {
     const s = state.settings;
     const pct = (label: string, key: 'strength' | 'softness' | 'roughness' | 'variation' | 'sideRidges' | 'erosion', hint: string) =>
       numberField({ label, value: Math.round((s[key] ?? 0) * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint, change: (v) => { s[key] = Math.max(0, Math.min(100, v)) / 100; changed(); } });
+    // A river's width comes from the water it carries, so its brush size only matters for erasing.
+    const sized = !(state.tool === 'river' && !state.erase);
     const fields: (HTMLElement | null)[] = [
       h('p', { class: 'muted small hint' }, state.erase ? `Erasing ${b.name.toLowerCase()} only. Other layers are left alone.` : b.hint),
-      numberField({
+      !sized ? null : numberField({
         label: b.kind === 'point' ? 'Width' : 'Brush size',
         value: Math.round(kmToMiles(s.size) * 10) / 10,
         min: 0.5,
@@ -76,13 +78,20 @@ export function createToolPanel(changed: () => void): ToolPanel {
           choice<string>('Zone', [{ value: '0', label: 'Automatic' }, ...ZONES.map((z) => ({ value: String(z.id), label: z.name }))], String(s.zone ?? 2), (v) => { s.zone = Number(v) as ZoneId; changed(); }),
         );
       }
+      if (state.tool === 'river' || state.tool === 'lava') {
+        fields.push(choice<'points' | 'draw'>('Course', [{ value: 'points', label: 'Points' }, { value: 'draw', label: 'Draw' }], s.route ?? 'points', (v) => { s.route = v; renderSettings(); changed(); }));
+      }
+      if (state.tool === 'volcano' || state.tool === 'lava') {
+        fields.push(choice<string>('State', [{ value: 'yes', label: 'Active' }, { value: 'no', label: 'Dormant' }], s.active === false ? 'no' : 'yes', (v) => { s.active = v === 'yes'; changed(); }));
+      }
       if (state.tool === 'whirlpool') {
         fields.push(choice<string>('Ships', [{ value: 'yes', label: 'Dangerous to ships' }, { value: 'no', label: 'Harmless' }], s.dangerous === false ? 'no' : 'yes', (v) => { s.dangerous = v === 'yes'; changed(); }));
       }
-      const strengthName = b.group === 'Land & Sea' ? 'Opacity' : b.group === 'Ground cover' ? 'Density' : 'Strength';
-      if (state.tool !== 'zone') fields.push(pct(strengthName, 'strength', b.group === 'Relief' ? 'How bold: for mountains, bigger peaks.' : 'How fully it covers.'));
+      const strengthName = state.tool === 'river' ? 'Water at the source' : state.tool === 'volcano' ? 'Height' : b.group === 'Land & Sea' ? 'Opacity' : b.group === 'Ground cover' ? 'Density' : 'Strength';
+      const strengthHint = state.tool === 'river' ? 'A spring-fed stream or a river from a big lake. Rivers grow on their way, and with every river that joins them.' : b.group === 'Relief' ? 'How bold: for mountains, bigger peaks.' : 'How fully it covers.';
+      if (state.tool !== 'zone') fields.push(pct(strengthName, 'strength', strengthHint));
     }
-    if (b.kind !== 'point' || state.tool === 'crater') {
+    if ((b.kind !== 'point' || state.tool === 'crater' || state.tool === 'volcano') && (state.tool !== 'river' || state.erase)) {
       fields.push(
         pct('Softness', 'softness', 'How gradually the edge fades.'),
         pct('Roughness', 'roughness', 'How ragged the outline is.'),
@@ -93,7 +102,7 @@ export function createToolPanel(changed: () => void): ToolPanel {
         numberField({ label: 'Detail', value: Math.round(kmToMiles(s.detail) * 10) / 10, min: 0.2, max: 200, step: 0.1, unit: 'miles', hint: 'Size of single peaks or bumps.', change: (v) => { if (v > 0) s.detail = milesToKm(v); changed(); } }),
       );
     }
-    if (!state.erase && b.kind !== 'point') fields.push(pct('Variation', 'variation', 'So repeated strokes don’t look copied.'));
+    if (!state.erase && b.kind !== 'point' && b.group !== 'Water' && b.group !== 'Volcanic') fields.push(pct('Variation', 'variation', 'So repeated strokes don’t look copied.'));
     fields.push(h('button', { type: 'button', class: 'ghost small', onclick: () => { remembered.set(b.id, brushDefaults(b.id)); state.settings = settingsFor(b.id); renderSettings(); changed(); } }, 'Reset this brush'));
     settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...fields.filter(Boolean) as HTMLElement[]);
   };

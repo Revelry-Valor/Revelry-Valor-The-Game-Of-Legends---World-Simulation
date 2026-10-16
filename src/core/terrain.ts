@@ -1,5 +1,6 @@
 import { fbm, noise2, random2, ridged, strokeSeed } from './noise';
 import { COVER_BRUSHES, strokeBounds, strokeReach, type CoverBrush, type Stroke, type Surface, type ZoneId } from './paint';
+import { flowAt, pointAt, riverNetwork, widthForFlow, type RiverInfo } from './water';
 
 /**
  * Turns painted strokes into what is where (REDESIGN.md, section 6). The map picture and the
@@ -62,6 +63,25 @@ export interface Fields {
   track: Float32Array;
   /** Fresh crater ejecta and rays, 0–1 (lighter ground). */
   ejecta: Float32Array;
+  /** How much hill paint is built up here. */
+  hill: Float32Array;
+  /** Fresh water: rivers and lakes, 0–1. */
+  water: Float32Array;
+  /** 1 = river, 2 = lake (where there is water). */
+  waterKind: Uint8Array;
+  /** How far into a lake, 0 at the shore to 1 in the middle (for its colour). */
+  waterDepth: Float32Array;
+  /** River width here (km), where there is a river. */
+  riverWidth: Float32Array;
+  /** White water at waterfalls, 0–1. */
+  foam: Float32Array;
+  /** Wetter, greener, more fertile ground: river banks, and around waterfalls (oases), 0–1. */
+  wet: Float32Array;
+  /** Volcanic cone, 0–1. */
+  volcano: Float32Array;
+  /** Lava flows, 0–1, and the glow of active ones, 0–1. */
+  lava: Float32Array;
+  lavaGlow: Float32Array;
   /** For lighting the painting only. */
   relief: Float32Array;
 }
@@ -85,6 +105,8 @@ interface Options {
   seed: number;
   /** Width of a wrapping map (km), or 0 if the map does not wrap. */
   wrapKm: number;
+  /** Skip the fine detail only lighting needs (for finding river courses). */
+  noRelief?: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -190,23 +212,21 @@ function unionStroke(s: Stroke, g: Grid, o: Options, seed: number, visit: (i: nu
   if (!box) return;
   const [i0, j0, i1, j1] = box;
   scratch(g.w * g.h);
-  for (let j = j0; j <= j1; j++) {
-    scratchA.fill(Infinity, j * g.w + i0, j * g.w + i1 + 1);
-    scratchB.fill(s.size / 2, j * g.w + i0, j * g.w + i1 + 1);
-  }
+  const R = s.size / 2;
+  // How far inside the nearest dab's edge (km): the exact union of the dabs' circles, so it is
+  // continuous where neighbouring dabs differ in size.
+  for (let j = j0; j <= j1; j++) scratchA.fill(-Infinity, j * g.w + i0, j * g.w + i1 + 1);
   const reach = 1 + s.roughness * 0.5 + 0.05;
   forDabs(s, g, o, seed, reach, (i, _x, _y, dx, dy, r) => {
-    const e = Math.sqrt(dx * dx + dy * dy) / r;
-    if (e < scratchA[i]) {
-      scratchA[i] = e;
-      scratchB[i] = r;
-    }
+    const inside = r - Math.sqrt(dx * dx + dy * dy);
+    if (inside > scratchA[i]) scratchA[i] = inside;
   });
   for (let j = j0; j <= j1; j++) {
     const y = g.y0 + j * g.px;
     for (let i = i0; i <= i1; i++) {
       const idx = j * g.w + i;
-      if (scratchA[idx] < reach) visit(idx, g.x0 + i * g.px, y, scratchA[idx], scratchB[idx]);
+      const e = 1 - scratchA[idx] / R;
+      if (e < reach) visit(idx, g.x0 + i * g.px, y, e, R);
     }
   }
 }
@@ -372,8 +392,23 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     ramp: new Float32Array(n),
     track: new Float32Array(n),
     ejecta: new Float32Array(n),
+    hill: new Float32Array(n),
+    water: new Float32Array(n),
+    waterKind: new Uint8Array(n),
+    waterDepth: new Float32Array(n),
+    riverWidth: new Float32Array(n),
+    foam: new Float32Array(n),
+    wet: new Float32Array(n),
+    volcano: new Float32Array(n),
+    lava: new Float32Array(n),
+    lavaGlow: new Float32Array(n),
     relief: new Float32Array(n),
   };
+  // Volcanic cones (relief) and their slope, for gullies.
+  const cone = new Float32Array(n);
+  const coneGx = new Float32Array(n);
+  const coneGy = new Float32Array(n);
+  let rivers: Map<number, RiverInfo> | null = null;
   // Spray paint: mountain mass and its slope, hills, erosion.
   const mass = new Float32Array(n);
   const mgx = new Float32Array(n);
@@ -590,6 +625,130 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
       case 'crater':
         crater(s, g, o, seed, er, f, cut, mass, hills, plateauIn);
         break;
+      case 'river': {
+        if (er) {
+          unionStroke(s, g, o, seed, (i, x, y, e, r) => {
+            const c = edge(s, x, y, e, r, px, seed);
+            if (c > 0) f.water[i] *= 1 - c;
+          });
+          break;
+        }
+        rivers ??= riverNetwork(surface);
+        const info = rivers.get(s.id);
+        if (!info) break;
+        lineStroke(s, g, o, (i, _x, _y, d, t) => {
+          const flow = flowAt(info, t);
+          const w = widthForFlow(flow) / 2;
+          // Like a map, rivers are drawn a little wider than life so they read at any zoom, and
+          // visibly grow downstream.
+          const wd = Math.max(w, px * (0.35 + 0.45 * Math.sqrt(flow)));
+          const c = 1 - smooth(wd - px * 0.5, wd + px * 0.5, d);
+          if (c > f.water[i]) {
+            f.water[i] = c;
+            f.waterKind[i] = 1;
+            f.riverWidth[i] = w * 2;
+          }
+          // Green banks.
+          const bank = 0.5 * (1 - smooth(w, w + 1.5 + w * 8, d));
+          if (bank > f.wet[i]) f.wet[i] = bank;
+        });
+        for (const fall of s.falls ?? []) {
+          if (typeof fall !== 'object') continue;
+          const w = widthForFlow(flowAt(info, fall.at)) / 2;
+          // White water all the way down the face, and a pool at the foot.
+          const to = Math.max(fall.to, fall.at + w * 2);
+          const steps = Math.min(200, Math.ceil((to - fall.at) / Math.max(px, w)));
+          const cascade: number[] = [];
+          for (let k = 0; k <= steps; k++) cascade.push(...pointAt(info, fall.at + ((to - fall.at) * k) / Math.max(1, steps)));
+          const [qx, qy] = pointAt(info, to + Math.max(w * 2, 0.3));
+          splash(f, g, o, cascade, qx, qy, w, px);
+        }
+        break;
+      }
+      case 'lake':
+        unionStroke(s, g, o, seed, (i, x, y, e, r) => {
+          const c = edge(s, x, y, e, r, px, seed);
+          if (c <= 0) return;
+          if (er) {
+            f.water[i] *= 1 - c;
+            return;
+          }
+          if (c * str >= f.water[i]) {
+            f.water[i] = c * str;
+            f.waterKind[i] = 2;
+          }
+          f.waterDepth[i] = Math.max(f.waterDepth[i], Math.min(1, (1 - e) * 2));
+        });
+        break;
+      case 'waterfall': {
+        const [x0, y0] = s.pts;
+        if (er) {
+          // Erasing a placed waterfall: clear its spray and pool.
+          const R = s.size * 4;
+          eachNear(g, o, x0, y0, R, (i) => {
+            f.foam[i] = 0;
+          });
+          break;
+        }
+        splash(f, g, o, [x0, y0], x0, y0 + s.size, s.size / 2, px);
+        break;
+      }
+      case 'volcano': {
+        const R = s.size / 2;
+        const [vx, vy] = s.pts;
+        const A = (0.15 + 0.5 * Math.sqrt(R / 25)) * (0.4 + 0.6 * str);
+        eachNear(g, o, vx, vy, R * 1.6, (i, x, y, dx, dy) => {
+          const d = Math.hypot(dx, dy);
+          const e = d / R + s.roughness * 0.12 * fbm(x, y, R * 0.5, px, seed, 4);
+          if (er) {
+            const k = smooth(0.8, 1.3, e);
+            cone[i] *= k;
+            f.volcano[i] *= k;
+            f.lavaGlow[i] *= k;
+            return;
+          }
+          if (e >= 1.2) return;
+          // A steep-topped cone flaring out at the base, with a crater at the summit.
+          const q = Math.max(0, 1 - e);
+          let hh = A * q ** 1.6;
+          let k = (-A * 1.6 * q ** 0.6) / (R * Math.max(d, 1e-6));
+          const crater = 0.13;
+          if (e < crater) {
+            hh = A * (1 - crater) ** 1.6 - A * 0.28 * (1 - (e / crater) ** 2);
+            k = (A * 0.56 * e) / (crater * crater * R * Math.max(d, 1e-6));
+          }
+          if (hh > cone[i]) {
+            cone[i] = hh;
+            coneGx[i] = k * dx;
+            coneGy[i] = k * dy;
+          }
+          f.volcano[i] = Math.max(f.volcano[i], 1 - smooth(0.75, 1.15, e));
+          if (s.active !== false && e < crater * 1.1) f.lavaGlow[i] = Math.max(f.lavaGlow[i], (1 - smooth(crater * 0.3, crater * 1.1, e)) * str);
+        });
+        break;
+      }
+      case 'lava': {
+        const w0 = s.size / 2;
+        lineStroke(s, g, o, (i, x, y, d) => {
+          // Lobed, ropy edges.
+          const w = w0 * (1 + s.roughness * 0.45 * fbm(x, y, s.size * 0.9, px, seed, 5));
+          const c = 1 - smooth(w - px * 0.6, w + px * 0.6, d);
+          if (c <= 0) return;
+          if (er) {
+            f.lava[i] *= 1 - c;
+            f.lavaGlow[i] *= 1 - c;
+            return;
+          }
+          f.lava[i] = Math.max(f.lava[i], c * str);
+          if (s.active !== false) {
+            // Glowing through cracks in a dark crust, hottest along the middle.
+            const core = 1 - smooth(0, w * 0.8, d + w * 0.25 * fbm(x, y, s.size * 0.4, px, seed + 1, 3));
+            const cracks = 1 - smooth(0, 0.12, Math.abs(fbm(x, y, Math.max(s.size * 0.25, px * 2), px, seed + 2, 4)));
+            f.lavaGlow[i] = Math.max(f.lavaGlow[i], core * (0.25 + 0.75 * Math.max(cracks, core * core)) * str);
+          }
+        });
+        break;
+      }
       case 'zone':
         zoneOverride ??= new Int8Array(n).fill(-1);
         unionStroke(s, g, o, seed, (i, x, y, e, r) => {
@@ -611,7 +770,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
 
   // Mountain zones: automatic from how high the mountains are built, then anything painted by hand.
   for (let i = 0; i < n; i++) {
-    const b = f.mountain[i];
+    const b = Math.max(f.mountain[i], cone[i] * 1.4);
     let z: ZoneId = b < 0.03 ? 0 : b < 0.15 ? 1 : b < 0.35 ? 2 : b < 0.6 ? 3 : 4;
     if (zoneOverride && zoneOverride[i] >= 0) z = zoneOverride[i] as ZoneId;
     f.zone[i] = z;
@@ -643,6 +802,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
 
       // Hills: soft bumps with gentle gullies.
       const hl = hills[idx];
+      f.hill[idx] = hl;
       if (hl > 0) {
         const hh = 0.6 * (1 - Math.exp(-hl / 0.6));
         r += hh * 0.12 * (0.7 + 0.3 * fbm(x, y, 10, px, o.seed + 41, 5));
@@ -650,7 +810,8 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
 
       // Mountains: a body with a crest where the paint is thickest, and gullies down every slope.
       const m = f.mountain[idx];
-      if (m > 0) {
+      if (m > 0 && o.noRelief) r += m;
+      else if (m > 0) {
         // Peaks and saddles vary the body, so the slopes (and gullies) aren't all parallel.
         const ps = 45;
         const pk = (xx: number, yy: number) => ridged(xx, yy, ps, Math.max(px, ps / 4), o.seed + 84, 2, 0.5);
@@ -665,6 +826,14 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
         const gul = gullies(x, y, gx, gy, 24, Math.max(px, 2.5), o.seed + 85, 4, ga);
         r += m + pa * (p0 - 0.4) + ga * gul;
       }
+
+      // Volcanoes: a cone scored by gullies running down from the rim.
+      const cn = cone[idx];
+      if (cn > 0) {
+        r += cn;
+        if (!o.noRelief) r += gullies(x, y, coneGx[idx], coneGy[idx], 6, Math.max(px, 0.6), o.seed + 95, 4, cn * 0.12) * cn * 0.12;
+      }
+      if (f.lava[idx] > 0) r += f.lava[idx] * 0.004;
 
       // Plateaus: a flat top ringed by layered rock faces, gullied by erosion. Ramps make a slope.
       const pin = plateauIn[idx];
@@ -725,6 +894,53 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     }
   }
   return f;
+}
+
+/** Visit sample points within `R` km of (cx, cy), on every wrapped copy. */
+function eachNear(g: Grid, o: Options, cx0: number, cy: number, R: number, visit: (i: number, x: number, y: number, dx: number, dy: number) => void): void {
+  for (const off of o.wrapKm ? [0, -o.wrapKm, o.wrapKm] : [0]) {
+    const cx = cx0 + off;
+    const i0 = Math.max(0, Math.ceil((cx - R - g.x0) / g.px));
+    const i1 = Math.min(g.w - 1, Math.floor((cx + R - g.x0) / g.px));
+    const j0 = Math.max(0, Math.ceil((cy - R - g.y0) / g.px));
+    const j1 = Math.min(g.h - 1, Math.floor((cy + R - g.y0) / g.px));
+    for (let j = j0; j <= j1; j++) {
+      const y = g.y0 + j * g.px;
+      for (let i = i0; i <= i1; i++) {
+        const x = g.x0 + i * g.px;
+        visit(j * g.w + i, x, y, x - cx, y - cy);
+      }
+    }
+  }
+}
+
+/**
+ * A waterfall pouring down `cascade` (x, y points) with half-width `w` km: white water down the
+ * face, a pool where it lands at (qx, qy), and wet, fertile ground around (an oasis in dry land).
+ */
+function splash(f: Fields, g: Grid, o: Options, cascade: number[], qx: number, qy: number, w0: number, px: number): void {
+  // Drawn a little larger than life, like the rivers, so they show on the map.
+  const w = Math.max(w0, px * 1.2);
+  const R = Math.max(w * 3, 0.35, px * 2);
+  const green = 4 + w * 25;
+  const spray = w * 1.4 + Math.max(px, 0.15);
+  let reach = R + green;
+  for (let k = 0; k < cascade.length; k += 2) reach = Math.max(reach, Math.hypot(cascade[k] - qx, cascade[k + 1] - qy) + spray);
+  eachNear(g, o, qx, qy, reach, (i, x, y, dx, dy) => {
+    const dq = Math.hypot(dx, dy);
+    const pool = 1 - smooth(R - px * 0.5, R + px * 0.5, dq);
+    if (pool > 0 && pool >= f.water[i]) {
+      f.water[i] = pool;
+      f.waterKind[i] = 2;
+      f.waterDepth[i] = Math.max(f.waterDepth[i], 1 - dq / R);
+    }
+    const wet = 1 - smooth(R, R + green, dq);
+    if (wet > f.wet[i]) f.wet[i] = wet;
+    let near = Infinity;
+    for (let k = 0; k < cascade.length; k += 2) near = Math.min(near, Math.hypot(x - cascade[k], y - cascade[k + 1]));
+    const foam = (1 - smooth(spray * 0.6, spray, near)) * 0.95 + (1 - smooth(0, R * 1.3, dq)) * 0.4;
+    if (foam > f.foam[i]) f.foam[i] = Math.min(1, foam);
+  });
 }
 
 function polyLength(p: number[]): number {
@@ -905,6 +1121,16 @@ export interface PlaceInfo {
   cliff: boolean;
   /** A ramp joins the ground floor to the feature here: an easy way up or down. */
   ramp: boolean;
+  /** Fresh water here: a river or a lake (null on dry land and at sea). */
+  water: 'river' | 'lake' | null;
+  /** River width here, km (0 if no river). */
+  riverWidth: number;
+  /** A waterfall's white water here. */
+  waterfall: boolean;
+  /** Extra wetness and fertility (river banks, waterfall oases), 0–1. */
+  wet: number;
+  /** On a volcano or lava flow (rich ash soil, obsidian, sulfur, hot springs…). */
+  volcanic: boolean;
   /** Canyons, ravines and cliff faces block travel (ramps open them). */
   blocksTravel: boolean;
   whirlpool: Whirlpool | null;
@@ -927,6 +1153,11 @@ export function surfaceAt(surface: Surface, x: number, y: number, o: Options): P
     cliff,
     ramp,
     blocksTravel: !ramp && (f.canyon[0] > 0.5 || f.ravine[0] > 0.5 || cliff),
+    water: f.water[0] > 0.5 && f.ground[0] >= 1.5 ? (f.waterKind[0] === 1 ? 'river' : 'lake') : null,
+    riverWidth: f.waterKind[0] === 1 && f.water[0] > 0.3 ? Math.round(f.riverWidth[0] * 100) / 100 : 0,
+    waterfall: f.foam[0] > 0.5,
+    wet: Math.round(f.wet[0] * 100) / 100,
+    volcanic: f.volcano[0] > 0.3 || f.lava[0] > 0.3,
     whirlpool: w,
   };
 }

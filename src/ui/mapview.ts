@@ -1,6 +1,7 @@
 import { brushInfo, roundPath, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
+import { finishCourse, onWater } from '../core/water';
 import { formatDistance, formatLatitude, KM_PER_DEGREE, kmToMiles, milesToKm } from '../core/units';
 import type { World } from '../core/world';
 import { MapCache, type MapLook } from '../render/mapcache';
@@ -94,6 +95,7 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
+    drawRoute(g, r);
     drawCursor(g, r);
     drawScale(g, r);
     busy.hidden = !cache.busy;
@@ -157,6 +159,37 @@ export function createMapView(o: MapViewOptions): MapView {
     g.lineTo(x1, y1);
     g.stroke();
     g.setLineDash([]);
+  }
+
+  /** Point mode: the points clicked so far, joined by dashes, and the next leg to the cursor. */
+  function drawRoute(g: CanvasRenderingContext2D, r: DOMRect) {
+    if (!routing) return;
+    const c = routing.ctrl;
+    const pts: number[] = [];
+    for (let k = 0; k < c.length; k += 2) pts.push(...toScreen(c[k], c[k + 1], r));
+    g.save();
+    g.lineWidth = 2;
+    g.setLineDash([6, 5]);
+    g.strokeStyle = routing.brush === 'lava' ? '#ff7a26' : '#bfe6ff';
+    g.beginPath();
+    for (let k = 0; k < pts.length; k += 2) (k ? g.lineTo : g.moveTo).call(g, pts[k], pts[k + 1]);
+    if (hover) {
+      const [hx, hy] = toScreen(hover.x, hover.y, r);
+      g.lineTo(hx, hy);
+    }
+    g.stroke();
+    g.setLineDash([]);
+    for (let k = 0; k < pts.length; k += 2) {
+      g.fillStyle = k === 0 ? '#ffffff' : g.strokeStyle;
+      g.strokeStyle = '#0b2236';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(pts[k], pts[k + 1], k === 0 ? 6 : 4.5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.strokeStyle = routing.brush === 'lava' ? '#ff7a26' : '#bfe6ff';
+    }
+    g.restore();
   }
 
   function drawCursor(g: CanvasRenderingContext2D, r: DOMRect) {
@@ -234,9 +267,88 @@ export function createMapView(o: MapViewOptions): MapView {
   let panning = false;
   let spaceDown = false;
 
+  // Point mode for rivers and lava: the points clicked so far.
+  let routing: { brush: 'river' | 'lava'; ctrl: number[] } | null = null;
+  const pointsMode = (t: ToolState) => (t.tool === 'river' || t.tool === 'lava') && t.settings.route === 'points' && !t.erase;
+  const opts = () => {
+    const s = o.world().settings;
+    return { seed: s.seed, wrapKm: s.edges === 'wrap' ? s.widthKm : 0 };
+  };
+
+  /** Bounds of a river and every river downstream of it (they all widen when it joins). */
+  const downstreamBounds = (st: Stroke): [number, number, number, number] => {
+    let b = strokeBounds(st);
+    const seen = new Set<number>([st.id]);
+    let next = st.joins?.id;
+    while (next !== undefined && !seen.has(next)) {
+      seen.add(next);
+      const r = o.world().surface.strokes.find((s) => s.id === next);
+      if (!r) break;
+      const rb = strokeBounds(r);
+      b = [Math.min(b[0], rb[0]), Math.min(b[1], rb[1]), Math.max(b[2], rb[2]), Math.max(b[3], rb[3])];
+      next = r.joins?.id;
+    }
+    return b;
+  };
+
+  /** Settle a river or lava flow: find its course (point mode), what it joins and where it falls. */
+  const settleCourse = (live: Stroke) => {
+    const course = finishCourse(o.world().surface, live, opts());
+    const done: Stroke = { ...live, pts: course.pts, joins: course.joins, falls: course.falls.length ? course.falls : undefined };
+    o.update(done);
+    cache.updateStroke(o.world().surface, done, downstreamBounds(done));
+    schedule();
+  };
+
+  const finishRoute = () => {
+    if (!routing) return;
+    const { brush, ctrl } = routing;
+    routing = null;
+    if (ctrl.length < 4) {
+      o.notice('Click at least two points: where it starts, and where it goes.');
+      schedule();
+      return;
+    }
+    const t = o.tool();
+    o.notice(brush === 'river' ? 'Finding the river’s course…' : 'Finding the lava’s course…');
+    schedule();
+    // Let the notice show before the work starts.
+    setTimeout(() => {
+      const live = o.begin({ ...t.settings, brush, erase: undefined, pts: roundPath(ctrl.slice(0, 4)), route: 'points', ctrl: roundPath(ctrl) });
+      settleCourse(live);
+    }, 30);
+  };
+
   const startStroke = (e: PointerEvent, x: number, y: number) => {
     const t = o.tool();
     if (t.tool === 'pan') return false;
+    if (pointsMode(t)) {
+      const brush = t.tool as 'river' | 'lava';
+      if (!routing || routing.brush !== brush) routing = { brush, ctrl: [] };
+      // A click close to a river (on screen) lands on it, so tributaries are easy to join.
+      let snapped = false;
+      if (brush === 'river' && routing.ctrl.length >= 2) {
+        let best = 12 / view.scale;
+        for (const s of o.world().surface.strokes) {
+          if (s.brush !== 'river' || s.erase) continue;
+          for (let k = 0; k < s.pts.length; k += 2) {
+            const d = Math.hypot(s.pts[k] - x, s.pts[k + 1] - y);
+            if (d < best) {
+              best = d;
+              x = s.pts[k];
+              y = s.pts[k + 1];
+              snapped = true;
+            }
+          }
+        }
+      }
+      routing.ctrl.push(x, y);
+      // A river ends as soon as a point lands on water (sea, lake or another river).
+      if (brush === 'river' && routing.ctrl.length >= 4 && (snapped || onWater(o.world().surface, x, y, opts()))) finishRoute();
+      else o.notice(routing.ctrl.length === 2 ? 'Now click points along the way. Press Enter to finish (a river also finishes on water), Backspace to take back a point, Esc to cancel.' : `${routing.ctrl.length / 2} points.`);
+      schedule();
+      return true;
+    }
     const st: Omit<Stroke, 'id'> = { ...t.settings, brush: t.tool, erase: t.erase || undefined, pts: [x, y] };
     st.pts = roundPath(st.pts);
     const live = o.begin(st);
@@ -277,7 +389,10 @@ export function createMapView(o: MapViewOptions): MapView {
   };
 
   const finishStroke = () => {
+    const st = drawing?.stroke;
     drawing = null;
+    // A drawn river still joins the river it ends on and falls over cliffs.
+    if (st && (st.brush === 'river' || st.brush === 'lava') && !st.erase) settleCourse(st);
     schedule();
   };
 
@@ -382,9 +497,18 @@ export function createMapView(o: MapViewOptions): MapView {
     if (p.ground === 'land') {
       if (p.zone) parts.push(ZONES[p.zone - 1].name);
       if (p.plateau) parts.push('Plateau');
-      if (p.blocksTravel) parts.push('Canyon or ravine (blocks travel)');
+      if (p.blocksTravel) parts.push(p.cliff ? 'Cliff (blocks travel)' : 'Canyon or ravine (blocks travel)');
       const cover = Object.entries(p.cover).sort((a, b) => b[1] - a[1])[0];
       if (cover) parts.push(brushInfo(cover[0] as BrushId).name);
+      if (p.water === 'river') {
+        const ft = p.riverWidth * 3280.84;
+        parts.push(`River, ${ft < 5280 ? `${Math.round(ft / 10) * 10} ft (${Math.round(p.riverWidth * 1000)} m)` : formatDistance(p.riverWidth)} wide`);
+      }
+      if (p.water === 'lake') parts.push('Lake');
+      if (p.waterfall) parts.push('Waterfall');
+      if (p.wet > 0.4 && !p.water) parts.push('Well watered');
+      if (p.volcanic) parts.push('Volcanic');
+      if (p.ramp) parts.push('Ramp');
     }
     if (p.whirlpool) parts.push(p.whirlpool.dangerous ? 'Whirlpool (dangerous)' : 'Whirlpool');
     return `${formatLatitude(latitudeAt(s, y))} · ${formatDistance(xw)} from the west edge · ${parts.join(' · ')}`;
@@ -396,6 +520,21 @@ export function createMapView(o: MapViewOptions): MapView {
     if (e.code === 'Space') {
       spaceDown = true;
       e.preventDefault();
+    }
+    if (routing) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finishRoute();
+      } else if (e.key === 'Escape') {
+        routing = null;
+        o.notice('River cancelled.');
+        schedule();
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        routing.ctrl.splice(-2, 2);
+        if (!routing.ctrl.length) routing = null;
+        schedule();
+      }
     }
   };
   const keyup = (e: KeyboardEvent) => {
