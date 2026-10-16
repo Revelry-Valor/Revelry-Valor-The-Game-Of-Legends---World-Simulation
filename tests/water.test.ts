@@ -83,3 +83,28 @@ describe('volcanoes and lakes', () => {
     expect(surfaceAt(s, 500, 300, o).ground).toBe('land');
   });
 });
+
+describe('river settings', () => {
+  it('Width sets how wide the river starts', () => {
+    const s = world(land);
+    const narrow = river(s, [100, 200, 900, 200], { width: 0.1 });
+    const wide = river(s, [100, 400, 900, 400], { width: 1.5 });
+    const net = riverNetwork(s);
+    expect(widthForFlow(flowAt(net.get(narrow.id)!, 0))).toBeCloseTo(0.1, 5);
+    expect(widthForFlow(flowAt(net.get(wide.id)!, 0))).toBeCloseTo(1.5, 5);
+  });
+
+  it('Wandering 0 keeps the course straight; more lets it bend up to that far', () => {
+    const s = world(land);
+    const offCourse = (r: Stroke) => {
+      let m = 0;
+      for (let k = 0; k < r.pts.length; k += 2) m = Math.max(m, Math.abs(r.pts[k + 1] - 300));
+      return m;
+    };
+    const straight = river(s, [100, 300, 900, 300], { wander: 0 });
+    const winding = river(s, [100, 300, 900, 300], { wander: 20 });
+    expect(offCourse(straight)).toBeLessThan(3);
+    expect(offCourse(winding)).toBeGreaterThan(8);
+    expect(offCourse(winding)).toBeLessThanOrEqual(20 + 3);
+  });
+});

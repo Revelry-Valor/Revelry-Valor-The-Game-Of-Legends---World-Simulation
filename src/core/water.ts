@@ -24,6 +24,12 @@ const KM_PER_FLOW = 400;
 /** Width of a river (km) carrying this much water. */
 export const widthForFlow = (flow: number) => 0.06 + 0.45 * Math.sqrt(Math.max(0, flow));
 
+/** Water at a river's source: from its Width setting (km), or from older saves' strength. */
+export function sourceFlow(s: Stroke): number {
+  if (s.width === undefined) return s.strength;
+  return Math.max(0, (s.width - 0.06) / 0.45) ** 2;
+}
+
 export interface RiverInfo {
   stroke: Stroke;
   /** Distance along the course at each path point. */
@@ -54,9 +60,9 @@ export function riverNetwork(surface: Surface): Map<number, RiverInfo> {
     const known = endFlow.get(id);
     if (known !== undefined) return known;
     const r = map.get(id)!;
-    if (visiting.has(id)) return r.stroke.strength;
+    if (visiting.has(id)) return sourceFlow(r.stroke);
     visiting.add(id);
-    let f = r.stroke.strength + r.total / KM_PER_FLOW;
+    let f = sourceFlow(r.stroke) + r.total / KM_PER_FLOW;
     for (const other of map.values()) if (other.stroke.joins?.id === id) f += flowAtEnd(other.stroke.id);
     visiting.delete(id);
     endFlow.set(id, f);
@@ -72,7 +78,7 @@ export function riverNetwork(surface: Surface): Map<number, RiverInfo> {
 
 /** Water carried at a distance along a river. */
 export function flowAt(r: RiverInfo, t: number): number {
-  let f = r.stroke.strength + Math.max(0, t) / KM_PER_FLOW;
+  let f = sourceFlow(r.stroke) + Math.max(0, t) / KM_PER_FLOW;
   for (const tr of r.tributaries) if (tr.at <= t) f += tr.flow;
   return f;
 }
@@ -128,7 +134,9 @@ function stepCost(f: Fields, from: number, to: number): number {
   c += 6 * f.face[to];
   // Canyons and ravines lead the water along.
   if (f.canyon[to] > 0.4 || f.ravine[to] > 0.4) c *= 0.3;
-  if (isWater(f, to)) c = 0.3;
+  // Rivers run across land, not out to sea and back; a lake can be passed through.
+  if (f.ground[to] < 1.5) c += 60;
+  else if (f.water[to] > 0.5) c = 1;
   return c;
 }
 
@@ -311,15 +319,16 @@ function straightenFaces(p: number[], lg: LandGrid): number[] {
  * Natural winding: big bends and small meanders, strongest on flat open ground and weakest in
  * mountains and canyons. The ends stay where they are.
  */
-function meander(p: number[], lg: LandGrid, seed: number, scale: number): number[] {
+function meander(p: number[], lg: LandGrid, seed: number, wander: number): number[] {
+  if (wander <= 0) return p;
   const out = p.slice();
   const n = p.length / 2;
   let t = 0;
-  const total = (() => {
-    let l = 0;
-    for (let k = 1; k < n; k++) l += Math.hypot(p[2 * k] - p[2 * k - 2], p[2 * k + 1] - p[2 * k - 1]);
-    return l;
-  })();
+  let total = 0;
+  for (let k = 1; k < n; k++) total += Math.hypot(p[2 * k] - p[2 * k - 2], p[2 * k + 1] - p[2 * k - 1]);
+  // Bends about five times as long as they are wide, with smaller meanders on top.
+  const longBend = Math.max(wander * 5.5, 6);
+  const shortBend = Math.max(wander * 1.4, 2);
   for (let k = 1; k < n - 1; k++) {
     t += Math.hypot(p[2 * k] - p[2 * k - 2], p[2 * k + 1] - p[2 * k - 1]);
     const dx = p[2 * k + 2] - p[2 * k - 2];
@@ -328,10 +337,14 @@ function meander(p: number[], lg: LandGrid, seed: number, scale: number): number
     const c = cellOf(lg, p[2 * k], p[2 * k + 1]);
     const f = lg.f;
     const free = (1 - Math.min(1, f.face[c] * 2)) / (1 + 6 * f.mountain[c] + 3 * f.hill[c] + 4 * f.canyon[c]);
-    const big = noise2(t / (scale * 12), 0.5, seed) * scale * 2.6;
-    const small = noise2(t / (scale * 3), 3.5, seed + 1) * scale * 0.9;
-    const ends = Math.min(1, t / (scale * 3), (total - t) / (scale * 3));
-    const off = (big + small) * free * ends;
+    // Rolling bends whose rhythm and size drift along the river, with small meanders on top.
+    const phase = (t / longBend) * Math.PI * 2 + 3.5 * noise2(t / (longBend * 2), 0.5, seed);
+    const size = 0.65 + 0.35 * noise2(t / (longBend * 1.3), 7.5, seed + 2);
+    const second = 0.3 * Math.sin(phase * 2.37 + 3 * noise2(t / longBend, 9.5, seed + 3));
+    const small = noise2(t / shortBend, 3.5, seed + 1) * 0.2;
+    const ends = Math.min(1, t / (wander * 2 + 1), (total - t) / (wander * 2 + 1));
+    // Never further than the Wandering distance from the course.
+    const off = Math.max(-1, Math.min(1, (Math.sin(phase) + second) * size * 0.85 + small)) * wander * free * ends;
     out[2 * k] = p[2 * k] + (-dy / len) * off;
     out[2 * k + 1] = p[2 * k + 1] + (dx / len) * off;
   }
@@ -380,7 +393,7 @@ export function finishCourse(surface: Surface, s: Stroke, o: Options): Course {
     }
     pts = straightenFaces(smoothPath(resample(pts, lg.g.px * 1.5), 3), lg);
     // Lava runs thick and straight; rivers wind.
-    if (s.brush === 'river') pts = straightenFaces(meander(resample(pts, Math.max(lg.g.px * 0.6, 0.3)), lg, seed, Math.max(lg.g.px * 2, 3)), lg);
+    if (s.brush === 'river') pts = straightenFaces(smoothPath(meander(resample(pts, Math.max(lg.g.px * 0.6, 0.3)), lg, seed, s.wander ?? 5), 1), lg);
   } else {
     pts = s.pts.slice();
   }

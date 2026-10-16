@@ -78,6 +78,12 @@ export function createToolPanel(changed: () => void): ToolPanel {
           choice<string>('Zone', [{ value: '0', label: 'Automatic' }, ...ZONES.map((z) => ({ value: String(z.id), label: z.name }))], String(s.zone ?? 2), (v) => { s.zone = Number(v) as ZoneId; changed(); }),
         );
       }
+      if (state.tool === 'river') {
+        fields.push(
+          numberField({ label: 'Width', value: Math.round(kmToMiles(s.width ?? 0.2) * 100) / 100, min: 0.01, max: 3, step: 0.01, unit: 'miles', slider: true, hint: 'Width at the source. It widens downstream, and wherever another river joins.', change: (v) => { if (v > 0) s.width = milesToKm(v); changed(); } }),
+          numberField({ label: 'Wandering', value: Math.round(kmToMiles(s.wander ?? 5) * 10) / 10, min: 0, max: 50, step: 0.5, unit: 'miles', slider: true, hint: 'How far the river may wander from its course in winding bends. 0 is no wandering. (Points mode.)', change: (v) => { s.wander = milesToKm(Math.max(0, v)); changed(); } }),
+        );
+      }
       if (state.tool === 'river' || state.tool === 'lava') {
         fields.push(choice<'points' | 'draw'>('Course', [{ value: 'points', label: 'Points' }, { value: 'draw', label: 'Draw' }], s.route ?? 'points', (v) => { s.route = v; renderSettings(); changed(); }));
       }
@@ -89,7 +95,7 @@ export function createToolPanel(changed: () => void): ToolPanel {
       }
       const strengthName = state.tool === 'river' ? 'Water at the source' : state.tool === 'volcano' ? 'Height' : b.group === 'Land & Sea' ? 'Opacity' : b.group === 'Ground cover' ? 'Density' : 'Strength';
       const strengthHint = state.tool === 'river' ? 'A spring-fed stream or a river from a big lake. Rivers grow on their way, and with every river that joins them.' : b.group === 'Relief' ? 'How bold: for mountains, bigger peaks.' : 'How fully it covers.';
-      if (state.tool !== 'zone') fields.push(pct(strengthName, 'strength', strengthHint));
+      if (state.tool !== 'zone' && state.tool !== 'river') fields.push(pct(strengthName, 'strength', strengthHint));
     }
     if ((b.kind !== 'point' || state.tool === 'crater' || state.tool === 'volcano') && (state.tool !== 'river' || state.erase)) {
       fields.push(

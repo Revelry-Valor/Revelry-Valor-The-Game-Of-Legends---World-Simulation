@@ -87,7 +87,8 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
   winds through low ground and valleys, goes around mountains, hills and plateaus, follows
   canyons, and meanders where the land is flat. **Draw:** drag the course yourself.
 - Rivers grow downstream, and one that ends in another makes it bigger from there on (a click
-  near a river snaps onto it). "Water at the source" sets how big it starts.
+  near a river snaps onto it). **Width** sets how wide it starts; **Wandering** sets how far (in
+  miles) it may bend away from its course, 0 meaning a straight course.
 - **Waterfalls** form by themselves where a river runs off a plateau, over a cliff or into a
   gorge: white water down the face, a pool at the foot, and green, fertile ground around (an
   oasis in a desert). They can also be placed by hand.

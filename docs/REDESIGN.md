@@ -231,7 +231,7 @@ A separate tool. You draw lines along crests and edges by hand (never suggested 
 - **How the course is generated (decided):** with no heights, the river uses the painted features as terrain. Between your points it winds through low ground and the valleys between ranges, goes around mountains, hills and plateaus, and follows ravines and canyons where they lead the right way.
 - **Joining:** each river that flows into another makes the river below it bigger from that point on.
 - Rivers look realistic, winding naturally.
-- **Built (Phase 2):** a click near a river (on screen) snaps onto it, so joining is easy. A river's width comes from the water it carries: "Water at the source", plus what it gathers along its length, plus every river that joins it. Rivers are drawn a little wider than life on the map, as map makers do, so they read at any zoom. Waterfalls form where a course runs off a plateau top, over a cliff face or into a gorge (only going down; one per drop).
+- **Built (Phase 2):** a click near a river (on screen) snaps onto it, so joining is easy. River brush sliders: **Width** (at the source) and **Wandering** (how far it may bend from its course, in miles; 0 = none). A river's width comes from the water it carries: its source width, plus what it gathers along its length, plus every river that joins it. Rivers are drawn a little wider than life on the map, as map makers do, so they read at any zoom. Waterfalls form where a course runs off a plateau top, over a cliff face or into a gorge (only going down; one per drop).
 
 **Lakes**
 - Placed by you, or created automatically by rifts and waterfalls. Rainfall never creates lakes on its own.

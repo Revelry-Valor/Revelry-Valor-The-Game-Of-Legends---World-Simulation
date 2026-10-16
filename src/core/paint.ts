@@ -145,6 +145,10 @@ export interface Stroke {
   zone?: ZoneId;
   /** Whirlpools: dangerous to ships. */
   dangerous?: boolean;
+  /** Rivers: width at the source (km); it widens downstream and where rivers join. */
+  width?: number;
+  /** Rivers in point mode: how far (km) the river may wander from its course; 0 = not at all. */
+  wander?: number;
   /** Rivers and lava flows: drawn by hand, or routed through clicked points. */
   route?: 'draw' | 'points';
   /** Rivers and lava flows in point mode: the points that were clicked (x, y pairs). */
@@ -181,6 +185,7 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'zone' ? { zone: 2 as ZoneId } : {}),
     ...(id === 'whirlpool' ? { dangerous: true } : {}),
     ...(id === 'river' || id === 'lava' ? { route: 'points' as const, variation: 0 } : {}),
+    ...(id === 'river' ? { width: milesToKm(0.1), wander: milesToKm(3) } : {}),
     ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
   };
 }
