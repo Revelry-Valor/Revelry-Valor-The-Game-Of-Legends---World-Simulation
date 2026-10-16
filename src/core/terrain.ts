@@ -56,8 +56,10 @@ export interface Fields {
   shadow: Float32Array;
   /** Plateau tops, 0–1. */
   plateau: Float32Array;
-  /** Ramps up a cliff or plateau rim, 0–1. */
+  /** Ramps joining the ground floor to a raised or sunken feature, 0–1. */
   ramp: Float32Array;
+  /** The worn track down the middle of a ramp, 0–1. */
+  track: Float32Array;
   /** Fresh crater ejecta and rays, 0–1 (lighter ground). */
   ejecta: Float32Array;
   /** For lighting the painting only. */
@@ -368,6 +370,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     scree: new Float32Array(n),
     plateau: new Float32Array(n),
     ramp: new Float32Array(n),
+    track: new Float32Array(n),
     ejecta: new Float32Array(n),
     relief: new Float32Array(n),
   };
@@ -385,6 +388,8 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
   const plateauEro = new Float32Array(n);
   // Hollows and bumps that replace what was under them: canyons, ravines, craters.
   const cut = new Float32Array(n);
+  // The same hollows as an even slope, for where a ramp leads down into them.
+  const cutSmooth = new Float32Array(n);
   let zoneOverride: Int8Array | null = null;
   const px = g.px;
 
@@ -471,7 +476,16 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
       case 'ramp':
         unionStroke(s, g, o, seed, (i, x, y, e, r) => {
           const c = edge(s, x, y, e, r, px, seed);
-          if (c > 0) f.ramp[i] = er ? f.ramp[i] * (1 - c) : Math.max(f.ramp[i], c * str);
+          if (c <= 0) return;
+          if (er) {
+            f.ramp[i] *= 1 - c;
+            f.track[i] *= 1 - c;
+            return;
+          }
+          f.ramp[i] = Math.max(f.ramp[i], c * str);
+          // A track along the middle, wandering a little.
+          const tr = (1 - smooth(0.12, 0.28, e + 0.08 * fbm(x, y, s.size, px, seed + 2, 3))) * str;
+          if (tr > f.track[i]) f.track[i] = tr;
         });
         break;
       case 'cliffs': {
@@ -547,6 +561,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
           if (er) {
             buf[i] *= e;
             cut[i] *= e;
+            cutSmooth[i] *= e;
             return;
           }
           const c = 1 - smooth(0.85, 1, e);
@@ -555,6 +570,8 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
           if (canyon) {
             const wall = Math.max(0, (e - 0.14) / 0.86);
             depth = D * (1 - terraces(wall + 0.06 * fbm(x, y, r * 0.8, px, seed + 3, 4), 3 + Math.round(ero * 3)));
+            const even = D * (1 - wall);
+            if (-even < cutSmooth[i]) cutSmooth[i] = -even;
             const a = smooth(0.08, 0.2, e) * (1 - smooth(0.92, 1, e));
             if (a > f.face[i]) {
               f.face[i] = a;
@@ -564,6 +581,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
           } else {
             // A narrow, deep crack.
             depth = D * Math.sqrt(1 - e);
+            if (-D * (1 - e) < cutSmooth[i]) cutSmooth[i] = -D * (1 - e);
           }
           if (-depth < cut[i]) cut[i] = -depth;
         });
@@ -689,7 +707,8 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
         }
       }
 
-      r += cut[idx];
+      // A ramp into a canyon or ravine replaces its steps with an even slope down to the floor.
+      r += f.ramp[idx] > 0 && cut[idx] < 0 ? cut[idx] + (Math.min(cutSmooth[idx], 0) - cut[idx]) * f.ramp[idx] : cut[idx];
       if (dunes && dunes[idx] > 0) {
         const ph = (x * 0.8 + y * 0.6) / 2.2 + 2.5 * fbm(x, y, 18, px, o.seed + 5);
         const fr = ph - Math.floor(ph);
@@ -856,6 +875,25 @@ export function whirlpools(surface: Surface): Whirlpool[] {
   return list;
 }
 
+/**
+ * Ramps are the way peoples get between the ground floor and a raised or sunken feature
+ * (plateaus, cliffs, canyons). The simulation treats each one as an access point with two ends.
+ */
+export interface AccessPoint {
+  id: number;
+  /** The two ends of the ramp, km. */
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  /** Width in km. */
+  width: number;
+}
+
+export function accessPoints(surface: Surface): AccessPoint[] {
+  return surface.strokes
+    .filter((s) => s.brush === 'ramp' && !s.erase)
+    .map((s) => ({ id: s.id, from: { x: s.pts[0], y: s.pts[1] }, to: { x: s.pts[s.pts.length - 2], y: s.pts[s.pts.length - 1] }, width: s.size }));
+}
+
 /** What the simulation sees at one place. */
 export interface PlaceInfo {
   ground: GroundClass;
@@ -865,7 +903,7 @@ export interface PlaceInfo {
   plateau: boolean;
   /** A cliff or rock face here (no ramp). */
   cliff: boolean;
-  /** A ramp makes the way up easy here. */
+  /** A ramp joins the ground floor to the feature here: an easy way up or down. */
   ramp: boolean;
   /** Canyons, ravines and cliff faces block travel (ramps open them). */
   blocksTravel: boolean;

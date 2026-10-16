@@ -153,7 +153,7 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
           // Rock faces show their layers.
           if (f.face[k] > 0) c = mix(c, strataColour(f.strata[k], false), f.face[k]);
           if (f.ravine[k] > 0) c = mix(c, SAT.crack, smooth(0.2, 0.8, f.ravine[k]) * 0.9);
-          if (f.ramp[k] > 0) c = mix(c, SAT.path, f.ramp[k] * 0.2);
+          if (f.ramp[k] > 0) c = mix(c, SAT.path, f.ramp[k] * 0.2 + f.track[k] * 0.45);
           const fs = f.face[k] > 0 ? 1 + (f.faceShade[k] - 1) * f.face[k] : 1;
           const lit = (0.55 + 0.45 * bright) * fs * (1 - f.shadow[k] * 0.6);
           c = [c[0] * lit, c[1] * lit, c[2] * lit];
@@ -187,6 +187,8 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
           if (f.canyon[k] > 0) c = mix(c, PAPER.shade, smooth(0, 0.7, f.canyon[k]) * 0.3);
           if (f.ravine[k] > 0) c = mix(c, PAPER.ink, smooth(0.3, 0.8, f.ravine[k]) * 0.85);
           if (f.ejecta[k] > 0) c = mix(c, [250, 244, 226], f.ejecta[k] * 0.4);
+          // Ramps: a dashed track.
+          if (f.track[k] > 0.3 && Math.sin((x + y) / Math.max(px * 3, 0.3)) > 0) c = mix(c, PAPER.ink, f.track[k] * 0.6);
           col = mix(sea, c, land);
         }
         // Inked coastline.

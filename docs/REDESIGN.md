@@ -149,7 +149,7 @@ The world can have up to five layers. The extra layers are optional and shown wh
 - **Look:** shaded relief like an atlas; mountains tinted from olive foothills through tan and rock to snow.
 - **Cliffs:** drawn along the top edge; only the face is drawn, on the low side (rock lip, layered face, scree, cast shadow). The high side is implied.
 - **Plateaus:** flat top ringed by layered rock faces, scree and a cast shadow; an **Erosion** setting notches the rim. Plateaus, cliffs and canyons all have the Erosion setting.
-- **Ramp brush:** paint across a plateau rim or cliff for an easy way up (opens travel there).
+- **Ramp brush:** draw from the ground floor up onto a plateau or cliff top, or down into a canyon. It joins the two (a graded slope with a worn track) and is recorded as an **access point**: the peoples of the world use ramps to reach these places, and travel through cliffs, rims and canyon walls is open only there.
 - **Canyons:** terraced, layered walls, flat floor, side canyons cutting an irregular rim. **Ravines:** narrow, deep, jagged cracks.
 - **Craters:** size means meteor size. Small: simple bowls. Large: flat floor, slumped terraces, central peak, rocky layered walls, rays. A new crater blasts away what was there, older craters included.
 

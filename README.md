@@ -56,7 +56,9 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 - **Cliffs:** draw along the top edge; only the face shows, on the low side (a rock lip,
   layered face with runnels, scree below, and a shadow when it faces away from the light).
   The high side is just the land you drew it on. Erosion setting.
-- **Ramp:** paint across a plateau rim or cliff to make an easy way up.
+- **Ramp:** draw from the ground floor up onto a plateau or cliff top, or down into a canyon:
+  a graded slope with a worn track. Each ramp is an access point the world's peoples will use
+  to reach those places.
 - **Canyon / gorge:** terraced, layered walls, a flat floor, and side canyons cutting into an
   irregular rim (Erosion setting). **Ravine:** a narrow, deep, jagged crack.
 - **Crater:** sized like a real impact: small ones are bowls; big ones have a flat floor,

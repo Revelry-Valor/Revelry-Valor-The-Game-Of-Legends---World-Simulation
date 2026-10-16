@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { brushDefaults, emptySurface, snapSpur, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { defaultSettings } from '../src/core/settings';
-import { evaluate, surfaceAt, whirlpools } from '../src/core/terrain';
+import { accessPoints, evaluate, surfaceAt, whirlpools } from '../src/core/terrain';
 import { createWorld, expandWorld } from '../src/core/world';
 import { parseWorld } from '../src/core/storage';
 import { renderPicture } from '../src/render/paintmap';
@@ -165,5 +165,14 @@ describe('brushes paint like a paint program', () => {
     expect(surfaceAt(cliff, 200, 20, o).blocksTravel).toBe(false);
     const ramped = paint(land, ['cliffs', [0, 0, 400, 0], { size: 20, side: 1, roughness: 0, erosion: 0 }], ['ramp', [200, -3], { size: 20 }]);
     expect(surfaceAt(ramped, 200, -3, o).blocksTravel).toBe(false);
+  });
+
+  it('a ramp joins the ground floor to a canyon floor, and is listed as an access point', () => {
+    const land: [BrushId, number[], Partial<Stroke>?] = ['land', [0, 0, 400, 0], { size: 600 }];
+    const canyon: [BrushId, number[], Partial<Stroke>?] = ['canyon', [0, 0, 400, 0], { size: 40, roughness: 0, erosion: 0 }];
+    expect(surfaceAt(paint(land, canyon), 200, 12, o).blocksTravel).toBe(true);
+    const ramped = paint(land, canyon, ['ramp', [200, 30, 200, 0], { size: 16 }]);
+    expect(surfaceAt(ramped, 200, 12, o).blocksTravel).toBe(false);
+    expect(accessPoints(ramped)).toEqual([{ id: 3, from: { x: 200, y: 30 }, to: { x: 200, y: 0 }, width: 16 }]);
   });
 });
