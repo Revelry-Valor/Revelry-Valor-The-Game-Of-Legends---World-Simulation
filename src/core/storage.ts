@@ -1,5 +1,6 @@
 import { CLIMATE_DEFAULTS, defaultSettings, validateSettings } from './settings';
 import { newWorldId, WORLD_FORMAT, type World } from './world';
+import { BRUSHES, emptySurface, type Surface } from './paint';
 
 /** Where saved worlds live: the browser's local storage, or anything shaped like it (tests). */
 export interface KeyValueStore {
@@ -75,9 +76,21 @@ export function parseWorld(text: string): World {
     id: typeof w.id === 'string' && w.id ? w.id : newWorldId(),
     settings,
     layers: { underdark: false, surface: true, canopy: false, sky1: false, sky2: false, sky3: false, ...(w.layers ?? {}) },
+    surface: readSurface(w.surface),
     createdAt: typeof w.createdAt === 'number' ? w.createdAt : now,
     updatedAt: typeof w.updatedAt === 'number' ? w.updatedAt : now,
   };
+}
+
+/** Painted strokes from a save, dropping any that are damaged. Worlds from format 1 have none. */
+function readSurface(raw: unknown): Surface {
+  const s = raw as Partial<Surface> | undefined;
+  if (!s || !Array.isArray(s.strokes)) return emptySurface();
+  const strokes = s.strokes.filter(
+    (k) => k && typeof k.id === 'number' && BRUSHES.some((b) => b.id === k.brush) && Array.isArray(k.pts) && k.pts.length >= 2 && k.pts.length % 2 === 0 && k.pts.every(Number.isFinite) && k.size > 0,
+  );
+  const top = strokes.reduce((m, k) => Math.max(m, k.id), 0);
+  return { strokes, nextId: Math.max(top + 1, typeof s.nextId === 'number' ? s.nextId : 1) };
 }
 
 /** Load a saved world (null if there is none with this id or it can't be read). */

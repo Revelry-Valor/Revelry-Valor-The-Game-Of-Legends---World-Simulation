@@ -20,8 +20,9 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 | Phase | Content | State |
 |---|---|---|
 | 0 | Foundations: world settings, layers, save/load, start screen, canvas expanding | Done |
-| 1 | Land & painting | Next |
-| 2–13 | Water, climate, geography, data creators, peoples, settlements, culture & tech, politics, war, mana, other layers, globe | Planned |
+| 1 | Land & painting: Land & Sea, feature brushes, mountain zones, satellite and paper looks | Done (for review) |
+| 2 | Water: rivers, lakes, waterfalls | Next |
+| 3–13 | Climate, geography, data creators, peoples, settlements, culture & tech, politics, war, mana, other layers, globe | Planned |
 
 ### What Phase 0 does
 
@@ -36,6 +37,28 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
   extends its latitudes; nothing already on the map moves.
 - **World settings:** edit the planet and climate from inside the world.
 - Worlds save in the browser (and autosave every 30 seconds).
+
+### What Phase 1 does
+
+- **Painting is stored as strokes, never cells.** Each stroke is a path in kilometres with its
+  brush settings. The picture and the simulation's "what is here?" are both worked out from the
+  strokes, so the land is the same at every zoom.
+- **Land & Sea:** Land, Shallow sea and Deep sea brushes. A soft land edge leaves a strip of shallows.
+- **Relief:** Mountains (Range, Spur that snaps onto a range and tapers, Massif; a Side ridges
+  setting), Hills, Plateau, Cliffs (choose the high side), Canyon / gorge and Ravine (both block
+  travel), Crater.
+- **Ground cover:** Forest, Jungle, Grassland, Tundra, Marsh / swamp, Dunes, Badlands, Salt flats,
+  Glacier / ice, Beach / shore.
+- **Sea:** Whirlpools, dangerous to ships or harmless.
+- **Mountain zones:** foothills, highlands, high mountains and peaks fill in automatically from
+  how bold the mountains are; the Zone brush repaints them by hand. A view shows them with what
+  each zone means for travel and settling.
+- **Brush settings:** size, strength, softness, roughness, detail, variation. Erase removes only
+  the selected brush's layer. Undo and redo.
+- **Looks:** Satellite (realistic) and Paper (drawn). Height is shown only by light and shade.
+- **Moving around:** drag with the Move tool, hold Space, or drag with the right mouse button;
+  scroll or pinch to zoom.
+- **Keys:** Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo, Ctrl+S save, E erase, [ and ] brush size.
 
 ## Developing
 

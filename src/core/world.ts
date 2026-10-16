@@ -1,5 +1,6 @@
 import { KM_PER_DEGREE } from './units';
 import { southLatitude, validateSettings, type WorldSettings } from './settings';
+import { emptySurface, shiftSurface, type Surface } from './paint';
 
 /** The world's layers, bottom to top (REDESIGN.md, section 5). Only the surface is always on. */
 export const LAYERS = [
@@ -20,7 +21,7 @@ export interface FlatPoint {
 }
 
 /** Version of the saved-world format; bumped when it changes. */
-export const WORLD_FORMAT = 1;
+export const WORLD_FORMAT = 2;
 
 export interface World {
   format: number;
@@ -28,6 +29,8 @@ export interface World {
   settings: WorldSettings;
   /** Which optional layers this world uses (the surface is always on). */
   layers: Record<LayerId, boolean>;
+  /** The painted surface layer: land, sea, relief and ground cover (Phase 1). */
+  surface: Surface;
   createdAt: number;
   updatedAt: number;
 }
@@ -45,6 +48,7 @@ export function createWorld(settings: WorldSettings, now = Date.now()): World {
     id: newWorldId(),
     settings: { ...settings, climate: { ...settings.climate } },
     layers: { underdark: false, surface: true, canopy: false, sky1: false, sky2: false, sky3: false },
+    surface: emptySurface(),
     createdAt: now,
     updatedAt: now,
   };
@@ -67,6 +71,10 @@ const translators: Translator[] = [];
 export function onMapShift(t: Translator): void {
   translators.push(t);
 }
+// Painted strokes keep their place on the land.
+onMapShift((w, dx, dy) => {
+  w.surface = shiftSurface(w.surface, dx, dy);
+});
 
 /** Why an expansion can't be made (null if it can). */
 export function expansionProblem(world: World, e: Expansion): string | null {

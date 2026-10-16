@@ -1,18 +1,22 @@
-import { latitudeAt, southLatitude, validateSettings } from '../core/settings';
-import { formatDistance, formatLatitude, KM_PER_DEGREE, kmToMiles, milesToKm } from '../core/units';
-import { expandWorld, expansionProblem, LAYERS, type Expansion, type LayerId, type World } from '../core/world';
+import { strokeBounds, ZONES, type Stroke } from '../core/paint';
+import { southLatitude, validateSettings } from '../core/settings';
+import { formatDistance, formatLatitude, KM_PER_DEGREE, milesToKm } from '../core/units';
+import { expandWorld, expansionProblem, LAYERS, type Expansion, type World } from '../core/world';
+import type { MapStyle } from '../render/paintmap';
 import type { App } from './main';
-import { h, numberField } from './dom';
+import { choice, h, numberField } from './dom';
+import { createMapView } from './mapview';
 import { planetFields } from './settingsform';
+import { createToolPanel } from './toolpanel';
 
 /**
- * The world screen (Phase 0): the empty map with its latitudes, the layer list, the world's
- * settings, and growing the canvas. Later phases add the painting tools on top.
+ * The world screen: the map, the painting tools (Phase 1), the layer list, the world's
+ * settings, and growing the canvas.
  */
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  let activeLayer: LayerId = 'surface';
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -36,201 +40,89 @@ export function showWorld(app: App, start: World): () => void {
     sizeLine.textContent = `${formatDistance(s.widthKm)} × ${formatDistance(s.heightKm)} · ${formatLatitude(s.northLatitude)} to ${formatLatitude(southLatitude(s))} · ${s.edges === 'wrap' ? 'wraps east–west' : 'edges lead nowhere'}`;
   };
 
-  // ---- Map canvas ----
-  const canvas = h('canvas', { class: 'map', 'aria-label': 'World map' });
-  const readout = h('div', { class: 'readout small' }, 'Move over the map to measure.');
-  const view = { cx: 0, cy: 0, scale: 1 }; // centre in km, pixels per km
-  const fit = () => {
-    const r = canvas.getBoundingClientRect();
-    const s = world.settings;
-    view.cx = s.widthKm / 2;
-    view.cy = s.heightKm / 2;
-    view.scale = Math.min(r.width / s.widthKm, r.height / s.heightKm) * 0.9 || 1;
-    draw();
+  // ---- Undo and redo: each step is the stroke list before a change. ----
+  const undoStack: Stroke[][] = [];
+  const redoStack: Stroke[][] = [];
+  const undoBtn = h('button', { type: 'button', class: 'ghost', title: 'Undo (Ctrl+Z)', disabled: true }, 'Undo');
+  const redoBtn = h('button', { type: 'button', class: 'ghost', title: 'Redo (Ctrl+Shift+Z)', disabled: true }, 'Redo');
+  const updateUndo = () => {
+    undoBtn.disabled = !undoStack.length;
+    redoBtn.disabled = !redoStack.length;
   };
-  const toScreen = (x: number, y: number, r: DOMRect) => [r.width / 2 + (x - view.cx) * view.scale, r.height / 2 + (y - view.cy) * view.scale];
-  const toWorld = (px: number, py: number, r: DOMRect) => [view.cx + (px - r.width / 2) / view.scale, view.cy + (py - r.height / 2) / view.scale];
-
-  const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
-  function draw() {
-    const r = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(r.width * dpr) || canvas.height !== Math.round(r.height * dpr)) {
-      canvas.width = Math.round(r.width * dpr);
-      canvas.height = Math.round(r.height * dpr);
-    }
-    const g = canvas.getContext('2d')!;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = css('--void');
-    g.fillRect(0, 0, r.width, r.height);
-    const s = world.settings;
-    const [x0, y0] = toScreen(0, 0, r);
-    const [x1, y1] = toScreen(s.widthKm, s.heightKm, r);
-
-    // Wrapped maps show a faded copy either side so the wrap is visible.
-    const copies = s.edges === 'wrap' ? [-1, 0, 1] : [0];
-    for (const c of copies) {
-      const off = c * (x1 - x0);
-      g.globalAlpha = c === 0 ? 1 : 0.35;
-      const sea = g.createLinearGradient(0, y0, 0, y1);
-      sea.addColorStop(0, css('--sea-a'));
-      sea.addColorStop(1, css('--sea-b'));
-      g.fillStyle = sea;
-      g.fillRect(x0 + off, y0, x1 - x0, y1 - y0);
-    }
-    g.globalAlpha = 1;
-
-    // Latitude lines: every 5° or 10°, depending on zoom.
-    const pxPerDeg = KM_PER_DEGREE * view.scale;
-    const step = pxPerDeg > 40 ? 1 : pxPerDeg > 8 ? 5 : 10;
-    const north = s.northLatitude;
-    const south = southLatitude(s);
-    const yAt = (lat: number) => toScreen(0, (north - lat) * KM_PER_DEGREE, r)[1];
-    g.font = `11px ${css('--mono')}`;
-    g.textBaseline = 'middle';
-    for (let lat = Math.ceil(south / step) * step; lat <= north; lat += step) {
-      const y = yAt(lat);
-      g.strokeStyle = css('--grid');
-      g.lineWidth = 1;
-      g.setLineDash([]);
-      g.beginPath();
-      g.moveTo(x0, y);
-      g.lineTo(x1, y);
-      g.stroke();
-      g.fillStyle = css('--grid-text');
-      g.fillText(formatLatitude(lat), Math.max(x0, 0) + 6, y - 7 < y0 + 8 ? y + 9 : y - 7);
-    }
-
-    // Named circles: equator, tropics and polar circles.
-    const tilt = s.axialTilt;
-    const named: [number, string][] = [[0, 'Equator']];
-    if (tilt > 0) named.push([tilt, 'Tropic (north)'], [-tilt, 'Tropic (south)']);
-    if (tilt < 90) named.push([90 - tilt, 'Arctic circle'], [-(90 - tilt), 'Antarctic circle']);
-    for (const [lat, name] of named) {
-      if (lat > north || lat < south) continue;
-      const y = yAt(lat);
-      g.strokeStyle = lat === 0 ? css('--equator') : css('--circle');
-      g.lineWidth = lat === 0 ? 1.5 : 1;
-      g.setLineDash(lat === 0 ? [] : [6, 5]);
-      g.beginPath();
-      g.moveTo(x0, y);
-      g.lineTo(x1, y);
-      g.stroke();
-      g.setLineDash([]);
-      g.fillStyle = g.strokeStyle;
-      const label = `${name} ${formatLatitude(lat)}`;
-      g.fillText(label, Math.min(x1, r.width) - g.measureText(label).width - 6, y - 7);
-    }
-
-    // Border: solid for nothing-beyond, dashed east and west when it wraps.
-    g.strokeStyle = css('--border-map');
-    g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(x0, y0);
-    g.lineTo(x1, y0);
-    g.moveTo(x0, y1);
-    g.lineTo(x1, y1);
-    g.stroke();
-    g.setLineDash(s.edges === 'wrap' ? [8, 6] : []);
-    g.beginPath();
-    g.moveTo(x0, y0);
-    g.lineTo(x0, y1);
-    g.moveTo(x1, y0);
-    g.lineTo(x1, y1);
-    g.stroke();
-    g.setLineDash([]);
-
-    drawScale(g, r);
-  }
-
-  function drawScale(g: CanvasRenderingContext2D, r: DOMRect) {
-    const targetPx = 140;
-    const miles = kmToMiles(targetPx / view.scale);
-    const p = 10 ** Math.floor(Math.log10(miles));
-    const nice = [1, 2, 5, 10].map((m) => m * p).filter((m) => m <= miles).pop() ?? p;
-    const px = milesToKm(nice) * view.scale;
-    const x = 16;
-    const y = r.height - 22;
-    g.fillStyle = css('--panel');
-    g.globalAlpha = 0.85;
-    g.fillRect(x - 8, y - 22, px + 16, 34);
-    g.globalAlpha = 1;
-    g.strokeStyle = css('--ink');
-    g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(x, y - 4);
-    g.lineTo(x, y);
-    g.lineTo(x + px, y);
-    g.lineTo(x + px, y - 4);
-    g.stroke();
-    g.fillStyle = css('--ink');
-    g.font = `11px ${css('--mono')}`;
-    g.textBaseline = 'alphabetic';
-    g.fillText(`${nice.toLocaleString('en-US')} mi (${Math.round(milesToKm(nice)).toLocaleString('en-US')} km)`, x, y - 8);
-  }
-
-  // Pan with drag (mouse or one finger), zoom with the wheel or two fingers.
-  const pointers = new Map<number, { x: number; y: number }>();
-  let pinch = 0;
-  const zoomAt = (factor: number, px: number, py: number) => {
-    const r = canvas.getBoundingClientRect();
-    const [wx, wy] = toWorld(px, py, r);
-    const s = world.settings;
-    const min = Math.min(r.width / s.widthKm, r.height / s.heightKm) * 0.2;
-    view.scale = Math.min(Math.max(view.scale * factor, min), 50);
-    view.cx = wx - (px - r.width / 2) / view.scale;
-    view.cy = wy - (py - r.height / 2) / view.scale;
-    draw();
+  /** Bounds of every stroke in one list but not the other. */
+  const diffBounds = (a: Stroke[], b: Stroke[]): [number, number, number, number] | null => {
+    const ids = (l: Stroke[]) => new Set(l.map((s) => s.id));
+    const ia = ids(a);
+    const ib = ids(b);
+    const changedStrokes = [...a.filter((s) => !ib.has(s.id)), ...b.filter((s) => !ia.has(s.id))];
+    if (!changedStrokes.length) return null;
+    return changedStrokes.map(strokeBounds).reduce((m, k) => [Math.min(m[0], k[0]), Math.min(m[1], k[1]), Math.max(m[2], k[2]), Math.max(m[3], k[3])]);
   };
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const r = canvas.getBoundingClientRect();
-    zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
-  }, { passive: false });
-  canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pointers.size === 2) {
-      const [a, b] = [...pointers.values()];
-      pinch = Math.hypot(a.x - b.x, a.y - b.y);
-    }
+  const setStrokes = (strokes: Stroke[]) => {
+    const before = world.surface.strokes;
+    world = { ...world, surface: { ...world.surface, strokes } };
+    const b = diffBounds(before, strokes);
+    if (b) map.surfaceChanged(b);
+    changed();
+    updateUndo();
+  };
+  const undo = () => {
+    const prev = undoStack.pop();
+    if (!prev) return;
+    redoStack.push(world.surface.strokes);
+    setStrokes(prev);
+  };
+  const redo = () => {
+    const next = redoStack.pop();
+    if (!next) return;
+    undoStack.push(world.surface.strokes);
+    setStrokes(next);
+  };
+  undoBtn.addEventListener('click', undo);
+  redoBtn.addEventListener('click', redo);
+
+  // ---- Tools and map ----
+  const notice = h('p', { class: 'notice small', role: 'status', hidden: true });
+  let noticeTimer = 0;
+  const showNotice = (text: string) => {
+    notice.textContent = text;
+    notice.hidden = false;
+    clearTimeout(noticeTimer);
+    noticeTimer = window.setTimeout(() => (notice.hidden = true), 4000);
+  };
+  const tools = createToolPanel(() => map?.redraw());
+  const map = createMapView({
+    world: () => world,
+    tool: () => tools.state,
+    look: () => look,
+    notice: showNotice,
+    commit(stroke) {
+      const id = world.surface.nextId;
+      undoStack.push(world.surface.strokes);
+      if (undoStack.length > 300) undoStack.shift();
+      redoStack.length = 0;
+      world = { ...world, surface: { strokes: [...world.surface.strokes, { ...stroke, id }], nextId: id + 1 } };
+      changed();
+      updateUndo();
+    },
   });
-  const release = (e: PointerEvent) => {
-    pointers.delete(e.pointerId);
-    pinch = 0;
-  };
-  canvas.addEventListener('pointerup', release);
-  canvas.addEventListener('pointercancel', release);
-  canvas.addEventListener('pointermove', (e) => {
-    const r = canvas.getBoundingClientRect();
-    const prev = pointers.get(e.pointerId);
-    if (prev) {
-      if (pointers.size === 1) {
-        view.cx -= (e.clientX - prev.x) / view.scale;
-        view.cy -= (e.clientY - prev.y) / view.scale;
-        draw();
-      }
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pointers.size === 2) {
-        const [a, b] = [...pointers.values()];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinch) zoomAt(d / pinch, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
-        pinch = d;
-      }
-    }
-    const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
-    const s = world.settings;
-    if (y < 0 || y > s.heightKm || (s.edges === 'void' && (x < 0 || x > s.widthKm))) {
-      readout.textContent = 'Off the map';
-      return;
-    }
-    const xw = ((x % s.widthKm) + s.widthKm) % s.widthKm;
-    readout.textContent = `${formatLatitude(latitudeAt(s, y))} · ${formatDistance(xw)} from the west edge · ${formatDistance(y)} from the north edge`;
-  });
-  canvas.addEventListener('pointerleave', () => (readout.textContent = 'Move over the map to measure.'));
 
-  const resize = new ResizeObserver(() => draw());
+  // ---- View options ----
+  const legend = h(
+    'table',
+    { class: 'zone-legend small', hidden: true },
+    h('thead', {}, h('tr', {}, h('th', {}, 'Zone'), h('th', {}, 'Travel · who can settle'))),
+    h('tbody', {}, ...ZONES.map((z) => h('tr', {}, h('td', {}, h('span', { class: `swatch z${z.id}` }), z.name), h('td', {}, `${z.travel}. ${z.settle}.`)))),
+  );
+  const viewPanel = h(
+    'section',
+    { class: 'view-panel' },
+    h('h2', {}, 'View'),
+    choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
+    choice<'off' | 'on'>('Mountain zones', [{ value: 'off', label: 'Hidden' }, { value: 'on', label: 'Shown' }], 'off', (v) => { look.zones = v === 'on'; legend.hidden = !look.zones; map.redraw(); }),
+    legend,
+    choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
+  );
 
   // ---- Layers ----
   const layerList = h('ul', { class: 'layers' });
@@ -238,35 +130,21 @@ export function showWorld(app: App, start: World): () => void {
     layerList.replaceChildren(
       ...LAYERS.map((l) => {
         const on = world.layers[l.id];
-        const pick = h(
-          'button',
-          {
-            type: 'button',
-            class: 'layer-pick',
-            'aria-pressed': activeLayer === l.id ? 'true' : 'false',
-            disabled: !on || l.id !== 'surface',
-            title: l.id === 'surface' ? 'The surface' : 'Each layer gets its own view in a later phase.',
-            onclick: () => {
-              activeLayer = l.id;
-              renderLayers();
-            },
-          },
-          l.name,
-        );
         const toggle =
           l.id === 'surface'
-            ? h('span', { class: 'muted small' }, 'Always on')
+            ? h('span', { class: 'muted small' }, 'Painting')
             : h('input', {
                 type: 'checkbox',
                 checked: on,
                 'aria-label': `Use the ${l.name} layer`,
+                title: 'Each layer gets its own view in a later phase.',
                 onchange: (e: Event) => {
                   world = { ...world, layers: { ...world.layers, [l.id]: (e.target as HTMLInputElement).checked } };
                   changed();
                   renderLayers();
                 },
               });
-        return h('li', {}, pick, toggle);
+        return h('li', { class: l.id === 'surface' ? 'current' : '' }, h('span', {}, l.name), toggle);
       }),
     );
   };
@@ -297,11 +175,16 @@ export function showWorld(app: App, start: World): () => void {
       numberField({ label, value: 0, min: 0, max: 20000, step: 10, unit: 'miles', change: (v) => { e[k] = milesToKm(Math.max(0, v)); update(); } });
     apply.addEventListener('click', () => {
       world = expandWorld(world, e);
+      // Undo steps hold strokes at their old positions, so they no longer apply.
+      undoStack.length = 0;
+      redoStack.length = 0;
+      updateUndo();
       changed();
       save();
       dialog.close();
       updateHead();
-      fit();
+      map.worldReset();
+      map.fit();
     });
     update();
     openDialog(
@@ -329,7 +212,7 @@ export function showWorld(app: App, start: World): () => void {
       save();
       dialog.close();
       updateHead();
-      draw();
+      map.redraw();
     });
     check();
     openDialog(
@@ -346,6 +229,46 @@ export function showWorld(app: App, start: World): () => void {
     app.start();
   };
 
+  // ---- Keyboard shortcuts ----
+  const keydown = (e: KeyboardEvent) => {
+    if ((e.target as HTMLElement).closest('input, textarea, select, dialog')) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    } else if (mod && e.key.toLowerCase() === 'y') {
+      e.preventDefault();
+      redo();
+    } else if (mod && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      save();
+    } else if (!mod && e.key.toLowerCase() === 'e') {
+      tools.setErase(!tools.state.erase);
+    } else if (!mod && e.key === '[') {
+      tools.resize(1 / 1.25);
+    } else if (!mod && e.key === ']') {
+      tools.resize(1.25);
+    }
+  };
+  window.addEventListener('keydown', keydown);
+
+  const sideToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true' }, 'Tools');
+  const side = h(
+    'aside',
+    { class: 'side' },
+    h('h2', {}, 'Paint'),
+    notice,
+    tools.el,
+    viewPanel,
+    h('section', {}, h('h2', {}, 'Layers'), layerList, h('p', { class: 'muted small' }, 'Other layers get their own views in a later phase.')),
+  );
+  sideToggle.addEventListener('click', () => {
+    const open = side.classList.toggle('closed');
+    sideToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+    map.redraw();
+  });
+
   app.root.append(
     h(
       'div',
@@ -357,6 +280,9 @@ export function showWorld(app: App, start: World): () => void {
         h(
           'nav',
           { class: 'tools' },
+          sideToggle,
+          undoBtn,
+          redoBtn,
           status,
           h('button', { type: 'button', class: 'primary', onclick: save }, 'Save'),
           h('button', { type: 'button', class: 'ghost', onclick: canvasOptions }, 'Canvas options'),
@@ -364,29 +290,21 @@ export function showWorld(app: App, start: World): () => void {
           h('button', { type: 'button', class: 'ghost', onclick: leave }, 'Main menu'),
         ),
       ),
-      h(
-        'div',
-        { class: 'workspace' },
-        h('aside', { class: 'side' }, h('h2', {}, 'Layers'), layerList, h('p', { class: 'muted small' }, 'Painting tools arrive in Phase 1: land, sea depths, mountains and ground cover.')),
-        h('div', { class: 'stage' }, canvas, h('div', { class: 'stage-controls' }, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')), readout),
-      ),
+      h('div', { class: 'workspace' }, side, map.el),
       dialog,
     ),
   );
 
   updateHead();
   renderLayers();
-  resize.observe(canvas);
-  requestAnimationFrame(fit);
   const beforeUnload = () => dirty && save();
   window.addEventListener('beforeunload', beforeUnload);
-  const scheme = matchMedia('(prefers-color-scheme: dark)');
-  scheme.addEventListener('change', draw);
 
   return () => {
     window.clearInterval(autosave);
-    resize.disconnect();
+    clearTimeout(noticeTimer);
+    map.dispose();
     window.removeEventListener('beforeunload', beforeUnload);
-    scheme.removeEventListener('change', draw);
+    window.removeEventListener('keydown', keydown);
   };
 }
