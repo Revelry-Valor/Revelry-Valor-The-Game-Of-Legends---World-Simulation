@@ -21,6 +21,7 @@ export type BrushId =
   | 'ravine'
   | 'crater'
   | 'erode'
+  | 'ramp'
   // Ground and ground cover
   | 'forest'
   | 'jungle'
@@ -70,14 +71,15 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'land', name: 'Land', group: 'Land & Sea', kind: 'area', hint: 'Paint continents and islands. A soft edge leaves a strip of shallow sea.', sizeMi: 120, strength: 1, softness: 0.35, roughness: 0.5, detailMi: 40 },
   { id: 'shallow', name: 'Shallow sea', group: 'Land & Sea', kind: 'area', hint: 'Continental shelves and banks. Reefs can only form here.', sizeMi: 120, strength: 1, softness: 0.5, roughness: 0.4, detailMi: 40 },
   { id: 'deep', name: 'Deep sea', group: 'Land & Sea', kind: 'area', hint: 'Open ocean. Also carves bays, straits and lakes out of land.', sizeMi: 120, strength: 1, softness: 0.35, roughness: 0.5, detailMi: 40 },
-  { id: 'mountains', name: 'Mountains', group: 'Relief', kind: 'line', hint: 'Paints a crest down the middle of the brush, sloping to both sides. Paint over mountains to build them up and widen them; use a smaller, weaker brush along the edges to add shoulders. Range: drag along the crest. Spur: start on a range and drag outward. Massif: a broad block.', sizeMi: 90, strength: 0.75, softness: 0.5, roughness: 0.45, detailMi: 12 },
-  { id: 'hills', name: 'Hills', group: 'Relief', kind: 'area', hint: 'Soft rolling bumps.', sizeMi: 80, strength: 0.7, softness: 0.6, roughness: 0.5, detailMi: 8 },
-  { id: 'plateau', name: 'Plateau', group: 'Relief', kind: 'area', hint: 'Paint the shape of the top: a flat raised top with a steep shaded rim.', sizeMi: 80, strength: 0.7, softness: 0.08, roughness: 0.55, detailMi: 15 },
-  { id: 'cliffs', name: 'Cliffs', group: 'Relief', kind: 'line', hint: 'Draw along the cliff edge. The high ground is on the side you choose.', sizeMi: 25, strength: 0.7, softness: 0.3, roughness: 0.3, detailMi: 5 },
-  { id: 'canyon', name: 'Canyon / gorge', group: 'Relief', kind: 'line', hint: 'Draw the canyon. Blocks travel except where bridged.', sizeMi: 14, strength: 0.8, softness: 0.25, roughness: 0.35, detailMi: 3 },
-  { id: 'ravine', name: 'Ravine', group: 'Relief', kind: 'line', hint: 'A narrow crack in the earth. Blocks travel.', sizeMi: 3, strength: 0.8, softness: 0.2, roughness: 0.3, detailMi: 1 },
-  { id: 'crater', name: 'Crater', group: 'Relief', kind: 'point', hint: 'Click to place a crater. The size is its width.', sizeMi: 20, strength: 0.7, softness: 0.3, roughness: 0.25, detailMi: 3 },
-  { id: 'erode', name: 'Erosion', group: 'Relief', kind: 'area', hint: 'Wears the land as you paint: cuts gullies into mountains, lowers peaks and makes coasts ragged.', sizeMi: 60, strength: 0.6, softness: 0.5, roughness: 0.5, detailMi: 6 },
+  { id: 'mountains', name: 'Mountains', group: 'Relief', kind: 'area', hint: 'A spray brush: paint builds up into mountains, and the crest forms where the paint is thickest. Paint beside a mountain to widen it, go over it again to raise it, and use a small, weak brush along the edges to add shoulders and spurs.', sizeMi: 70, strength: 0.6, softness: 0.5, roughness: 0.45, detailMi: 14 },
+  { id: 'hills', name: 'Hills', group: 'Relief', kind: 'area', hint: 'A spray brush for soft rolling hills; builds up like mountains, but lower.', sizeMi: 60, strength: 0.6, softness: 0.6, roughness: 0.5, detailMi: 8 },
+  { id: 'plateau', name: 'Plateau', group: 'Relief', kind: 'area', hint: 'Paint the shape of the top: a flat raised top ringed by layered cliffs. Use Ramp to make a way up.', sizeMi: 80, strength: 0.7, softness: 0.1, roughness: 0.55, detailMi: 6 },
+  { id: 'cliffs', name: 'Cliffs', group: 'Relief', kind: 'line', hint: 'Draw along the top edge. The cliff face shows on the low side; the high side is the land you drew it on.', sizeMi: 5, strength: 0.7, softness: 0.3, roughness: 0.35, detailMi: 2 },
+  { id: 'ramp', name: 'Ramp', group: 'Relief', kind: 'area', hint: 'Paint across a plateau rim or cliff to make an easy way up.', sizeMi: 8, strength: 1, softness: 0.4, roughness: 0.2, detailMi: 2 },
+  { id: 'canyon', name: 'Canyon / gorge', group: 'Relief', kind: 'line', hint: 'Draw the canyon: terraced, layered walls and a flat floor. Blocks travel except where bridged.', sizeMi: 14, strength: 0.8, softness: 0.25, roughness: 0.35, detailMi: 3 },
+  { id: 'ravine', name: 'Ravine', group: 'Relief', kind: 'line', hint: 'A narrow, deep crack in the earth. Blocks travel.', sizeMi: 2, strength: 0.8, softness: 0.2, roughness: 0.5, detailMi: 1 },
+  { id: 'crater', name: 'Crater', group: 'Relief', kind: 'point', hint: 'Click to place an impact crater. Bigger means a bigger meteor: big craters get flat floors, terraced walls, a central peak and rays. A new crater blasts away what was there, older craters included.', sizeMi: 12, strength: 0.8, softness: 0.3, roughness: 0.25, detailMi: 3 },
+  { id: 'erode', name: 'Erosion', group: 'Relief', kind: 'area', hint: 'A spray brush that wears the land: cuts gullies into mountains, lowers peaks and makes coasts ragged.', sizeMi: 50, strength: 0.5, softness: 0.5, roughness: 0.5, detailMi: 6 },
   { id: 'forest', name: 'Forest', group: 'Ground cover', kind: 'area', hint: 'A canopy of treetops. Painted cover overrides the climate here.', sizeMi: 60, strength: 0.9, softness: 0.3, roughness: 0.6, detailMi: 6 },
   { id: 'jungle', name: 'Jungle', group: 'Ground cover', kind: 'area', hint: 'Dense tropical canopy.', sizeMi: 60, strength: 0.9, softness: 0.3, roughness: 0.6, detailMi: 6 },
   { id: 'grassland', name: 'Grassland', group: 'Ground cover', kind: 'area', hint: 'Open grass and steppe.', sizeMi: 80, strength: 0.8, softness: 0.6, roughness: 0.5, detailMi: 10 },
@@ -117,10 +119,12 @@ export interface Stroke {
   detail: number;
   /** 0–1: how much the stroke varies along its length. */
   variation: number;
-  /** Mountains only. */
+  /** No longer used (mountains are a spray brush); kept so older saves still load. */
   mode?: MountainMode;
-  /** Mountains: 0–1, small ridges and valleys down both sides of a range. */
+  /** Mountains: 0–1, how deeply ridges and gullies are cut down the slopes. */
   sideRidges?: number;
+  /** Plateaus, cliffs and canyons: 0–1, how worn and gullied the rock faces are. */
+  erosion?: number;
   /** Width at the end as a share of the start (spurs taper). */
   taper?: number;
   /** Cliffs: which side of the line is high, as you look along the drawing direction (1 = right). */
@@ -149,7 +153,8 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     roughness: b.roughness,
     detail: milesToKm(b.detailMi),
     variation: 0.3,
-    ...(id === 'mountains' ? { mode: 'range' as MountainMode, sideRidges: 0.5 } : {}),
+    ...(id === 'mountains' ? { sideRidges: 0.6 } : {}),
+    ...(id === 'plateau' || id === 'cliffs' || id === 'canyon' ? { erosion: 0.4 } : {}),
     ...(id === 'cliffs' ? { side: 1 as const } : {}),
     ...(id === 'zone' ? { zone: 2 as ZoneId } : {}),
     ...(id === 'whirlpool' ? { dangerous: true } : {}),
@@ -159,7 +164,8 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
 /** How far a stroke can reach from its path, in km (for finding what it touches). */
 export function strokeReach(s: Stroke): number {
   const r = s.size / 2;
-  const extra = s.brush === 'crater' ? 1.35 : s.brush === 'whirlpool' ? 1.1 : (1 + s.variation * 0.45) * (1 + s.roughness * 0.5) + 0.05;
+  // Craters throw ejecta and rays well past their rim; cliffs cast shadows below their face.
+  const extra = s.brush === 'crater' ? 4 : s.brush === 'whirlpool' ? 1.1 : s.brush === 'cliffs' ? 3 : s.brush === 'canyon' ? 2.3 : s.brush === 'plateau' ? 1.55 : (1 + s.variation * 0.35) * (1 + s.roughness * 0.5) + 0.05;
   return r * extra;
 }
 

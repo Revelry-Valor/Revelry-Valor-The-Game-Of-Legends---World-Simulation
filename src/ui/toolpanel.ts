@@ -1,4 +1,4 @@
-import { BRUSHES, brushDefaults, brushInfo, ZONES, type BrushId, type MountainMode, type ZoneId } from '../core/paint';
+import { BRUSHES, brushDefaults, brushInfo, ZONES, type BrushId, type ZoneId } from '../core/paint';
 import { kmToMiles, milesToKm } from '../core/units';
 import { choice, h, numberField } from './dom';
 import type { BrushSettings, ToolState } from './mapview';
@@ -46,7 +46,7 @@ export function createToolPanel(changed: () => void): ToolPanel {
     }
     const b = brushInfo(state.tool);
     const s = state.settings;
-    const pct = (label: string, key: 'strength' | 'softness' | 'roughness' | 'variation' | 'sideRidges', hint: string) =>
+    const pct = (label: string, key: 'strength' | 'softness' | 'roughness' | 'variation' | 'sideRidges' | 'erosion', hint: string) =>
       numberField({ label, value: Math.round((s[key] ?? 0) * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint, change: (v) => { s[key] = Math.max(0, Math.min(100, v)) / 100; changed(); } });
     const fields: (HTMLElement | null)[] = [
       h('p', { class: 'muted small hint' }, state.erase ? `Erasing ${b.name.toLowerCase()} only. Other layers are left alone.` : b.hint),
@@ -63,10 +63,10 @@ export function createToolPanel(changed: () => void): ToolPanel {
     ];
     if (!state.erase) {
       if (state.tool === 'mountains') {
-        fields.push(
-          choice<MountainMode>('Mode', [{ value: 'range', label: 'Range' }, { value: 'spur', label: 'Spur' }, { value: 'massif', label: 'Massif' }], s.mode ?? 'range', (v) => { s.mode = v; changed(); }),
-          pct('Side ridges', 'sideRidges', 'Small ridges and valleys down both sides of a range.'),
-        );
+        fields.push(pct('Ridges & gullies', 'sideRidges', 'How deeply ridges and gullies are cut down the slopes.'));
+      }
+      if (state.tool === 'plateau' || state.tool === 'cliffs' || state.tool === 'canyon') {
+        fields.push(pct('Erosion', 'erosion', 'How worn the rock faces are: gullies notch the edge and the layers step more.'));
       }
       if (state.tool === 'cliffs') {
         fields.push(choice<'1' | '-1'>('High side', [{ value: '1', label: 'Right of the line' }, { value: '-1', label: 'Left of the line' }], String(s.side ?? 1) as '1' | '-1', (v) => { s.side = v === '1' ? 1 : -1; changed(); }));

@@ -122,7 +122,7 @@ The world can have up to five layers. The extra layers are optional and shown wh
 
 | Brush | How you use it | Notes |
 |---|---|---|
-| Mountains | Three modes (below) | Lit on one side, shadowed on the other |
+| Mountains | Spray brush (below) | Lit on one side, shadowed on the other |
 | Hills | Paint an area | Soft rolling bumps |
 | Plateau | Paint the shape of the top | Flat raised top, steep shaded rim |
 | Cliffs | Draw a line | Sheer face, inland or on a coast |
@@ -142,12 +142,16 @@ The world can have up to five layers. The extra layers are optional and shown wh
 | Eraser | Per layer | Removes only the selected layer |
 | Blend / smudge | Per layer | Softens edges, pushes paint around |
 
-**Mountains: three modes**
-1. **Range:** drag a line. Peaks and ridges follow it, tallest along the middle of the crest.
-2. **Spur:** start a stroke on an existing range and drag outward. It snaps on and joins smoothly, starting as big as the range where it meets it and getting smaller and lower-looking toward its end. Spurs can branch off spurs.
-3. **Massif:** paint an area for a broad, knotted mountain block.
-
-Side ridges: both an automatic **Side ridges** slider (small natural ridges and valleys down both sides of a range) and spurs you draw by hand.
+**How brushes paint (decided after trying Phase 1):** like Wonderdraft or Photoshop. A stroke is a row of stamps laid as you drag; what you see while painting is what stays.
+- Land, sea and ground cover are opaque paint.
+- **Mountains are a spray brush.** Paint builds up and the crest forms where it is thickest. Painting beside a mountain widens it, over it raises it, and a small, weak brush along its edges adds shoulders and spurs. Ridges and gullies are cut straight down the slopes of whatever shape is built (a **Ridges & gullies** setting). Hills work the same way, lower.
+- **Erosion brush:** a spray that cuts gullies, lowers peaks and roughens coasts. Outlines are rough by default (Roughness setting).
+- **Look:** shaded relief like an atlas; mountains tinted from olive foothills through tan and rock to snow.
+- **Cliffs:** drawn along the top edge; only the face is drawn, on the low side (rock lip, layered face, scree, cast shadow). The high side is implied.
+- **Plateaus:** flat top ringed by layered rock faces, scree and a cast shadow; an **Erosion** setting notches the rim. Plateaus, cliffs and canyons all have the Erosion setting.
+- **Ramp brush:** paint across a plateau rim or cliff for an easy way up (opens travel there).
+- **Canyons:** terraced, layered walls, flat floor, side canyons cutting an irregular rim. **Ravines:** narrow, deep, jagged cracks.
+- **Craters:** size means meteor size. Small: simple bowls. Large: flat floor, slumped terraces, central peak, rocky layered walls, rays. A new crater blasts away what was there, older craters included.
 
 ### 6.2a Mountain zones
 Every mountain area has altitude zones, like the bands on a real mountain. They exist only in the simulation and in a view you can turn on; nothing is drawn by height.

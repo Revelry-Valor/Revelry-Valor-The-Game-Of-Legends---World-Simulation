@@ -1,4 +1,4 @@
-import { brushInfo, roundPath, snapSpur, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
+import { brushInfo, roundPath, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { formatDistance, formatLatitude, KM_PER_DEGREE, kmToMiles, milesToKm } from '../core/units';
@@ -238,17 +238,6 @@ export function createMapView(o: MapViewOptions): MapView {
     const t = o.tool();
     if (t.tool === 'pan') return false;
     const st: Omit<Stroke, 'id'> = { ...t.settings, brush: t.tool, erase: t.erase || undefined, pts: [x, y] };
-    if (st.brush === 'mountains' && st.mode === 'spur' && !st.erase) {
-      const snap = snapSpur(o.world().surface, x, y);
-      if (snap) {
-        st.pts = [snap.x, snap.y];
-        st.size = snap.size;
-        st.taper = 0.25;
-      } else {
-        o.notice('Start a spur on an existing range; this one is drawn as a new range.');
-        st.mode = 'range';
-      }
-    }
     st.pts = roundPath(st.pts);
     const live = o.begin(st);
     drawing = { stroke: live, pointer: e.pointerId };

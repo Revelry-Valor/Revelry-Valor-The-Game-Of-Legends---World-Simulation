@@ -119,3 +119,51 @@ describe('the painted world', () => {
     }
   });
 });
+
+describe('brushes paint like a paint program', () => {
+  it('what is painted never changes as the stroke goes on', () => {
+    const pts: number[] = [];
+    for (let i = 0; i <= 40; i++) pts.push(100 + i * 10, 300 + Math.sin(i / 4) * 60);
+    const g = { x0: 80, y0: 200, px: 4, w: 60, h: 50 };
+    for (const brush of ['land', 'mountains', 'forest'] as const) {
+      const base = { ...brushDefaults(brush), id: 1, size: 120 };
+      const early = evaluate({ strokes: [{ ...base, pts: pts.slice(0, 40) }], nextId: 2 }, g, o);
+      const later = evaluate({ strokes: [{ ...base, pts }], nextId: 2 }, g, o);
+      // Only the area near where the stroke went on differs.
+      for (let j = 0; j < g.h; j++) {
+        for (let i = 0; i < 20; i++) {
+          const k = j * g.w + i;
+          expect(later.ground[k]).toBeCloseTo(early.ground[k], 5);
+          expect(later.mountain[k]).toBeCloseTo(early.mountain[k], 5);
+        }
+      }
+    }
+  });
+
+  it('spraying mountains beside a mountain widens it', () => {
+    const land: [BrushId, number[], Partial<Stroke>?] = ['land', [0, 0, 1000, 0], { size: 800 }];
+    const one = paint(land, ['mountains', [200, 0, 800, 0], { size: 100 }]);
+    const two = paint(land, ['mountains', [200, 0, 800, 0], { size: 100 }], ['mountains', [200, 60, 800, 60], { size: 100 }]);
+    expect(surfaceAt(one, 500, 80, o).mountain).toBe(0);
+    expect(surfaceAt(two, 500, 80, o).mountain).toBeGreaterThan(0.2);
+    // The two merge: no gap between them.
+    expect(surfaceAt(two, 500, 30, o).mountain).toBeGreaterThan(surfaceAt(one, 500, 30, o).mountain);
+  });
+
+  it('a new crater blasts away an older one inside its rim', () => {
+    const land: [BrushId, number[], Partial<Stroke>?] = ['land', [0, 0], { size: 800 }];
+    const old = paint(land, ['mountains', [0, 0, 60, 0], { size: 100 }]);
+    const hit = paint(land, ['mountains', [0, 0, 60, 0], { size: 100 }], ['crater', [30, 0], { size: 40 }]);
+    expect(surfaceAt(hit, 30, 0, o).mountain).toBeLessThan(surfaceAt(old, 30, 0, o).mountain * 0.3);
+  });
+
+  it('cliffs and plateau rims block travel; a ramp opens them', () => {
+    const land: [BrushId, number[], Partial<Stroke>?] = ['land', [0, 0, 400, 0], { size: 600 }];
+    const cliff = paint(land, ['cliffs', [0, 0, 400, 0], { size: 20, side: 1, roughness: 0, erosion: 0 }]);
+    // High side is right of the line (south, +y); the face is north (−y).
+    expect(surfaceAt(cliff, 200, -3, o).blocksTravel).toBe(true);
+    expect(surfaceAt(cliff, 200, 20, o).blocksTravel).toBe(false);
+    const ramped = paint(land, ['cliffs', [0, 0, 400, 0], { size: 20, side: 1, roughness: 0, erosion: 0 }], ['ramp', [200, -3], { size: 20 }]);
+    expect(surfaceAt(ramped, 200, -3, o).blocksTravel).toBe(false);
+  });
+});

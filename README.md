@@ -44,15 +44,26 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
   brush settings. The picture and the simulation's "what is here?" are both worked out from the
   strokes, so the land is the same at every zoom.
 - **Land & Sea:** Land, Shallow sea and Deep sea brushes. A soft land edge leaves a strip of shallows.
-- **Live painting:** every brush paints onto the map as you drag, at its current settings.
-- **Relief:** Mountains paint a crest down the middle of the brush, sloping to both sides, and
-  build up: paint over a range to raise and widen it, or along its edges with a smaller, weaker
-  brush to add shoulders. Modes: Range, Spur (snaps onto a range and tapers), Massif; a Side
-  ridges setting. Also Hills (build up too), Plateau, Cliffs (choose the high side), Canyon /
-  gorge and Ravine (both block travel), Crater, and Erosion (cuts gullies, lowers peaks, makes
-  coasts ragged).
-- **Look:** shaded relief like an atlas: mountains tinted from olive foothills through tan and
-  rock to snow on the peaks.
+- **Live painting, like a paint program:** a stroke is a row of stamps laid as you drag, so
+  what you see while painting is exactly what stays. Land, sea and ground cover are opaque paint.
+- **Mountains are a spray brush:** paint builds up, and the crest forms where it is thickest.
+  Paint beside a mountain to widen it, over it to raise it, or along its edges with a small,
+  weak brush for shoulders and spurs. Ridges and gullies are cut down the actual slopes, so any
+  shape you build looks like real eroded mountains (Ridges & gullies setting). Hills build up
+  the same way, lower.
+- **Plateau:** a flat top ringed by layered rock faces, with scree at the foot and a shadow cast
+  away from the light. Its Erosion setting notches the rim with gullies and adds more layers.
+- **Cliffs:** draw along the top edge; only the face shows, on the low side (a rock lip,
+  layered face with runnels, scree below, and a shadow when it faces away from the light).
+  The high side is just the land you drew it on. Erosion setting.
+- **Ramp:** paint across a plateau rim or cliff to make an easy way up.
+- **Canyon / gorge:** terraced, layered walls, a flat floor, and side canyons cutting into an
+  irregular rim (Erosion setting). **Ravine:** a narrow, deep, jagged crack.
+- **Crater:** sized like a real impact: small ones are bowls; big ones have a flat floor,
+  slumped terraces, a central peak, rocky layered walls and rays of ejecta. A new crater blasts
+  away what was there, older craters included.
+- **Erosion brush:** a spray that cuts gullies into mountains, lowers peaks and roughens coasts.
+- Canyons, ravines and cliff faces block travel; ramps open them.
 - **Ground cover:** Forest, Jungle, Grassland, Tundra, Marsh / swamp, Dunes, Badlands, Salt flats,
   Glacier / ice, Beach / shore.
 - **Sea:** Whirlpools, dangerous to ships or harmless.

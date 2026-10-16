@@ -44,7 +44,10 @@ const SAT = {
   rock: hex('#8d8478'),
   rockDark: hex('#5f574c'),
   snow: hex('#f1f4f7'),
-  canyon: hex('#9b5634'),
+  canyonFloor: hex('#b39a6a'),
+  ejecta: hex('#cdbf9f'),
+  path: hex('#c2a77a'),
+  scree: hex('#a99f8e'),
   crack: hex('#33261d'),
   zone: [hex('#000000'), hex('#e3cf6b'), hex('#d68b37'), hex('#a8402a'), hex('#e9ecff')] as RGB[],
 };
@@ -140,10 +143,19 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
             c = mix(c, SAT.snow, snow);
           }
           else if (steep > 0.35) c = mix(c, SAT.rock, smooth(0.35, 0.9, steep) * 0.7);
-          if (f.cliff[k] > 0) c = mix(c, SAT.rockDark, f.cliff[k] * 0.6);
-          if (f.canyon[k] > 0) c = mix(c, SAT.canyon, smooth(0, 0.7, f.canyon[k]) * 0.8);
-          if (f.ravine[k] > 0) c = mix(c, SAT.crack, smooth(0.2, 0.8, f.ravine[k]) * 0.85);
-          const lit = 0.45 + 0.55 * bright;
+          // Plateau tops: drier, stonier ground.
+          if (f.plateau[k] > 0) c = mix(c, SAT.high, f.plateau[k] * 0.3);
+          // Fresh crater ejecta: paler, dustier ground.
+          if (f.ejecta[k] > 0) c = mix(c, SAT.ejecta, f.ejecta[k] * 0.55);
+          // Canyon floors: sandy, a little green where water would run.
+          if (f.canyon[k] > 0) c = mix(c, SAT.canyonFloor, smooth(0, 0.7, f.canyon[k]) * 0.75);
+          if (f.scree[k] > 0) c = mix(c, mix(SAT.scree, SAT.rockDark, 0.3 * (fbm(x, y, 1.5, px, seed + 56, 3) + 1)), f.scree[k] * 0.8);
+          // Rock faces show their layers.
+          if (f.face[k] > 0) c = mix(c, strataColour(f.strata[k], false), f.face[k]);
+          if (f.ravine[k] > 0) c = mix(c, SAT.crack, smooth(0.2, 0.8, f.ravine[k]) * 0.9);
+          if (f.ramp[k] > 0) c = mix(c, SAT.path, f.ramp[k] * 0.2);
+          const fs = f.face[k] > 0 ? 1 + (f.faceShade[k] - 1) * f.face[k] : 1;
+          const lit = (0.55 + 0.45 * bright) * fs * (1 - f.shadow[k] * 0.6);
           c = [c[0] * lit, c[1] * lit, c[2] * lit];
           col = mix(sea, c, land);
         }
@@ -165,9 +177,16 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
           // Mountains are inked: dark strokes on the shaded slopes, like a drawn map.
           const m = f.mountain[k];
           if (m > 0.03) c = mix(c, PAPER.ink, Math.max(0, Math.min(1, (0.9 - bright) * 1.3)) * 0.7 * smooth(0.03, 0.3, m));
-          if (f.cliff[k] > 0) c = mix(c, PAPER.ink, f.cliff[k] * 0.55);
-          if (f.canyon[k] > 0) c = mix(c, PAPER.shade, smooth(0, 0.7, f.canyon[k]) * 0.5);
-          if (f.ravine[k] > 0) c = mix(c, PAPER.ink, smooth(0.3, 0.8, f.ravine[k]) * 0.8);
+          if (f.face[k] > 0) {
+            // Rock faces in ink: hatched layers, darker where turned from the light.
+            c = mix(c, strataColour(f.strata[k], true), f.face[k]);
+            c = mix(c, PAPER.ink, f.face[k] * Math.max(0, Math.min(1, 1.1 - f.faceShade[k])) * 0.8);
+          }
+          if (f.shadow[k] > 0) c = mix(c, PAPER.shade, f.shadow[k] * 0.6);
+          if (f.scree[k] > 0) c = mix(c, PAPER.shade, f.scree[k] * 0.3 * (fbm(x, y, 1.5, px, seed + 56, 3) > 0.1 ? 1 : 0.3));
+          if (f.canyon[k] > 0) c = mix(c, PAPER.shade, smooth(0, 0.7, f.canyon[k]) * 0.3);
+          if (f.ravine[k] > 0) c = mix(c, PAPER.ink, smooth(0.3, 0.8, f.ravine[k]) * 0.85);
+          if (f.ejecta[k] > 0) c = mix(c, [250, 244, 226], f.ejecta[k] * 0.4);
           col = mix(sea, c, land);
         }
         // Inked coastline.
@@ -190,6 +209,22 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
     }
   }
   return out;
+}
+
+/** Rock layers on a face, from its height in layers: cream, tan, rust and grey-brown bands. */
+const STRATA: RGB[] = [hex('#c9b089'), hex('#a8774f'), hex('#d8c3a0'), hex('#8e5f40'), hex('#b49a78'), hex('#7a6555')];
+const STRATA_PAPER: RGB[] = [hex('#d9c69f'), hex('#b8996f'), hex('#e3d4b2'), hex('#a88a62')];
+function strataColour(level: number, paper: boolean): RGB {
+  const list = paper ? STRATA_PAPER : STRATA;
+  const l = Math.max(0, level);
+  const k = Math.floor(l);
+  const fr = l - k;
+  const a = list[k % list.length];
+  const b = list[(k + 1) % list.length];
+  // Sharp boundaries between layers, with a thin dark line where they meet.
+  let c = mix(a, b, smooth(0.85, 1, fr));
+  if (fr < 0.06) c = mix(c, [60, 45, 35], 0.35 * (1 - fr / 0.06));
+  return c;
 }
 
 function landCover(c: RGB, f: ReturnType<typeof evaluate>, k: number, x: number, y: number, px: number, seed: number, paper: boolean): RGB {
