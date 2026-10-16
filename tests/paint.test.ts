@@ -50,11 +50,19 @@ describe('features and layers', () => {
 
   it('mountains get zones: peaks or high ground on the crest, foothills at the edge', () => {
     const s = paint(['land', [0, 0, 1000, 0], { size: 800 }], ['mountains', [200, 0, 800, 0], { size: 200, strength: 1 }]);
-    const crest = surfaceAt(s, 500, 0, o).zone;
-    const edge = surfaceAt(s, 500, 80, o).zone;
-    expect(crest).toBeGreaterThanOrEqual(3);
-    expect(edge).toBe(1);
+    const across = Array.from({ length: 31 }, (_, k) => surfaceAt(s, 500, k * 4, o).zone);
+    expect(across[0]).toBeGreaterThanOrEqual(3);
+    expect(across).toContain(2);
+    expect(across).toContain(1);
     expect(surfaceAt(s, 500, 300, o).zone).toBe(0);
+  });
+
+  it('mountains build up: painting over a range makes it higher and wider', () => {
+    const one = paint(['land', [0, 0, 1000, 0], { size: 800 }], ['mountains', [200, 0, 800, 0], { size: 200, strength: 0.5 }]);
+    const two = paint(['land', [0, 0, 1000, 0], { size: 800 }], ['mountains', [200, 0, 800, 0], { size: 200, strength: 0.5 }], ['mountains', [200, 0, 800, 0], { size: 260, strength: 0.5 }]);
+    expect(surfaceAt(two, 500, 0, o).mountain).toBeGreaterThan(surfaceAt(one, 500, 0, o).mountain * 1.4);
+    expect(surfaceAt(one, 500, 110, o).mountain).toBe(0);
+    expect(surfaceAt(two, 500, 110, o).mountain).toBeGreaterThan(0);
   });
 
   it('the zone brush overrides the automatic zones, and Automatic puts them back', () => {

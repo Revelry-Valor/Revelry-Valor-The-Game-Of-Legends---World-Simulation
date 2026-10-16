@@ -39,7 +39,9 @@ const SAT = {
   shore: hex('#56b3b6'),
   grass: hex('#5e7b3c'),
   dry: hex('#8d7d55'),
-  rock: hex('#857a69'),
+  foot: hex('#8b8a55'),
+  high: hex('#9c8560'),
+  rock: hex('#8d8478'),
   rockDark: hex('#5f574c'),
   snow: hex('#f1f4f7'),
   canyon: hex('#9b5634'),
@@ -87,7 +89,7 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
   const out = new Uint8ClampedArray(w * h * 4);
   const W = g.w;
   // Vertical exaggeration for lighting: relief 1 is drawn like a high range.
-  const E = 14;
+  const E = 60;
   const L = [-0.62, -0.62, 0.48]; // light from the north-west
   const flat = L[2];
   const paper = job.style === 'paper';
@@ -128,19 +130,20 @@ export function renderPicture(surface: Surface, job: RenderJob): Uint8ClampedArr
           c = landCover(c, f, k, x, y, px, seed, false);
           // Bare rock shows wherever the ground is steep.
           const steep = Math.min(1, Math.hypot(dzx, dzy) * 0.5);
-          // Rock and snow on the mountains.
+          // Mountains are tinted by how high they are built, like an atlas: olive foothills,
+          // tan and brown highlands, grey rock, then snow on the peaks.
           const m = f.mountain[k];
           if (m > 0.02) {
-            const rock = mix(SAT.rock, SAT.rockDark, 0.5 + 0.5 * fbm(x, y, 6, px, seed + 53));
-            c = mix(c, rock, smooth(0.08, 0.55, m) * (0.5 + 0.5 * steep));
-            const snow = smooth(0.7, 0.92, m + 0.12 * fbm(x, y, 10, px, seed + 54)) * (1 - steep * 0.5);
+            const ramp = m < 0.22 ? mix(c, SAT.foot, smooth(0.02, 0.22, m) * 0.85) : m < 0.4 ? mix(mix(c, SAT.foot, 0.85), SAT.high, smooth(0.22, 0.4, m)) : mix(SAT.high, SAT.rock, smooth(0.4, 0.65, m));
+            c = mix(ramp, SAT.rockDark, steep * 0.25 * smooth(0.1, 0.4, m));
+            const snow = smooth(0.62, 0.85, m + 0.08 * fbm(x, y, 10, px, seed + 54, 4)) * (1 - steep * 0.3);
             c = mix(c, SAT.snow, snow);
           }
           else if (steep > 0.35) c = mix(c, SAT.rock, smooth(0.35, 0.9, steep) * 0.7);
           if (f.cliff[k] > 0) c = mix(c, SAT.rockDark, f.cliff[k] * 0.6);
           if (f.canyon[k] > 0) c = mix(c, SAT.canyon, smooth(0, 0.7, f.canyon[k]) * 0.8);
           if (f.ravine[k] > 0) c = mix(c, SAT.crack, smooth(0.2, 0.8, f.ravine[k]) * 0.85);
-          const lit = 0.32 + 0.68 * bright;
+          const lit = 0.45 + 0.55 * bright;
           c = [c[0] * lit, c[1] * lit, c[2] * lit];
           col = mix(sea, c, land);
         }

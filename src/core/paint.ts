@@ -20,6 +20,7 @@ export type BrushId =
   | 'canyon'
   | 'ravine'
   | 'crater'
+  | 'erode'
   // Ground and ground cover
   | 'forest'
   | 'jungle'
@@ -69,13 +70,14 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'land', name: 'Land', group: 'Land & Sea', kind: 'area', hint: 'Paint continents and islands. A soft edge leaves a strip of shallow sea.', sizeMi: 120, strength: 1, softness: 0.35, roughness: 0.5, detailMi: 40 },
   { id: 'shallow', name: 'Shallow sea', group: 'Land & Sea', kind: 'area', hint: 'Continental shelves and banks. Reefs can only form here.', sizeMi: 120, strength: 1, softness: 0.5, roughness: 0.4, detailMi: 40 },
   { id: 'deep', name: 'Deep sea', group: 'Land & Sea', kind: 'area', hint: 'Open ocean. Also carves bays, straits and lakes out of land.', sizeMi: 120, strength: 1, softness: 0.35, roughness: 0.5, detailMi: 40 },
-  { id: 'mountains', name: 'Mountains', group: 'Relief', kind: 'line', hint: 'Range: drag along the crest. Spur: start on a range and drag outward. Massif: paint a broad block.', sizeMi: 90, strength: 0.75, softness: 0.5, roughness: 0.45, detailMi: 12 },
+  { id: 'mountains', name: 'Mountains', group: 'Relief', kind: 'line', hint: 'Paints a crest down the middle of the brush, sloping to both sides. Paint over mountains to build them up and widen them; use a smaller, weaker brush along the edges to add shoulders. Range: drag along the crest. Spur: start on a range and drag outward. Massif: a broad block.', sizeMi: 90, strength: 0.75, softness: 0.5, roughness: 0.45, detailMi: 12 },
   { id: 'hills', name: 'Hills', group: 'Relief', kind: 'area', hint: 'Soft rolling bumps.', sizeMi: 80, strength: 0.7, softness: 0.6, roughness: 0.5, detailMi: 8 },
   { id: 'plateau', name: 'Plateau', group: 'Relief', kind: 'area', hint: 'Paint the shape of the top: a flat raised top with a steep shaded rim.', sizeMi: 80, strength: 0.7, softness: 0.08, roughness: 0.55, detailMi: 15 },
   { id: 'cliffs', name: 'Cliffs', group: 'Relief', kind: 'line', hint: 'Draw along the cliff edge. The high ground is on the side you choose.', sizeMi: 25, strength: 0.7, softness: 0.3, roughness: 0.3, detailMi: 5 },
   { id: 'canyon', name: 'Canyon / gorge', group: 'Relief', kind: 'line', hint: 'Draw the canyon. Blocks travel except where bridged.', sizeMi: 14, strength: 0.8, softness: 0.25, roughness: 0.35, detailMi: 3 },
   { id: 'ravine', name: 'Ravine', group: 'Relief', kind: 'line', hint: 'A narrow crack in the earth. Blocks travel.', sizeMi: 3, strength: 0.8, softness: 0.2, roughness: 0.3, detailMi: 1 },
   { id: 'crater', name: 'Crater', group: 'Relief', kind: 'point', hint: 'Click to place a crater. The size is its width.', sizeMi: 20, strength: 0.7, softness: 0.3, roughness: 0.25, detailMi: 3 },
+  { id: 'erode', name: 'Erosion', group: 'Relief', kind: 'area', hint: 'Wears the land as you paint: cuts gullies into mountains, lowers peaks and makes coasts ragged.', sizeMi: 60, strength: 0.6, softness: 0.5, roughness: 0.5, detailMi: 6 },
   { id: 'forest', name: 'Forest', group: 'Ground cover', kind: 'area', hint: 'A canopy of treetops. Painted cover overrides the climate here.', sizeMi: 60, strength: 0.9, softness: 0.3, roughness: 0.6, detailMi: 6 },
   { id: 'jungle', name: 'Jungle', group: 'Ground cover', kind: 'area', hint: 'Dense tropical canopy.', sizeMi: 60, strength: 0.9, softness: 0.3, roughness: 0.6, detailMi: 6 },
   { id: 'grassland', name: 'Grassland', group: 'Ground cover', kind: 'area', hint: 'Open grass and steppe.', sizeMi: 80, strength: 0.8, softness: 0.6, roughness: 0.5, detailMi: 10 },

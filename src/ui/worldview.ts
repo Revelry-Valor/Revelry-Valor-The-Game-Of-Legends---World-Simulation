@@ -96,15 +96,26 @@ export function showWorld(app: App, start: World): () => void {
     tool: () => tools.state,
     look: () => look,
     notice: showNotice,
-    commit(stroke) {
+    begin(stroke) {
       const id = world.surface.nextId;
+      const live: Stroke = { ...stroke, id };
       undoStack.push(world.surface.strokes);
       if (undoStack.length > 300) undoStack.shift();
       redoStack.length = 0;
-      world = { ...world, surface: { strokes: [...world.surface.strokes, { ...stroke, id }], nextId: id + 1 } };
+      world = { ...world, surface: { strokes: [...world.surface.strokes, live], nextId: id + 1 } };
       changed();
       updateUndo();
+      return live;
     },
+    update(stroke) {
+      const strokes = world.surface.strokes.slice();
+      const i = strokes.findIndex((s) => s.id === stroke.id);
+      if (i < 0) return;
+      strokes[i] = stroke;
+      world = { ...world, surface: { ...world.surface, strokes } };
+      changed();
+    },
+    cancel: undo,
   });
 
   // ---- View options ----

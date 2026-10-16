@@ -20,34 +20,15 @@ export interface MapViewOptions {
   world(): World;
   tool(): ToolState;
   look(): MapLook & { grid: boolean };
-  /** A finished stroke (without an id). */
-  commit(stroke: Omit<Stroke, 'id'>): void;
+  /** Start a stroke: it joins the world at once and gets its id. */
+  begin(stroke: Omit<Stroke, 'id'>): Stroke;
+  /** The stroke being painted grew. */
+  update(stroke: Stroke): void;
+  /** Take back the stroke just started (a second finger turned it into a pinch). */
+  cancel(): void;
   /** A short message for the person (for example, why a spur did not start). */
   notice(text: string): void;
 }
-
-const PREVIEW: Partial<Record<BrushId, string>> = {
-  land: '#6f8f45',
-  shallow: '#3aa3b5',
-  deep: '#163f66',
-  mountains: '#8a7c68',
-  hills: '#7d8f4c',
-  plateau: '#a08a64',
-  cliffs: '#4a4038',
-  canyon: '#9b5634',
-  ravine: '#2b2019',
-  forest: '#2c4a22',
-  jungle: '#1c4a1a',
-  grassland: '#8c9b4e',
-  tundra: '#8a8a72',
-  marsh: '#4d5b37',
-  dunes: '#dcb878',
-  badlands: '#b06842',
-  saltflats: '#ece6d6',
-  glacier: '#e6eff5',
-  beach: '#dcc99d',
-  zone: '#d68b37',
-};
 
 export interface MapView {
   el: HTMLElement;
@@ -77,8 +58,8 @@ export function createMapView(o: MapViewOptions): MapView {
   const toScreen = (x: number, y: number, r: DOMRect) => [r.width / 2 + (x - view.cx) * view.scale, r.height / 2 + (y - view.cy) * view.scale];
   const toWorld = (sx: number, sy: number, r: DOMRect) => [view.cx + (sx - r.width / 2) / view.scale, view.cy + (sy - r.height / 2) / view.scale];
 
-  // The stroke being drawn, and where the brush is.
-  let drawing: { stroke: Omit<Stroke, 'id'>; pointer: number } | null = null;
+  // The stroke being painted, and where the brush is.
+  let drawing: { stroke: Stroke; pointer: number } | null = null;
   let hover: { x: number; y: number } | null = null;
 
   function draw() {
@@ -113,7 +94,6 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
-    if (drawing) drawStroke(g, r, drawing.stroke);
     drawCursor(g, r);
     drawScale(g, r);
     busy.hidden = !cache.busy;
@@ -177,58 +157,6 @@ export function createMapView(o: MapViewOptions): MapView {
     g.lineTo(x1, y1);
     g.stroke();
     g.setLineDash([]);
-  }
-
-  function drawStroke(g: CanvasRenderingContext2D, r: DOMRect, st: Omit<Stroke, 'id'>) {
-    const p = st.pts;
-    g.save();
-    g.globalAlpha = st.erase ? 0.35 : 0.5;
-    g.strokeStyle = st.erase ? '#ffffff' : PREVIEW[st.brush] ?? '#ffffff';
-    g.fillStyle = g.strokeStyle;
-    g.lineCap = 'round';
-    g.lineJoin = 'round';
-    const n = p.length / 2;
-    if (st.taper !== undefined && st.taper !== 1 && n > 1) {
-      // Tapering spur: draw each segment narrower than the last.
-      for (let k = 0; k < n - 1; k++) {
-        const [ax, ay] = toScreen(p[2 * k], p[2 * k + 1], r);
-        const [bx, by] = toScreen(p[2 * k + 2], p[2 * k + 3], r);
-        g.lineWidth = Math.max(1, st.size * view.scale * (1 + (st.taper - 1) * (k / (n - 1))));
-        g.beginPath();
-        g.moveTo(ax, ay);
-        g.lineTo(bx, by);
-        g.stroke();
-      }
-    } else {
-      g.lineWidth = Math.max(1, st.size * view.scale);
-      g.beginPath();
-      for (let k = 0; k < n; k++) {
-        const [sx, sy] = toScreen(p[2 * k], p[2 * k + 1], r);
-        if (k === 0) g.moveTo(sx, sy);
-        else g.lineTo(sx, sy);
-      }
-      if (n === 1) g.lineTo(toScreen(p[0], p[1], r)[0] + 0.01, toScreen(p[0], p[1], r)[1]);
-      g.stroke();
-    }
-    if (st.brush === 'cliffs' && n > 1) {
-      // Ticks on the high side, like an escarpment symbol.
-      g.globalAlpha = 0.9;
-      g.strokeStyle = '#2a1f17';
-      g.lineWidth = 1.5;
-      const side = st.side ?? 1;
-      for (let k = 0; k < n - 1; k++) {
-        const [ax, ay] = toScreen(p[2 * k], p[2 * k + 1], r);
-        const [bx, by] = toScreen(p[2 * k + 2], p[2 * k + 3], r);
-        const len = Math.hypot(bx - ax, by - ay) || 1;
-        const nx = (-(by - ay) / len) * side;
-        const ny = ((bx - ax) / len) * side;
-        g.beginPath();
-        g.moveTo((ax + bx) / 2, (ay + by) / 2);
-        g.lineTo((ax + bx) / 2 + nx * 8, (ay + by) / 2 + ny * 8);
-        g.stroke();
-      }
-    }
-    g.restore();
   }
 
   function drawCursor(g: CanvasRenderingContext2D, r: DOMRect) {
@@ -321,31 +249,46 @@ export function createMapView(o: MapViewOptions): MapView {
         st.mode = 'range';
       }
     }
-    drawing = { stroke: st, pointer: e.pointerId };
+    st.pts = roundPath(st.pts);
+    const live = o.begin(st);
+    drawing = { stroke: live, pointer: e.pointerId };
+    cache.updateStroke(o.world().surface, live, strokeBounds(live));
+    schedule();
+    if (brushInfo(live.brush).kind === 'point') drawing = null;
     return true;
+  };
+
+  /** The part of a growing stroke that can have changed: its last stretch (ends fade), or all of a tapering spur. */
+  const changedPart = (st: Stroke): [number, number, number, number] => {
+    if (st.taper !== undefined && st.taper !== 1) return strokeBounds(st);
+    const p = st.pts;
+    let len = 0;
+    let k = p.length - 2;
+    while (k > 0 && len < st.size * 2) {
+      len += Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]);
+      k -= 2;
+    }
+    return strokeBounds({ ...st, pts: p.slice(k) });
   };
 
   const extendStroke = (x: number, y: number) => {
     if (!drawing) return;
     const st = drawing.stroke;
-    if (brushInfo(st.brush).kind === 'point') return;
     const p = st.pts;
     const lx = p[p.length - 2];
     const ly = p[p.length - 1];
-    const step = Math.max(st.size * 0.15, 3 / view.scale);
-    if (Math.hypot(x - lx, y - ly) >= step) {
-      p.push(x, y);
-      schedule();
-    }
+    const step = Math.max(st.size * 0.12, 3 / view.scale);
+    if (Math.hypot(x - lx, y - ly) < step) return;
+    // Paint as you go: the stroke grows in the world, and only the changed part is redrawn.
+    const grown: Stroke = { ...st, pts: [...p, ...roundPath([x, y])] };
+    drawing.stroke = grown;
+    o.update(grown);
+    cache.updateStroke(o.world().surface, grown, changedPart(grown));
+    schedule();
   };
 
   const finishStroke = () => {
-    if (!drawing) return;
-    const st = drawing.stroke;
     drawing = null;
-    st.pts = roundPath(st.pts);
-    o.commit(st);
-    cache.setSurface(o.world().surface, strokeBounds(st as Stroke));
     schedule();
   };
 
@@ -360,8 +303,11 @@ export function createMapView(o: MapViewOptions): MapView {
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
-      // Two fingers: cancel any stroke and pinch instead.
-      drawing = null;
+      // Two fingers: take back the stroke just started and pinch instead.
+      if (drawing) {
+        drawing = null;
+        o.cancel();
+      }
       panning = true;
       const [a, b] = [...pointers.values()];
       pinch = Math.hypot(a.x - b.x, a.y - b.y);

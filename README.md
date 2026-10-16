@@ -44,9 +44,15 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
   brush settings. The picture and the simulation's "what is here?" are both worked out from the
   strokes, so the land is the same at every zoom.
 - **Land & Sea:** Land, Shallow sea and Deep sea brushes. A soft land edge leaves a strip of shallows.
-- **Relief:** Mountains (Range, Spur that snaps onto a range and tapers, Massif; a Side ridges
-  setting), Hills, Plateau, Cliffs (choose the high side), Canyon / gorge and Ravine (both block
-  travel), Crater.
+- **Live painting:** every brush paints onto the map as you drag, at its current settings.
+- **Relief:** Mountains paint a crest down the middle of the brush, sloping to both sides, and
+  build up: paint over a range to raise and widen it, or along its edges with a smaller, weaker
+  brush to add shoulders. Modes: Range, Spur (snaps onto a range and tapers), Massif; a Side
+  ridges setting. Also Hills (build up too), Plateau, Cliffs (choose the high side), Canyon /
+  gorge and Ravine (both block travel), Crater, and Erosion (cuts gullies, lowers peaks, makes
+  coasts ragged).
+- **Look:** shaded relief like an atlas: mountains tinted from olive foothills through tan and
+  rock to snow on the peaks.
 - **Ground cover:** Forest, Jungle, Grassland, Tundra, Marsh / swamp, Dunes, Badlands, Salt flats,
   Glacier / ice, Beach / shore.
 - **Sea:** Whirlpools, dangerous to ships or harmless.

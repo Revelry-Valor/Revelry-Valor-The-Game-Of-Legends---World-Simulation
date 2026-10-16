@@ -33,7 +33,7 @@ export interface Fields {
   ground: Float32Array;
   /** Ground cover by brush, 0–1 (only brushes that appear). */
   cover: Partial<Record<CoverBrush, Float32Array>>;
-  /** How bold the mountains are here, 0–1. */
+  /** How high the mountains are built up here (0, up to about 1.6). */
   mountain: Float32Array;
   /** Mountain zone (0 none, 1 foothills … 4 peaks). */
   zone: Uint8Array;
@@ -51,6 +51,11 @@ export interface Fields {
 export type GroundClass = 'deep' | 'shallow' | 'land';
 
 export const groundClass = (v: number): GroundClass => (v >= 1.5 ? 'land' : v >= 0.5 ? 'shallow' : 'deep');
+
+/** How high built-up mountains can get (in relief units): more paint levels off toward this. */
+const MOUNTAIN_CAP = 1.6;
+/** Relief from everything but mountains, scaled to match the stronger lighting. */
+const OTHER_RELIEF = 0.25;
 
 const GROUND_TARGET: Record<string, number> = { deep: 0, shallow: 1, land: 2 };
 
@@ -179,7 +184,10 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     plateau: new Float32Array(n),
     relief: new Float32Array(n),
   };
-  const mtnRelief = new Float32Array(n);
+  const mass = new Float32Array(n);
+  const ribSum = new Float32Array(n);
+  const ribWeight = new Float32Array(n);
+  const erosion = new Float32Array(n);
   const hills = new Float32Array(n);
   const cliffRelief = new Float32Array(n);
   const crater = new Float32Array(n);
@@ -218,6 +226,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     }
     switch (s.brush) {
       case 'mountains': {
+        // Mountains build up: each stroke adds to the mass already there, like an airbrush.
         const massif = s.mode === 'massif';
         const sr = s.sideRidges ?? 0;
         const spacing = Math.max(s.detail * 1.8, px * 4);
@@ -226,46 +235,47 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
           const c = shape(s, x, y, d, r, px, seed);
           if (c <= 0) return;
           if (er) {
-            f.mountain[i] *= 1 - c;
-            mtnRelief[i] *= 1 - c;
+            mass[i] *= 1 - c;
+            ribSum[i] *= 1 - c;
+            ribWeight[i] *= 1 - c;
             return;
           }
           const e = Math.min(1, d / r);
-          // Fine peaks and valleys everywhere, in world position.
-          const peaks = ridged(x, y, s.detail * 0.6, px, seed + 21, 6, 0.45);
-          let profile: number;
-          let h: number;
-          if (massif) {
-            // A broad, knotted block.
-            profile = c * (0.7 + 0.3 * fbm(x, y, r * 0.7, Math.max(px, r * 0.1), seed + 11, 3));
-            const knots = ridged(x, y, s.detail * 1.4, px, seed + 23, 4, 0.5);
-            h = profile * (1.6 + 0.9 * knots + 0.3 * peaks);
-          } else {
-            // Ranges are tallest along the crest and fall away to both sides.
-            profile = c * (1 - e * e);
-            // Ridges and valleys laid out along and across the crest, so they run down the flanks.
-            let lu = t / spacing;
-            const lv = sd / (spacing * 1.7);
-            lu += 0.55 * noise2(lu * 0.4, lv * 0.7, seed + 33);
-            const ribs = ridged(lu, lv, 1, px / spacing, seed + 31, 3, 0.5);
-            // The range's body carries the light; side ridges and fine peaks are smaller.
-            h = profile * (1.9 + (ribs - 0.3) * 1.1 * sr * Math.min(1, (1 - e) * 3) + (peaks - 0.3) * 0.35 * (1 - 0.5 * sr));
-          }
-          // Zones follow the range's shape, varied gently, not every small peak.
-          const bold = str * profile * (0.9 + 0.25 * fbm(x, y, s.detail * 2.5, Math.max(px, s.detail * 0.6), seed + 25, 3));
-          if (bold > f.mountain[i]) f.mountain[i] = Math.min(1, bold);
-          const hh = Math.max(0, h) * (0.35 + 0.65 * str);
-          if (hh > mtnRelief[i]) mtnRelief[i] = hh;
+          // Side ridges and valleys run square to this stroke's crest, down its flanks.
+          let lu = t / spacing;
+          const lv = sd / (spacing * 1.6);
+          lu += 0.5 * noise2(lu * 0.35, lv * 0.6, seed + 33);
+          const rib = massif ? ridged(x, y, spacing * 0.9, Math.max(px, spacing / 8), seed + 23, 4, 0.5) : ridged(lu, lv, 1, Math.max(px / spacing, 0.08), seed + 31, 4, 0.5);
+          // A crest down the middle of the brush: steep near the top, easing out into foothills,
+          // with peaks and saddles along it. The ridges reach out and the valleys cut in, so the
+          // range's edge is lobed, not smooth.
+          const crest = massif ? 1 : 0.78 + 0.35 * noise2(t / (spacing * 2.2), 0.37, seed + 41);
+          const body = massif ? (1 - e * e * 0.7) : (1 - e) ** 1.5;
+          const lobes = Math.max(0, 1 + (massif ? 0.8 : sr * 1.4) * (rib - 0.45) * smooth(0.05, 0.6, e));
+          // Ranges fall away at their two ends instead of stopping short.
+          const ends = massif ? 1 : smooth(-r, r * 0.6, t) * smooth(-r, r * 0.6, total - t);
+          const add = str * body * crest * lobes * ends * c;
+          mass[i] += add;
+          ribSum[i] += add * (rib - 0.45) * (massif ? 0.8 : sr);
+          ribWeight[i] += add;
         });
         break;
       }
+      case 'erode':
+        rasterStroke(s, g, o, (i, x, y, d, t) => {
+          const c = shape(s, x, y, d, radiusAt(s, t, total, seed), px, seed);
+          if (c <= 0) return;
+          erosion[i] = er ? erosion[i] * (1 - c) : Math.min(1, erosion[i] + c * str * (1 - erosion[i]));
+        });
+        break;
       case 'hills':
         rasterStroke(s, g, o, (i, x, y, d, t) => {
           const c = shape(s, x, y, d, radiusAt(s, t, total, seed), px, seed);
           if (c <= 0) return;
           if (er) return void (hills[i] *= 1 - c);
           const h = c * str * 0.4 * (0.5 + 0.5 * fbm(x, y, s.detail, px, seed + 41, 6));
-          if (h > hills[i]) hills[i] = h;
+          // Hills build up too, levelling off as they grow.
+          hills[i] += h * Math.max(0, 1 - hills[i] / 0.6);
         });
         break;
       case 'plateau':
@@ -325,15 +335,36 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     }
   }
 
-  // Mountain zones: automatic from how bold the mountains are, then anything painted by hand.
+  // Mountains: the built-up mass levels off as it grows, and erosion wears it down.
+  for (let i = 0; i < n; i++) {
+    let m = mass[i];
+    if (m <= 0) continue;
+    m = MOUNTAIN_CAP * (1 - Math.exp(-m / MOUNTAIN_CAP));
+    f.mountain[i] = m * (1 - 0.3 * erosion[i]);
+  }
+
+  // Mountain zones: automatic from how high the mountains are built, then anything painted by hand.
   for (let i = 0; i < n; i++) {
     const b = f.mountain[i];
-    let z: ZoneId = b < 0.04 ? 0 : b < 0.2 ? 1 : b < 0.42 ? 2 : b < 0.68 ? 3 : 4;
+    let z: ZoneId = b < 0.03 ? 0 : b < 0.15 ? 1 : b < 0.35 ? 2 : b < 0.6 ? 3 : 4;
     if (zoneOverride && zoneOverride[i] >= 0) z = zoneOverride[i] as ZoneId;
     f.zone[i] = z;
   }
 
-  // Relief, for lighting only. Stacked in the design's layer order.
+  // Erosion also wears coasts ragged.
+  for (let j = 0; j < g.h; j++) {
+    for (let i = 0; i < g.w; i++) {
+      const idx = j * g.w + i;
+      const ev = erosion[idx];
+      const v = f.ground[idx];
+      if (ev <= 0 || v < 0.6 || v > 2.4) continue;
+      const x = g.x0 + i * px;
+      const y = g.y0 + j * px;
+      f.ground[idx] = v + ev * 0.7 * fbm(x, y, 25, px, o.seed + 81, 7);
+    }
+  }
+
+  // Relief, for lighting only. Mountains carry most of it; the rest is quieter detail.
   const dunes = f.cover.dunes;
   for (let j = 0; j < g.h; j++) {
     const y = g.y0 + j * px;
@@ -346,7 +377,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
       let r = 0.03 * fbm(x, y, 60, px, o.seed + 1, 6);
       const pl = f.plateau[idx];
       if (pl > 0) r += smooth(0.25, 0.55, pl) * 0.42 * (1 + 0.08 * fbm(x, y, 20, px, o.seed + 2));
-      r += hills[idx] + mtnRelief[idx] + cliffRelief[idx] + crater[idx];
+      r += hills[idx] + cliffRelief[idx] + crater[idx];
       if (f.canyon[idx] > 0) r -= smooth(0, 0.6, f.canyon[idx]) * 0.45;
       if (f.ravine[idx] > 0) r -= smooth(0, 0.7, f.ravine[idx]) * 0.2;
       if (dunes && dunes[idx] > 0) {
@@ -357,6 +388,18 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
       }
       const forest = (f.cover.forest?.[idx] ?? 0) + (f.cover.jungle?.[idx] ?? 0);
       if (forest > 0) r += Math.min(1, forest) * 0.012 * fbm(x, y, Math.max(px * 2.5, 0.08), px * 0.8, o.seed + 6, 3);
+      const ev = erosion[idx];
+      if (ev > 0) r += ev * 0.06 * (ridged(x, y, 6, px, o.seed + 83, 5, 0.5) - 0.5);
+      r *= OTHER_RELIEF;
+      const m = f.mountain[idx];
+      if (m > 0) {
+        // Shaded-relief look: a clear body and crest, side ridges, and only a little fine detail.
+        const ribs = ribWeight[idx] > 0 ? ribSum[idx] / ribWeight[idx] : 0;
+        const fine = ridged(x, y, 8, px, o.seed + 85, 4, 0.45) - 0.5;
+        r += m + m * ribs * 0.7 + m * fine * 0.06;
+        // Erosion cuts branching gullies into the mountainside.
+        if (ev > 0) r += ev * m * 0.35 * (ridged(x, y, 14, px, o.seed + 87, 5, 0.55) - 0.55);
+      }
       f.relief[idx] = r * land;
     }
   }
