@@ -593,6 +593,15 @@ Rain crystals and waterfalls raise wetness locally. The rainfall override shifts
 **Sanity check:** heavy rain along the ITCZ deep into continents, on mid-latitude east coasts in summer, and on high-latitude west coasts in winter.
 
 ### 7.9 Climate zones
+**Adapted for this sim (decided).**
+- **15 zones:** tropical rainforest, tropical monsoon, tropical savanna; hot desert, cold desert, hot steppe, cold steppe; Mediterranean, humid subtropical, oceanic; humid continental, subarctic; tundra, ice cap. (Full Köppen detail isn't needed.)
+- **Rules in °F:** ice cap: summer below 32 °F; tundra: summer 32–50 °F; tropical: winter at or above 64 °F; temperate: winter at or above 32 °F and summer at or above 50 °F (hot summer at 72 °F); continental: winter below 32 °F, summer at or above 50 °F (humid continental if summer reaches about 66 °F, otherwise subarctic). Rain rules follow the order below; deserts get a steppe border about 60–190 miles wide in the tropics and twice that at higher latitudes, thinner on steep slopes.
+- **Mountains** have no zone of their own: their hidden climate heights cool them, so they step through the zones on the way up.
+- Zone boundaries are blended over a short distance. The Climate zones view has a legend, and the readout names the zone with both seasons' temperature and rain.
+- **Oases:** a waterfall oasis or a lake in a desert stays desert, but the ground near it is more fertile and more livable (for farming and settling).
+- **Painted cover vs. zone:** the zone (and its temperature and rain) always comes from the climate; painted ground cover decides what grows and how it looks there. A zone only changes if the climate changes.
+- **New ground cover types,** both automatic and as brushes: savanna (grass with scattered trees), dry scrub (Mediterranean), conifer forest / taiga, steppe grass, rocky desert. Trees and shrubs are part of each cover's texture, never drawn as symbols.
+
 From each point's warmest and coldest season temperatures and its summer and winter precipitation states.
 
 | Group | Rule (season mean) |
