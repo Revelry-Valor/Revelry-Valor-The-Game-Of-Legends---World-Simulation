@@ -34,6 +34,7 @@ Items marked **Proposed** are suggestions waiting for a decision. Items marked *
 - **Expanding:** in the canvas options, choose which directions to expand and how far. Expanding north or south extends the map's latitudes to match. Nothing already on the map moves or changes.
 - **Edges (a setting per world):** the ocean wraps east to west, or anything off the map simply has no effect. North and south edges never wrap.
 - A flat map world stays flat. It cannot be turned into a globe.
+- **Where the equator is (decided):** by default the middle of a flat map is the equator (0°). You can move the equator up or down the map, at creation and later in World settings, to put a continent where you want its climate to be. Globes can't do this; their latitudes only change when the planet is made bigger or smaller.
 
 ### Globe world
 - A whole planet with continents. It must be started as a globe.
@@ -361,7 +362,16 @@ Pressure zones are placed fresh each season, not from a fixed latitude table. Ai
 | Winter continental highs | Interiors of large landmasses ~5–10 °C colder than ocean at the same latitude | Winter only | Sinking | Cold, dry; air pushed offshore |
 | Summer thermal lows (optional) | Hot continental interiors | Summer only | Rising | Draw monsoon air inland |
 
-- **ITCZ per season:** take the warmest latitude in each column of longitude, then smooth the line so it doesn't zigzag through mountains.
+- **ITCZ per season (decided, replaces "warmest latitude per column"):** one path per season running the full width of the world. Summer sits in the northern hemisphere, winter mirrors it into the southern one with the same rules.
+  - **Tilt sets the limit.** The path never goes further from the equator than the axial tilt (23.5° on Earth), except a few degrees past it over hot interiors and big plateaus. Zero tilt keeps it on the equator.
+  - **Over open ocean** it sinks toward its lowest point: 5° from the equator on Earth (5°N in summer, 5°S in winter), scaled with tilt (about a fifth of the tilt).
+  - **Over land** it climbs toward the tilt line.
+  - **Width decides how far it gets.** It starts ramping up while still at sea as it nears a coast (ramp distance slider, default 500 km), peaks at the middle of the landmass, and drops back to meet the sea on the far side. A wide ocean lets it sink all the way to 5° in its middle; narrow seas and small islands move it only in proportion to their size. Sliders: land width for full reach (default 2,500 km) and ocean width for full reach (default 4,000 km).
+  - **Only land in the band counts:** land between the equator and the tilt line in that season's hemisphere. A big landmass in the 10–30° band with ocean on its equator side gives the biggest swing and the strongest monsoon.
+  - **Cold currents and upwelling** near the equator hold it away from the equator: over the eastern side of oceans it stays about 5–10° into the summer hemisphere and resists crossing.
+  - **Hemisphere imbalance:** if one hemisphere has much more land, both paths shift a few degrees toward it (about 5°N on Earth).
+  - **Plateaus** add pull. The path is smoothed so it never zigzags; it joins up across the edges on wrapping maps.
+  - **Off a flat map's edges** counts as open ocean. Orbital eccentricity is left out.
 - **Rotation around pressure centres:** highs spiral outward, clockwise in the north, counterclockwise in the south; lows spiral inward, the opposite way.
 
 **Prevailing winds** (named by the direction they blow from)
@@ -387,6 +397,35 @@ Pressure zones are placed fresh each season, not from a fixed latitude table. Ai
 | 16 days | ~70° |
 
 ### 7.5 Ocean currents
+**Decided rules (these override the general notes below where they differ).** Colours on the map: black = neutral, red = warm, blue = cold. Latitudes below are for Earth's day length; they move with the cell edges for other day lengths.
+
+*Where currents can flow.* Only over Deep sea paint (deeper than about 200 m). Shallow sea paint is the continental shelf: currents run along its edge, never across it. Passages between landmasses let part of a current through only if a deep-water gap is wide enough (slider); otherwise the gap is a wall.
+
+*Equatorial currents (black, neutral).* One each side of the equator, about 5–20°, driven west by the trades; wide, slow, steady. They warm the whole way across, so the west side of every ocean has the warmest water and higher sea level.
+
+*Equatorial countercurrent (black, neutral).* Runs east under the ITCZ, between the two equatorial currents: narrow and fairly fast, carrying piled-up warm water back east. Strongest when the ITCZ is far from the equator; weak or gone when the ITCZ is within about 3°. Where it reaches the far coast it turns along the shelf edge, splits north and south, pushes back the cold current and its upwelling at that latitude (a warm, rainy pocket on an otherwise cool, dry coast: warm anomaly, seeds "wet", cancels upwelling while strong), then mostly turns back west into the equatorial currents, closing the loop. Where it weakens seasonally, the cold current takes back over, so that coast swings between a warm wet season and a cool dry one.
+
+*Hitting a shelf: splits.* A current meeting the shelf edge head-on splits both ways along it. Each branch is weighted by the coast's angle (a coast slanting toward one pole sends more water that way) and by which side the ITCZ is on that season.
+
+*Warm boundary currents (red).* When a westward equatorial current hits a shelf it splits and turns red, carrying warm water poleward along the coast to about 30°.
+
+*Crossing the sea (westerlies, 30–60° cell).* The warm water then crosses the ocean eastward at about 40–50°, keeping a slight poleward slant, so it arrives near 50° on the far side. If a continent blocks it from getting that far poleward, it simply follows the coast east to the other side of the sea.
+
+*Far side at 40–50°: splits again.* Cold (blue) equatorward along that coast, back to the equatorial current, closing the subtropical gyre; warm (red) poleward to about 70–80°.
+
+*Polar easterlies.* At 70–80° the easterlies push the water back west across the sea. Where it hits a shelf it splits again: cold (blue) equatorward, closing the subpolar gyre.
+
+*Polar current.* Above that, a neutral (black) current circles the pole east to west.
+
+*Mid-ocean currents and nearby land.* A major current crossing open ocean on its own, with a substantial landmass directly poleward or equatorward of it within a set distance (Open: how far), may split off a cold branch toward that land to complete a gyre. The reverse also holds: a warm current running along a continent within that distance of a major ocean current turns out to meet it and joins it.
+
+*Seas closed off from the equator.* Where a sea is cut off from the equator (by continents or their shelves, which count the same), the polar currents send cold water down its western side, following the rules above; on meeting a shelf it turns east and warms, then heads poleward again to rejoin the polar flow: a gyre of its own.
+
+*Shelf water.* Shelf temperature blends the nearby current with local sun heating, weighted by distance from the shelf edge. A narrow shelf brings the current's warmth (and rain) right to the coast; a wide shelf softens it and is warmed more by the sun (prime reef country where the equatorial current arrives).
+
+*Reefs.* Best on warm, wide, shallow shelves where the equatorial current arrives; also near the countercurrent's landfall if the water stays above the reef temperature in winter.
+
+**General notes (from the Worldbuilding Pasta method):**
 A current's temperature is relative to where it is now:
 - **Warm:** moving poleward, carrying water warmer than the local latitude.
 - **Cold:** moving equatorward, carrying water colder than the local latitude.
@@ -447,6 +486,13 @@ Per season: base temperature by latitude, then corrections for currents, land vs
   - Trade belt (~0–30°) reverses: east coasts get ocean air, west coasts are dry.
 - **Altitude:** about 6.5 °C per km of height class (slider). Roughly, 1 km acts like moving 8° poleward.
 - **Sky layers:** colder and windier with each layer up.
+
+**Sea ice (decided)**
+- The bulk of the sea ice lies between 70° and 80°.
+- It reaches further equatorward as a thin strip along cold-current coasts: up to 45° of latitude beyond the 70° line at most (Open: confirm, and whether that maximum shrinks on warmer worlds).
+- Warm currents eat it away and cold currents build it up. It never vanishes because of a warm current; there is just less on the warm side and more on the cold side.
+- A warm current crossing the sea corrals the ice: in summer it stops the ice from crossing that current.
+- Winter: more ice, its edge toward 70° and beyond, and the cold-coast strips reach further. Summer: the edge pulls back toward 80°, more so where warm currents run, and the strips shrink.
 
 **Ice**
 - No ice-free land below 0 °C in summer; no land ice above 0 °C in summer.
