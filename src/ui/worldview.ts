@@ -1,7 +1,7 @@
 import { strokeBounds, ZONES, type Stroke } from '../core/paint';
-import { northForCentre, southLatitude, validateSettings } from '../core/settings';
-import { formatDistance, formatLatitude, KM_PER_DEGREE, milesToKm } from '../core/units';
-import { expandWorld, expansionProblem, LAYERS, type Expansion, type World } from '../core/world';
+import { centreLatitude, kmPerDegree, placeAtLatitude, southLatitude, validateSettings } from '../core/settings';
+import { formatDistance, formatLatitude, milesToKm } from '../core/units';
+import { expandedSettings, expandWorld, expansionProblem, LAYERS, type Expansion, type World } from '../core/world';
 import { ZONE_INFO } from '../core/climate';
 import { RAIN_LEGEND, TEMP_LEGEND, type MapStyle, type MapView } from '../render/paintmap';
 import { createClimateRunner } from './climaterun';
@@ -10,6 +10,7 @@ import { choice, h, numberField } from './dom';
 import { createMapView } from './mapview';
 import { planetFields } from './settingsform';
 import { createToolPanel } from './toolpanel';
+import { sizeMeter, worldLocator } from './worldsize';
 
 /**
  * The world screen: the map, the painting tools (Phase 1), the layer list, the world's
@@ -242,6 +243,7 @@ export function showWorld(app: App, start: World): () => void {
 
   const canvasOptions = () => {
     const e: Expansion = { north: 0, south: 0, east: 0, west: 0 };
+    const meter = sizeMeter();
     const preview = h('p', { class: 'summary' });
     const problem = h('p', { class: 'problems', role: 'alert' });
     const apply = h('button', { type: 'button', class: 'primary' }, 'Expand');
@@ -250,13 +252,13 @@ export function showWorld(app: App, start: World): () => void {
       const err = expansionProblem(world, e);
       apply.disabled = !!err;
       problem.textContent = err && err !== 'Choose how far to expand.' ? err : '';
-      const w = s.widthKm + e.east + e.west;
-      const hk = s.heightKm + e.north + e.south;
-      const n = s.northLatitude + e.north / KM_PER_DEGREE;
-      preview.textContent = `New size ${formatDistance(w)} × ${formatDistance(hk)}, from ${formatLatitude(n)} to ${formatLatitude(n - hk / KM_PER_DEGREE)}.`;
+      const next = expandedSettings(s, e);
+      const grew = kmPerDegree(next) > kmPerDegree(s) + 1e-6;
+      preview.textContent = `New size ${formatDistance(next.widthKm)} × ${formatDistance(next.heightKm)}, from ${formatLatitude(next.northLatitude)} to ${formatLatitude(southLatitude(next))}.${grew ? ' The map is now bigger than Earth: its planet grows, and each degree covers more ground.' : ''}`;
+      meter.update(next, s);
     };
     const side = (k: keyof Expansion, label: string) =>
-      numberField({ label, value: 0, min: 0, max: 20000, step: 10, unit: 'miles', change: (v) => { e[k] = milesToKm(Math.max(0, v)); update(); } });
+      numberField({ label, value: 0, min: 0, max: 60000, step: 10, unit: 'miles', change: (v) => { e[k] = milesToKm(Math.max(0, v)); update(); } });
     apply.addEventListener('click', () => {
       world = expandWorld(world, e);
       // Undo steps hold strokes at their old positions, so they no longer apply.
@@ -277,6 +279,9 @@ export function showWorld(app: App, start: World): () => void {
       h('p', { class: 'muted small' }, 'Add ocean to any side. Nothing already on the map moves; growing north or south extends its latitudes.'),
       h('div', { class: 'expand-grid' }, side('north', 'North'), side('west', 'West'), side('east', 'East'), side('south', 'South')),
       preview,
+      h('h3', {}, 'How big it is'),
+      meter.el,
+      h('p', { class: 'muted small' }, 'Hollow dot: the map now. Solid dot: after growing. Red line: its planet’s whole surface (when not Earth-sized).'),
       problem,
       h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Cancel'), apply),
     );
@@ -286,13 +291,34 @@ export function showWorld(app: App, start: World): () => void {
     const s = { ...world.settings, climate: { ...world.settings.climate }, rainfall: { ...world.settings.rainfall } };
     const problems = h('ul', { class: 'problems', role: 'alert' });
     const apply = h('button', { type: 'button', class: 'primary' }, 'Apply');
-    const check = () => {
+    const setField = (field: HTMLElement, v: number) => field.querySelectorAll('input').forEach((i) => ((i as HTMLInputElement).value = String(Math.round(v * 10) / 10)));
+    const locator = worldLocator((lat, lon) => {
+      s.northLatitude = placeAtLatitude(s, lat);
+      s.centreLongitude = lon;
+      setField(latField, lat);
+      check(true);
+    });
+    const latField = numberField({
+      label: 'Centre latitude',
+      value: Math.round(centreLatitude(s) * 10) / 10,
+      min: -90,
+      max: 90,
+      step: 0.5,
+      unit: '°',
+      slider: true,
+      hint: 'Moves the map north or south on its world (0: the equator runs through the middle). The painting stays; the climate follows.',
+      change: (v) => { s.northLatitude = placeAtLatitude(s, v); check(); },
+    });
+    const check = (fromLocator = false) => {
+      // A planet size change rescales the degrees: keep the map between the poles.
+      s.northLatitude = placeAtLatitude(s, centreLatitude(s));
+      if (s.mapType === 'flat' && !fromLocator) locator.update(s);
       const list = validateSettings(s);
       problems.replaceChildren(...list.map((p) => h('li', {}, p)));
       apply.disabled = list.length > 0;
     };
     apply.addEventListener('click', () => {
-      world = { ...world, settings: s };
+      world = { ...world, settings: { ...s } };
       changed();
       save();
       dialog.close();
@@ -304,19 +330,7 @@ export function showWorld(app: App, start: World): () => void {
     openDialog(
       h('h2', {}, 'World settings'),
       h('div', { class: 'field' }, h('label', { for: 'ws-name' }, 'Name'), h('input', { id: 'ws-name', type: 'text', value: s.name, maxlength: 60, oninput: (ev: Event) => { s.name = (ev.target as HTMLInputElement).value; check(); } })),
-      s.mapType === 'flat'
-        ? numberField({
-            label: 'Centre latitude',
-            value: Math.round(((s.northLatitude + southLatitude(s)) / 2) * 10) / 10,
-            min: -85,
-            max: 85,
-            step: 0.5,
-            unit: '°',
-            slider: true,
-            hint: 'Moves the map north or south on its world (0: the equator runs through the middle). The painting stays; the climate follows.',
-            change: (v) => { s.northLatitude = northForCentre(v, s.heightKm); check(); },
-          })
-        : '',
+      s.mapType === 'flat' ? h('div', {}, h('h3', {}, 'Where it sits on its world'), locator.el, latField) : '',
       planetFields(s, check),
       problems,
       h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Cancel'), apply),

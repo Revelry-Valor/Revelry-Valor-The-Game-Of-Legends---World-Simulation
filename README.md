@@ -135,6 +135,13 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 - **New brushes:** Savanna, Dry scrub, Conifer forest / taiga, Steppe grass, Rocky desert;
   **Climate crystal** (heat, cold or rain, with a reach); **Rain Shadow Pen** (set the height
   the climate sees along a line, with presets); **Gap (pass)** to let moist air through.
+- **Where the map sits:** Create world (and World settings) show the whole world as a strip with
+  the map on it; drag the map to place it (latitude and longitude), or use the sliders.
+- **Size meter:** Create world and Canvas options compare the map's area with the surfaces of real
+  planets (Moon to Jupiter) and say how many times Earth's surface it is.
+- **Degrees grow with big maps:** the planet is Earth-sized until the map outgrows it (taller than
+  pole to pole or wider than Earth is around). Past that the planet grows to fit, and each degree
+  covers more ground. Maps can now be up to 120,000 km a side.
 - **Settings:** the equator runs through the middle of a new flat map; **Centre latitude**
   moves the map (also in World settings). Temperatures show in °F. Optional planet size for
   flat maps. **Climate fine-tuning** has sliders for rain, cooling with height, currents, reef

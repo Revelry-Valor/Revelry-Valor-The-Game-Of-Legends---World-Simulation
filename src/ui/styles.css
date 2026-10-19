@@ -191,3 +191,25 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .tab { flex: 1 1 auto; padding: 0.35rem 0.55rem; font-size: 0.85rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
 .tab[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .tab-body { display: flex; flex-direction: column; gap: 1.25rem; }
+
+/* Size meter: the map's area against real planets (log scale). */
+.size-meter { display: grid; gap: 0.35rem; margin: 0.4rem 0 0.2rem; }
+.size-bar { position: relative; height: 3.4rem; margin: 0 0.6rem; }
+.size-track { position: absolute; left: 0; right: 0; top: 0.55rem; height: 0.5rem; border-radius: 999px; background: linear-gradient(to right, var(--line), var(--sea-a)); }
+.size-tick { position: absolute; top: 0.3rem; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font-size: 0.68rem; color: var(--muted); white-space: nowrap; }
+.size-tick i { width: 1px; height: 1rem; background: var(--muted); }
+.size-tick:nth-child(odd) b { margin-top: 1.05rem; }
+.size-tick b { font-weight: 500; }
+.size-mark { position: absolute; top: 0.25rem; width: 0.9rem; height: 0.9rem; border-radius: 50%; transform: translateX(-50%); background: var(--accent); border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--accent); z-index: 2; }
+.size-mark.before { background: var(--panel); z-index: 1; }
+.size-planet { position: absolute; top: 0.1rem; width: 2px; height: 1.2rem; transform: translateX(-50%); background: var(--danger); }
+.size-text { margin: 0; }
+
+/* Where the map sits on its world. */
+.locator-wrap { display: grid; gap: 0.3rem; margin: 0.3rem 0 0.6rem; }
+.locator { width: 100%; max-width: 30rem; aspect-ratio: 2 / 1; border-radius: 6px; cursor: crosshair; touch-action: none; border: 1px solid var(--line); }
+.locator-world { fill: var(--sea-a); }
+.locator-grid { stroke: var(--grid); stroke-width: 0.5; }
+.locator-eq { stroke: var(--equator); stroke-width: 1; }
+.locator-tropic { stroke: var(--circle); stroke-width: 0.6; stroke-dasharray: 3 3; }
+.locator-map { fill: rgba(242, 195, 107, 0.35); stroke: var(--equator); stroke-width: 1.2; cursor: grab; vector-effect: non-scaling-stroke; }

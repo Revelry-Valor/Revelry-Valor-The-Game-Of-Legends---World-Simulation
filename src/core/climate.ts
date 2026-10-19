@@ -1,7 +1,6 @@
-import { CLIMATE_DEFAULTS, climateRadiusKm, type WorldSettings } from './settings';
+import { CLIMATE_DEFAULTS, climateRadiusKm, kmPerDegree, type WorldSettings } from './settings';
 import type { Stroke, Surface } from './paint';
 import { evaluate } from './terrain';
-import { KM_PER_DEGREE } from './units';
 import { flowAt, riverNetwork, widthForFlow } from './water';
 
 /**
@@ -232,8 +231,9 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
   const height = f.climateH;
   const land = new Uint8Array(n);
   for (let k = 0; k < n; k++) land[k] = ground[k] >= 1.5 ? 1 : 0;
+  const kpd = kmPerDegree(s);
   const lat = new Float32Array(h);
-  for (let j = 0; j < h; j++) lat[j] = s.northLatitude - ((j + 0.5) * stepY) / KM_PER_DEGREE;
+  for (let j = 0; j < h; j++) lat[j] = s.northLatitude - ((j + 0.5) * stepY) / kpd;
   compCache = null;
   const latOf = (k: number) => lat[(k / w) | 0];
 
@@ -260,7 +260,7 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
     }
   }
 
-  const ctx: Ctx = { s, c, w, h, n, stepX, stepY, W, H, wrap, lat, land, ground, height, distSea, distLand, distDeep, toLandX, toLandY, tilt, tiltF, avgShift, edges, latOf };
+  const ctx: Ctx = { kpd, s, c, w, h, n, stepX, stepY, W, H, wrap, lat, land, ground, height, distSea, distLand, distDeep, toLandX, toLandY, tilt, tiltF, avgShift, edges, latOf };
   const summer = season(ctx, surface, 1);
   const winter = season(ctx, surface, -1);
   const zone = zones(ctx, summer, winter);
@@ -274,6 +274,8 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
 }
 
 interface Ctx {
+  /** Kilometres per degree of latitude on this planet. */
+  kpd: number;
   s: WorldSettings;
   c: typeof CLIMATE_DEFAULTS;
   w: number;
@@ -372,7 +374,7 @@ function season(ctx: Ctx, surface: Surface, s: number): SeasonClimate {
       let anomaly = 0;
       let blocked = 0;
       for (let t = 0; t < 400 && dist < 3000; t++) {
-        const la2 = ctx.s.northLatitude - y / KM_PER_DEGREE;
+        const la2 = ctx.s.northLatitude - y / ctx.kpd;
         const b = belt(ctx, la2, s);
         const len = Math.hypot(b.u, b.v);
         x -= (b.u / len) * step;
@@ -517,7 +519,7 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
   // Land in the band between the equator and the tilt line in the summer hemisphere.
   const frac = new Float32Array(w);
   const hgt = new Float32Array(w);
-  const expected = Math.max(1, (tilt * KM_PER_DEGREE) / ctx.stepY);
+  const expected = Math.max(1, (tilt * ctx.kpd) / ctx.stepY);
   for (let i = 0; i < w; i++) {
     let lc = 0;
     let hs = 0;
@@ -668,7 +670,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
   const step = Math.max(stepX * 0.7, 12);
   const shift = s * 2.5 * ctx.tiltF;
   const north = ctx.s.northLatitude;
-  const latAt = (y: number) => north - y / KM_PER_DEGREE;
+  const latAt = (y: number) => north - y / ctx.kpd;
   const wx = (x: number) => (wrap ? ((x % W) + W) % W : x);
   const samp = (arr: Float32Array, x: number, y: number) => {
     const fx = Math.max(0, Math.min(w - 1.001, wx(x) / stepX - 0.5));
@@ -897,7 +899,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
   // The gyre plan for this world's wind cells.
   const E = edges;
   for (const hemi of [1, -1]) {
-    const shiftY = (la: number) => (north - (la * hemi + shift)) * KM_PER_DEGREE;
+    const shiftY = (la: number) => (north - (la * hemi + shift)) * ctx.kpd;
     /** Where each sea run along a latitude ends on its east (or west) side: a current starts there. */
     const runEnds = (la: number, east: boolean, coastOnly = false): number[] => {
       const y = shiftY(la);
@@ -983,7 +985,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
   const ccHemi = it >= 0 ? 1 : -1;
   const ccLat = Math.max(4, Math.min(9, Math.abs(it)));
   {
-    const y = (north - ccLat * ccHemi) * KM_PER_DEGREE;
+    const y = (north - ccLat * ccHemi) * ctx.kpd;
     if (y > 0 && y < H) {
       const j = Math.floor(y / stepY);
       for (let i = 0; i < w; i++) {
@@ -1381,12 +1383,12 @@ function seaRuns(ctx: Ctx, j: number): { a: number; b: number; openA: boolean; o
   return runs;
 }
 
-const rowOfLat = (ctx: Ctx, la: number) => Math.round(((ctx.s.northLatitude - la) * KM_PER_DEGREE) / ctx.stepY - 0.5);
+const rowOfLat = (ctx: Ctx, la: number) => Math.round(((ctx.s.northLatitude - la) * ctx.kpd) / ctx.stepY - 0.5);
 
 function pressureField(ctx: Ctx, s: number, out: SeasonClimate): void {
   const { w, h, n, land, stepX, stepY, W, c, edges, lat } = ctx;
   const centres = out.centres;
-  const yOf = (la: number) => (ctx.s.northLatitude - la) * KM_PER_DEGREE;
+  const yOf = (la: number) => (ctx.s.northLatitude - la) * ctx.kpd;
   const warmShift = 0; // already in the edges
   void warmShift;
   for (const hs of [1, -1]) {
@@ -1418,7 +1420,7 @@ function pressureField(ctx: Ctx, s: number, out: SeasonClimate): void {
           y: yOf(latC),
           amp: (high ? 6 : -6) * strength,
           sx: ring ? 1e6 : Math.max(900, Math.min(3500, len * 0.35)),
-          sy: (high ? (summerHere ? 7.5 : 6) : 6) * KM_PER_DEGREE,
+          sy: (high ? (summerHere ? 7.5 : 6) : 6) * ctx.kpd,
         });
       }
     }
@@ -1439,7 +1441,7 @@ function pressureField(ctx: Ctx, s: number, out: SeasonClimate): void {
       }
     }
     const polarLand = cnt ? lf / cnt : 0;
-    centres.push({ kind: 'high', name: 'Polar high', x: lf ? lx / lf : W / 2, y: yOf(hs * 90), amp: 3 + 5 * polarLand, sx: 1e6, sy: 15 * KM_PER_DEGREE });
+    centres.push({ kind: 'high', name: 'Polar high', x: lf ? lx / lf : W / 2, y: yOf(hs * 90), amp: 3 + 5 * polarLand, sx: 1e6, sy: 15 * ctx.kpd });
   }
   // The field: a weak belt pattern plus every centre.
   for (let j = 0; j < h; j++) {

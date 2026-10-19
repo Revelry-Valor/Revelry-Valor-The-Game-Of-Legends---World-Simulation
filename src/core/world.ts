@@ -1,5 +1,4 @@
-import { KM_PER_DEGREE } from './units';
-import { southLatitude, validateSettings, type WorldSettings } from './settings';
+import { centreLatitude, kmPerDegree, southLatitude, validateSettings, type WorldSettings } from './settings';
 import { emptySurface, shiftSurface, type Surface } from './paint';
 
 /** The world's layers, bottom to top (REDESIGN.md, section 5). Only the surface is always on. */
@@ -76,15 +75,30 @@ onMapShift((w, dx, dy) => {
   w.surface = shiftSurface(w.surface, dx, dy);
 });
 
+/**
+ * The settings after growing a flat map. The old part keeps its latitudes; if the map outgrows
+ * its planet (past Earth's size, unless a planet size is set), the planet grows and every degree
+ * covers more ground, with the old part's middle staying where it was.
+ */
+export function expandedSettings(s: WorldSettings, e: Expansion): WorldSettings {
+  const next = { ...s, widthKm: s.widthKm + e.east + e.west, heightKm: s.heightKm + e.north + e.south };
+  const k = kmPerDegree(next);
+  const span = next.heightKm / k;
+  let north = centreLatitude(s) + (e.north + s.heightKm / 2) / k;
+  // A map as tall as its planet runs pole to pole.
+  if (span >= 179.99) north = 90;
+  return { ...next, northLatitude: north };
+}
+
 /** Why an expansion can't be made (null if it can). */
 export function expansionProblem(world: World, e: Expansion): string | null {
   const s = world.settings;
   if (s.mapType !== 'flat') return 'Only flat maps grow this way; a globe grows by its radius.';
   if ([e.north, e.south, e.east, e.west].some((v) => !(v >= 0))) return 'Expansion amounts must be zero or more.';
   if (e.north + e.south + e.east + e.west === 0) return 'Choose how far to expand.';
-  if (s.northLatitude + e.north / KM_PER_DEGREE > 90) return 'That would reach past the North Pole.';
-  if (southLatitude(s) - e.south / KM_PER_DEGREE < -90) return 'That would reach past the South Pole.';
-  const next = { ...s, widthKm: s.widthKm + e.east + e.west, heightKm: s.heightKm + e.north + e.south };
+  const next = expandedSettings(s, e);
+  if (next.northLatitude > 90 + 1e-6) return 'That would reach past the North Pole.';
+  if (southLatitude(next) < -90 - 1e-6) return 'That would reach past the South Pole.';
   const problems = validateSettings(next);
   return problems.length ? problems[0] : null;
 }
@@ -99,12 +113,7 @@ export function expandWorld(world: World, e: Expansion, now = Date.now()): World
   const s = world.settings;
   const grown: World = {
     ...world,
-    settings: {
-      ...s,
-      widthKm: s.widthKm + e.east + e.west,
-      heightKm: s.heightKm + e.north + e.south,
-      northLatitude: s.northLatitude + e.north / KM_PER_DEGREE,
-    },
+    settings: expandedSettings(s, e),
     updatedAt: now,
   };
   if (e.west || e.north) for (const t of translators) t(grown, e.west, e.north);

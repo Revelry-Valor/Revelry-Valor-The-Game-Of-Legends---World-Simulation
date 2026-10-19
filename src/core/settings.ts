@@ -72,6 +72,8 @@ export interface WorldSettings {
   heightKm: number;
   /** Flat maps: latitude of the north edge (degrees, negative south of the equator). */
   northLatitude: number;
+  /** Flat maps: longitude of the map's middle (where it sits around the world; no effect on climate). */
+  centreLongitude: number;
   /** Flat maps: what lies past the east and west edges. */
   edges: EdgeMode;
   /** Globes: the planet's radius in km. Flat maps use it only when `useRadius` is on. */
@@ -103,7 +105,8 @@ export type SizePresetId = (typeof SIZE_PRESETS)[number]['id'];
 
 /** Smallest and largest flat maps allowed, in km. */
 export const MIN_SIDE_KM = 50;
-export const MAX_SIDE_KM = 40000;
+/** Up to about three Earths around: past Earth's size the planet grows with the map. */
+export const MAX_SIDE_KM = 120000;
 
 export function defaultSettings(overrides: Partial<WorldSettings> = {}): WorldSettings {
   const preset = SIZE_PRESETS[1];
@@ -115,6 +118,7 @@ export function defaultSettings(overrides: Partial<WorldSettings> = {}): WorldSe
     heightKm,
     // The equator runs through the middle of the map by default.
     northLatitude: heightKm / KM_PER_DEGREE / 2,
+    centreLongitude: 0,
     edges: 'void',
     radiusKm: EARTH_RADIUS_KM,
     useRadius: false,
@@ -129,24 +133,57 @@ export function defaultSettings(overrides: Partial<WorldSettings> = {}): WorldSe
   };
 }
 
+/**
+ * The planet's radius (km). Set by hand for globes (or when a flat map uses its own planet size);
+ * otherwise Earth's, until the map outgrows Earth (taller than pole to pole, or wider than the
+ * equator): then the planet grows to fit, and each degree covers more ground.
+ */
+export function planetRadiusKm(s: Pick<WorldSettings, 'mapType' | 'useRadius' | 'radiusKm' | 'widthKm' | 'heightKm'>): number {
+  if (s.mapType === 'globe' || s.useRadius) return s.radiusKm;
+  return Math.max(EARTH_RADIUS_KM, (EARTH_RADIUS_KM * s.heightKm) / (180 * KM_PER_DEGREE), (EARTH_RADIUS_KM * s.widthKm) / (360 * KM_PER_DEGREE));
+}
+
+/** Kilometres in one degree of latitude on this world's planet. */
+export function kmPerDegree(s: Pick<WorldSettings, 'mapType' | 'useRadius' | 'radiusKm' | 'widthKm' | 'heightKm'>): number {
+  return (KM_PER_DEGREE * planetRadiusKm(s)) / EARTH_RADIUS_KM;
+}
+
 /** Latitude of the south edge of a flat map. */
 export function southLatitude(s: WorldSettings): number {
-  return s.northLatitude - s.heightKm / KM_PER_DEGREE;
+  return s.northLatitude - s.heightKm / kmPerDegree(s);
 }
 
 /** Latitude at a distance (km) south of a flat map's north edge. */
 export function latitudeAt(s: WorldSettings, yKm: number): number {
-  return s.northLatitude - yKm / KM_PER_DEGREE;
+  return s.northLatitude - yKm / kmPerDegree(s);
+}
+
+/** Latitude of the middle of a flat map. */
+export function centreLatitude(s: WorldSettings): number {
+  return s.northLatitude - s.heightKm / kmPerDegree(s) / 2;
 }
 
 /** Latitude of the north edge that centres a map of this height on a given latitude. */
-export function northForCentre(centreLatitude: number, heightKm: number): number {
-  return centreLatitude + heightKm / KM_PER_DEGREE / 2;
+export function northForCentre(centreLatitude: number, heightKm: number, kmPerDeg = KM_PER_DEGREE): number {
+  return centreLatitude + heightKm / kmPerDeg / 2;
+}
+
+/** Put a flat map's middle at a latitude, kept between the poles. */
+export function placeAtLatitude(s: WorldSettings, centre: number): number {
+  const half = s.heightKm / kmPerDegree(s) / 2;
+  const c = Math.max(-90 + half, Math.min(90 - half, centre));
+  return c + half;
 }
 
 /** The planet radius the climate uses (km). */
 export function climateRadiusKm(s: WorldSettings): number {
-  return s.mapType === 'globe' || s.useRadius ? s.radiusKm : EARTH_RADIUS_KM;
+  return planetRadiusKm(s);
+}
+
+/** Surface area of the world's planet and of the map (km²). */
+export function planetAreaKm2(s: WorldSettings): number {
+  const r = planetRadiusKm(s);
+  return 4 * Math.PI * r * r;
 }
 
 /** Fahrenheit for people to read; settings are kept in °C. */
@@ -162,8 +199,9 @@ export function validateSettings(s: WorldSettings): string[] {
       if (!(v >= MIN_SIDE_KM)) problems.push(`The map's ${side} must be at least ${MIN_SIDE_KM} km.`);
       if (v > MAX_SIDE_KM) problems.push(`The map's ${side} can be at most ${MAX_SIDE_KM.toLocaleString('en-US')} km.`);
     }
-    if (s.northLatitude > 90) problems.push('The map reaches past the North Pole.');
-    if (southLatitude(s) < -90) problems.push('The map reaches past the South Pole.');
+    if (s.northLatitude > 90 + 1e-6) problems.push('The map reaches past the North Pole.');
+    if (southLatitude(s) < -90 - 1e-6) problems.push('The map reaches past the South Pole.');
+    if (s.useRadius && s.widthKm > 2 * Math.PI * s.radiusKm * 1.0001) problems.push('The map is wider than its planet is around.');
   }
   if ((s.mapType === 'globe' || s.useRadius) && !(s.radiusKm >= 500 && s.radiusKm <= 100000)) {
     problems.push('The planet radius must be between 500 and 100,000 km.');

@@ -1,9 +1,9 @@
 import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
 import { brushInfo, roundPath, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
-import { cToF, latitudeAt, southLatitude } from '../core/settings';
+import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
-import { formatDistance, formatLatitude, KM_PER_DEGREE, kmToMiles, milesToKm } from '../core/units';
+import { formatDistance, formatLatitude, kmToMiles, milesToKm } from '../core/units';
 import type { World } from '../core/world';
 import { MapCache, type MapLook } from '../render/mapcache';
 import { h } from './dom';
@@ -111,11 +111,12 @@ export function createMapView(o: MapViewOptions): MapView {
 
   function drawLatitudes(g: CanvasRenderingContext2D, r: DOMRect, x0: number, x1: number, y0: number) {
     const s = o.world().settings;
-    const pxPerDeg = KM_PER_DEGREE * view.scale;
+    const kpd = kmPerDegree(s);
+    const pxPerDeg = kpd * view.scale;
     const step = pxPerDeg > 40 ? 1 : pxPerDeg > 8 ? 5 : 10;
     const north = s.northLatitude;
     const south = southLatitude(s);
-    const yAt = (lat: number) => toScreen(0, (north - lat) * KM_PER_DEGREE, r)[1];
+    const yAt = (lat: number) => toScreen(0, (north - lat) * kpd, r)[1];
     g.font = `11px ${css('--mono')}`;
     g.textBaseline = 'middle';
     g.lineWidth = 1;
@@ -154,7 +155,7 @@ export function createMapView(o: MapViewOptions): MapView {
   function drawClimate(g: CanvasRenderingContext2D, r: DOMRect, cl: Climate, look: MapLook, x0: number, span: number, copies: number[]) {
     const se = look.season === 1 ? cl.summer : cl.winter;
     const s = o.world().settings;
-    const yOfLat = (lat: number) => toScreen(0, (s.northLatitude - lat) * KM_PER_DEGREE, r)[1];
+    const yOfLat = (lat: number) => toScreen(0, (s.northLatitude - lat) * kmPerDegree(s), r)[1];
     g.save();
     // The ITCZ: where the trade winds meet and the tropical rains follow.
     {

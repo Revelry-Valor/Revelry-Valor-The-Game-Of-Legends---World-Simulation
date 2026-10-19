@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, latitudeAt, northForCentre, SIZE_PRESETS, southLatitude, validateSettings } from '../src/core/settings';
-import { formatDistance, formatLatitude, KM_PER_DEGREE, milesToKm } from '../src/core/units';
+import { centreLatitude, defaultSettings, kmPerDegree, latitudeAt, northForCentre, placeAtLatitude, planetRadiusKm, SIZE_PRESETS, southLatitude, validateSettings } from '../src/core/settings';
+import { EARTH_RADIUS_KM, formatDistance, formatLatitude, KM_PER_DEGREE, milesToKm } from '../src/core/units';
 import { createWorld, expandWorld, expansionProblem, onMapShift } from '../src/core/world';
 import { deleteWorld, importWorld, listWorlds, loadWorld, parseWorld, saveWorld, type KeyValueStore } from '../src/core/storage';
 
@@ -104,5 +104,40 @@ describe('saving worlds', () => {
   it('reports a full store as a readable error instead of failing silently', () => {
     const store: KeyValueStore = { getItem: () => null, setItem: () => { throw new Error('quota exceeded'); }, removeItem: () => {} };
     expect(() => saveWorld(store, createWorld(defaultSettings()))).toThrow(/could not be saved: quota exceeded/);
+  });
+});
+
+describe('the planet grows with a map bigger than Earth', () => {
+  it('keeps Earth’s degrees for maps that fit on Earth', () => {
+    const s = defaultSettings();
+    expect(kmPerDegree(s)).toBeCloseTo(KM_PER_DEGREE, 6);
+    expect(planetRadiusKm(s)).toBe(EARTH_RADIUS_KM);
+  });
+  it('grows the planet and its degrees when the map is taller than pole to pole', () => {
+    const s = defaultSettings({ widthKm: 30000, heightKm: 30000 });
+    s.northLatitude = placeAtLatitude(s, 0);
+    expect(kmPerDegree(s)).toBeCloseTo(30000 / 180, 6);
+    expect(s.northLatitude).toBeCloseTo(90, 6);
+    expect(southLatitude(s)).toBeCloseTo(-90, 6);
+    expect(validateSettings(s)).toEqual([]);
+  });
+  it('grows the planet when the map is wider than Earth is around', () => {
+    const s = defaultSettings({ widthKm: 80000, heightKm: 5000 });
+    expect(planetRadiusKm(s)).toBeGreaterThan(EARTH_RADIUS_KM * 1.9);
+  });
+  it('keeps a map between the poles when it is moved', () => {
+    const s = defaultSettings({ heightKm: 4000 });
+    s.northLatitude = placeAtLatitude(s, 89);
+    expect(s.northLatitude).toBeCloseTo(90, 6);
+  });
+  it('rescales the degrees when the canvas grows past Earth, keeping the old part’s middle', () => {
+    const w = createWorld(defaultSettings({ widthKm: 8000, heightKm: 16000, northLatitude: 72 }));
+    const before = centreLatitude(w.settings);
+    const g = expandWorld(w, { north: 5000, south: 5000, east: 0, west: 0 });
+    expect(kmPerDegree(g.settings)).toBeGreaterThan(KM_PER_DEGREE);
+    expect(g.settings.northLatitude).toBeCloseTo(90, 6);
+    expect(southLatitude(g.settings)).toBeCloseTo(-90, 6);
+    // The old part's middle stays near where it was.
+    expect(Math.abs(latitudeAt(g.settings, 5000 + 8000) - before)).toBeLessThan(0.5);
   });
 });
