@@ -1,8 +1,10 @@
 import { strokeBounds, ZONES, type Stroke } from '../core/paint';
-import { southLatitude, validateSettings } from '../core/settings';
+import { northForCentre, southLatitude, validateSettings } from '../core/settings';
 import { formatDistance, formatLatitude, KM_PER_DEGREE, milesToKm } from '../core/units';
 import { expandWorld, expansionProblem, LAYERS, type Expansion, type World } from '../core/world';
-import type { MapStyle } from '../render/paintmap';
+import { ZONE_INFO } from '../core/climate';
+import { RAIN_LEGEND, TEMP_LEGEND, type MapStyle, type MapView } from '../render/paintmap';
+import { createClimateRunner } from './climaterun';
 import type { App } from './main';
 import { choice, h, numberField } from './dom';
 import { createMapView } from './mapview';
@@ -16,7 +18,7 @@ import { createToolPanel } from './toolpanel';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1 };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -64,6 +66,7 @@ export function showWorld(app: App, start: World): () => void {
     const b = diffBounds(before, strokes);
     if (b) map.surfaceChanged(b);
     changed();
+    climate.changed();
     updateUndo();
   };
   const undo = () => {
@@ -104,6 +107,7 @@ export function showWorld(app: App, start: World): () => void {
       redoStack.length = 0;
       world = { ...world, surface: { strokes: [...world.surface.strokes, live], nextId: id + 1 } };
       changed();
+      climate.changed();
       updateUndo();
       return live;
     },
@@ -114,9 +118,25 @@ export function showWorld(app: App, start: World): () => void {
       strokes[i] = stroke;
       world = { ...world, surface: { ...world.surface, strokes } };
       changed();
+      climate.changed();
     },
     cancel: undo,
+    climate: () => climate.climate,
   });
+
+  // ---- Climate: worked out again a moment after painting pauses, or at once with the button. ----
+  const climateStatus = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Working out the climate…');
+  const climateBtn = h('button', { type: 'button', class: 'ghost small', title: 'Work the climate out again now.' }, 'Update climate');
+  const climate = createClimateRunner(
+    () => ({ surface: world.surface, settings: world.settings }),
+    () => map.climateChanged(),
+    (st) => {
+      climateStatus.textContent = st === 'working' ? 'Working out the climate…' : st === 'waiting' ? 'Climate will update when you pause.' : 'Climate is up to date.';
+      climateBtn.disabled = st === 'working';
+    },
+  );
+  climateBtn.addEventListener('click', () => climate.now());
+  climate.now();
 
   // ---- View options ----
   const legend = h(
@@ -125,6 +145,34 @@ export function showWorld(app: App, start: World): () => void {
     h('thead', {}, h('tr', {}, h('th', {}, 'Zone'), h('th', {}, 'Travel · who can settle'))),
     h('tbody', {}, ...ZONES.map((z) => h('tr', {}, h('td', {}, h('span', { class: `swatch z${z.id}` }), z.name), h('td', {}, `${z.travel}. ${z.settle}.`)))),
   );
+  const climateLegend = h('div', { class: 'climate-legend small' });
+  const ramp = (stops: string[]) => h('div', { class: 'ramp', style: `background: linear-gradient(to right, ${stops.join(', ')})` });
+  const key = (colour: string, text: string, line = false) => h('div', { class: 'key' }, h('span', { class: line ? 'swatch line' : 'swatch', style: `background: ${colour}` }), text);
+  const renderClimateLegend = () => {
+    const toHex = (c: number[]) => `rgb(${c.join(',')})`;
+    const itcz = key('#ffffff', 'Dashed white line: the ITCZ, the belt of tropical rain', true);
+    switch (look.view) {
+      case 'zones':
+        climateLegend.replaceChildren(...ZONE_INFO.map((z) => key(z.colour, z.name)), itcz);
+        break;
+      case 'temp':
+        climateLegend.replaceChildren(ramp(TEMP_LEGEND.map(([, c]) => c)), h('div', { class: 'ramp-labels' }, ...TEMP_LEGEND.map(([t]) => h('span', {}, `${t}°F`))), h('p', { class: 'muted' }, 'Average temperature in the season shown; sea surface temperature at sea.'), itcz);
+        break;
+      case 'rain':
+        climateLegend.replaceChildren(ramp(RAIN_LEGEND.map(toHex)), h('div', { class: 'ramp-labels' }, h('span', {}, 'Dry'), h('span', {}, 'Wet'), h('span', {}, 'Very wet')), h('p', { class: 'muted' }, `Rain in the season shown. White speckle on land is winter snow cover.`), itcz);
+        break;
+      case 'pressure':
+        climateLegend.replaceChildren(key('#d67860', 'High pressure (H): dry, settled air'), key('#5c78d6', 'Low pressure (L): rising air, storms'), key('#96969e', 'Grey zone: fronts, where air masses meet'), key('#14181e', 'Arrows: wind direction'), itcz);
+        break;
+      case 'currents':
+        climateLegend.replaceChildren(key('#d23a2a', 'Warm current'), key('#2a6fd2', 'Cold current'), key('#111418', 'Neutral current'), key('#78dce6', 'Upwelling: cold, rich water (fishing, fog)'), key('#e4ecf1', 'Sea ice'), key('#5fd2c3', 'Coral reef'));
+        break;
+      default:
+        climateLegend.replaceChildren();
+    }
+    climateLegend.hidden = look.view === 'land';
+  };
+  renderClimateLegend();
   const viewPanel = h(
     'section',
     { class: 'view-panel' },
@@ -132,6 +180,22 @@ export function showWorld(app: App, start: World): () => void {
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'off' | 'on'>('Mountain zones', [{ value: 'off', label: 'Hidden' }, { value: 'on', label: 'Shown' }], 'off', (v) => { look.zones = v === 'on'; legend.hidden = !look.zones; map.redraw(); }),
     legend,
+    choice<MapView>(
+      'Map',
+      [
+        { value: 'land', label: 'Land' },
+        { value: 'zones', label: 'Climate zones' },
+        { value: 'temp', label: 'Temperature' },
+        { value: 'rain', label: 'Rainfall' },
+        { value: 'pressure', label: 'Pressure & winds' },
+        { value: 'currents', label: 'Currents & sea' },
+      ],
+      look.view,
+      (v) => { look.view = v; renderClimateLegend(); map.redraw(); },
+    ),
+    choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; map.redraw(); }),
+    climateLegend,
+    h('div', { class: 'climate-run' }, climateBtn, climateStatus),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
   );
 
@@ -196,6 +260,7 @@ export function showWorld(app: App, start: World): () => void {
       updateHead();
       map.worldReset();
       map.fit();
+      climate.now();
     });
     update();
     openDialog(
@@ -223,12 +288,26 @@ export function showWorld(app: App, start: World): () => void {
       save();
       dialog.close();
       updateHead();
-      map.redraw();
+      map.worldReset();
+      climate.now();
     });
     check();
     openDialog(
       h('h2', {}, 'World settings'),
       h('div', { class: 'field' }, h('label', { for: 'ws-name' }, 'Name'), h('input', { id: 'ws-name', type: 'text', value: s.name, maxlength: 60, oninput: (ev: Event) => { s.name = (ev.target as HTMLInputElement).value; check(); } })),
+      s.mapType === 'flat'
+        ? numberField({
+            label: 'Centre latitude',
+            value: Math.round(((s.northLatitude + southLatitude(s)) / 2) * 10) / 10,
+            min: -85,
+            max: 85,
+            step: 0.5,
+            unit: '°',
+            slider: true,
+            hint: 'Moves the map north or south on its world (0: the equator runs through the middle). The painting stays; the climate follows.',
+            change: (v) => { s.northLatitude = northForCentre(v, s.heightKm); check(); },
+          })
+        : '',
       planetFields(s, check),
       problems,
       h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Cancel'), apply),
@@ -314,6 +393,7 @@ export function showWorld(app: App, start: World): () => void {
   return () => {
     window.clearInterval(autosave);
     clearTimeout(noticeTimer);
+    climate.dispose();
     map.dispose();
     window.removeEventListener('beforeunload', beforeUnload);
     window.removeEventListener('keydown', keydown);

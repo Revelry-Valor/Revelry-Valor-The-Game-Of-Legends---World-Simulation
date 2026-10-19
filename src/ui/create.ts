@@ -9,7 +9,7 @@ import { planetFields } from './settingsform';
 export function showCreate(app: App): void {
   const s = defaultSettings();
   let preset: SizePresetId | 'custom' = 'continent';
-  let centre = 40;
+  let centre = 0;
   let widthMi = 2000;
   let heightMi = 1200;
 
@@ -83,7 +83,7 @@ export function showCreate(app: App): void {
         step: 1,
         unit: '°',
         slider: true,
-        hint: 'Where the map sits on its world: positive is north of the equator, negative south.',
+        hint: 'Where the map sits on its world. 0 puts the equator through the middle; positive moves the map north, negative south. You can change it later in World settings.',
         change: (v) => { centre = v; update(); },
       }),
       choice('Past the east and west edges', [{ value: 'void', label: 'Nothing (no effect)' }, { value: 'wrap', label: 'The ocean wraps around' }], s.edges, (v) => { s.edges = v; }),

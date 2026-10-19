@@ -154,6 +154,14 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .swatch.z2 { background: #d68b37; }
 .swatch.z3 { background: #a8402a; }
 .swatch.z4 { background: #e9ecff; }
+.climate-legend { display: grid; gap: 0.25rem; margin: 0.3rem 0 0.6rem; }
+.climate-legend .key { display: flex; align-items: center; gap: 0.1rem; }
+.climate-legend .swatch.line { height: 0; border: none; border-top: 2px dashed #8a8f96; width: 1.4em; border-radius: 0; background: none !important; }
+.climate-legend .ramp { height: 0.8rem; border-radius: 3px; border: 1px solid rgba(0,0,0,0.25); }
+.climate-legend .ramp-labels { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.7rem; }
+.climate-legend p { margin: 0.2rem 0 0; }
+.climate-run { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.fold-head { margin: 0.8rem 0 0.2rem; font-size: 0.85rem; }
 .layers { list-style: none; margin: 0 0 0.5rem; padding: 0; display: flex; flex-direction: column; gap: 0.15rem; }
 .layers li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 32px; padding: 0 0.4rem; border-radius: 6px; }
 .layers li.current { background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 700; }

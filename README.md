@@ -22,8 +22,9 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 | 0 | Foundations: world settings, layers, save/load, start screen, canvas expanding | Done |
 | 1 | Land & painting: Land & Sea, feature brushes, mountain zones, satellite and paper looks | Done (for review) |
 | 2 | Water: rivers (point and draw), joining, lakes, waterfalls; volcanoes and lava | Done (for review) |
-| 3 | Climate | Next |
-| 4–13 | geography, data creators, peoples, settlements, culture & tech, politics, war, mana, other layers, globe | Planned |
+| 3 | Climate: ITCZ, currents, pressure and winds, temperature, rain, zones, sea ice, upwelling, reefs | Done (for review) |
+| 4 | Geography | Next |
+| 5–13 | data creators, peoples, settlements, culture & tech, politics, war, mana, other layers, globe | Planned |
 
 ### What Phase 0 does
 
@@ -97,6 +98,37 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
   **Lava flows** are drawn like rivers; active ones glow through cracks in a dark crust.
 - The map readout shows rivers (and their width), lakes, waterfalls, well-watered and volcanic
   ground.
+
+### What Phase 3 does
+
+- **The climate works itself out** from what is painted, a moment after painting pauses (or at
+  once with **Update climate**). It runs in the background for northern summer and northern
+  winter, on an even grid of invisible climate points (at most about 300 across).
+- **The chain:** the tropical rain belt (ITCZ) swings toward the tropic over wide land and
+  stays near the equator over open sea; ocean currents circle around the wind cells (warm red,
+  cold blue, neutral black); sea temperatures; land temperatures (inland seasons harsher, cooler
+  with height); pressure centres (subtropical highs, winter continental highs, summer heat
+  lows, subpolar lows, polar highs); winds turned by the planet's spin; fronts; upwelling and
+  fog; rain carried inland by the wind, with rain shadows behind high ground; sea ice; snow.
+- **14 climate zones** (rainforest to ice cap). They set the look of unpainted land: forest,
+  grassland, savanna, steppe, desert, taiga or tundra. Painted ground cover still decides the
+  look where it's painted.
+- **Map views:** Land, Climate zones, Temperature (°F), Rainfall (dry / wet / very wet heat
+  map), Pressure & winds (H and L, wind arrows, fronts as a grey zone), Currents & sea (current
+  arrows, upwelling, sea ice, reefs), each for **Northern summer** or **Northern winter**. The
+  dashed white line is the ITCZ.
+- **Reefs** grow on warm shallow sea (barrier band along the shelf edge, fringing reefs by the
+  coast), not near big river mouths or cold upwelling. The **Reef** brush adds or removes them.
+- **New brushes:** Savanna, Dry scrub, Conifer forest / taiga, Steppe grass, Rocky desert;
+  **Climate crystal** (heat, cold or rain, with a reach); **Rain Shadow Pen** (set the height
+  the climate sees along a line, with presets); **Gap (pass)** to let moist air through.
+- **Settings:** the equator runs through the middle of a new flat map; **Centre latitude**
+  moves the map (also in World settings). Temperatures show in °F. Optional planet size for
+  flat maps. **Climate fine-tuning** has sliders for rain, cooling with height, currents, reef
+  temperatures (64–86 °F), the ITCZ's land and sea widths and coastal ramp, pressure strengths,
+  the polar front and the land joining gap.
+- The map readout adds the climate zone, summer and winter temperatures and rain, and at sea
+  the water temperature, sea ice, reefs and upwelling.
 
 ## Developing
 

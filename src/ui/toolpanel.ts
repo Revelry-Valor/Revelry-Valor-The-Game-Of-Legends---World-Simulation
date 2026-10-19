@@ -53,7 +53,7 @@ export function createToolPanel(changed: () => void): ToolPanel {
     const fields: (HTMLElement | null)[] = [
       h('p', { class: 'muted small hint' }, state.erase ? `Erasing ${b.name.toLowerCase()} only. Other layers are left alone.` : b.hint),
       !sized ? null : numberField({
-        label: b.kind === 'point' ? 'Width' : 'Brush size',
+        label: state.tool === 'crystal' ? 'Reach' : b.kind === 'point' ? 'Width' : 'Brush size',
         value: Math.round(kmToMiles(s.size) * 10) / 10,
         min: 0.5,
         max: 1500,
@@ -90,12 +90,23 @@ export function createToolPanel(changed: () => void): ToolPanel {
       if (state.tool === 'volcano' || state.tool === 'lava') {
         fields.push(choice<string>('State', [{ value: 'yes', label: 'Active' }, { value: 'no', label: 'Dormant' }], s.active === false ? 'no' : 'yes', (v) => { s.active = v === 'yes'; changed(); }));
       }
+      if (state.tool === 'crystal') {
+        fields.push(choice<'heat' | 'cold' | 'rain'>('Crystal', [{ value: 'heat', label: 'Heat (sun)' }, { value: 'cold', label: 'Cold' }, { value: 'rain', label: 'Rain' }], s.crystal ?? 'heat', (v) => { s.crystal = v; changed(); }));
+      }
+      if (state.tool === 'shadowpen') {
+        const presets: [string, number][] = [['Coastal cliff', 0.6], ['Low hills', 0.5], ['High hills', 1], ['Escarpment', 1.5], ['Mountains', 2.5], ['High mountains', 4]];
+        const ft = (km: number) => `${Math.round((km * 3280.84) / 100) * 100} ft`;
+        fields.push(
+          choice<string>('Height', presets.map(([label, km]) => ({ value: String(km), label: `${label} · ${ft(km)}` })), String(s.penHeight ?? 2.5), (v) => { s.penHeight = Number(v); renderSettings(); changed(); }),
+          numberField({ label: 'Exact height', value: Math.round((s.penHeight ?? 2.5) * 3280.84), min: 0, max: 30000, step: 100, unit: 'ft', hint: 'Overrides the height the climate sees along the line. 0 flattens it for the climate only.', change: (v) => { s.penHeight = Math.max(0, v) / 3280.84; changed(); } }),
+        );
+      }
       if (state.tool === 'whirlpool') {
         fields.push(choice<string>('Ships', [{ value: 'yes', label: 'Dangerous to ships' }, { value: 'no', label: 'Harmless' }], s.dangerous === false ? 'no' : 'yes', (v) => { s.dangerous = v === 'yes'; changed(); }));
       }
       const strengthName = state.tool === 'river' ? 'Water at the source' : state.tool === 'volcano' ? 'Height' : b.group === 'Land & Sea' ? 'Opacity' : b.group === 'Ground cover' ? 'Density' : 'Strength';
       const strengthHint = state.tool === 'river' ? 'A spring-fed stream or a river from a big lake. Rivers grow on their way, and with every river that joins them.' : b.group === 'Relief' ? 'How bold: for mountains, bigger peaks.' : 'How fully it covers.';
-      if (state.tool !== 'zone' && state.tool !== 'river') fields.push(pct(strengthName, 'strength', strengthHint));
+      if (state.tool !== 'zone' && state.tool !== 'river' && state.tool !== 'shadowpen' && state.tool !== 'gap') fields.push(pct(strengthName, 'strength', strengthHint));
     }
     if ((b.kind !== 'point' || state.tool === 'crater' || state.tool === 'volcano') && (state.tool !== 'river' || state.erase)) {
       fields.push(
@@ -108,7 +119,7 @@ export function createToolPanel(changed: () => void): ToolPanel {
         numberField({ label: 'Detail', value: Math.round(kmToMiles(s.detail) * 10) / 10, min: 0.2, max: 200, step: 0.1, unit: 'miles', hint: 'Size of single peaks or bumps.', change: (v) => { if (v > 0) s.detail = milesToKm(v); changed(); } }),
       );
     }
-    if (!state.erase && b.kind !== 'point' && b.group !== 'Water' && b.group !== 'Volcanic') fields.push(pct('Variation', 'variation', 'So repeated strokes don’t look copied.'));
+    if (!state.erase && b.kind !== 'point' && b.group !== 'Water' && b.group !== 'Volcanic' && b.group !== 'Climate') fields.push(pct('Variation', 'variation', 'So repeated strokes don’t look copied.'));
     fields.push(h('button', { type: 'button', class: 'ghost small', onclick: () => { remembered.set(b.id, brushDefaults(b.id)); state.settings = settingsFor(b.id); renderSettings(); changed(); } }, 'Reset this brush'));
     settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...fields.filter(Boolean) as HTMLElement[]);
   };

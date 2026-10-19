@@ -602,7 +602,7 @@ Rain crystals and waterfalls raise wetness locally. The rainfall override shifts
 
 ### 7.9 Climate zones
 **Adapted for this sim (decided).**
-- **15 zones:** tropical rainforest, tropical monsoon, tropical savanna; hot desert, cold desert, hot steppe, cold steppe; Mediterranean, humid subtropical, oceanic; humid continental, subarctic; tundra, ice cap. (Full Köppen detail isn't needed.)
+- **14 zones:** tropical rainforest, tropical monsoon, tropical savanna; hot desert, cold desert, hot steppe, cold steppe; Mediterranean, humid subtropical, oceanic; humid continental, subarctic; tundra, ice cap. (Full Köppen detail isn't needed.)
 - **Rules in °F:** ice cap: summer below 32 °F; tundra: summer 32–50 °F; tropical: winter at or above 64 °F; temperate: winter at or above 32 °F and summer at or above 50 °F (hot summer at 72 °F); continental: winter below 32 °F, summer at or above 50 °F (humid continental if summer reaches about 66 °F, otherwise subarctic). Rain rules follow the order below; deserts get a steppe border about 60–190 miles wide in the tropics and twice that at higher latitudes, thinner on steep slopes.
 - **Mountains** have no zone of their own: their hidden climate heights cool them, so they step through the zones on the way up.
 - Zone boundaries are blended over a short distance. The Climate zones view has a legend, and the readout names the zone with both seasons' temperature and rain.
@@ -1063,6 +1063,8 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 | 11. Mana & rifts | Ley lines, world tree roots, rifts, monster tides and hordes | Needs war and politics to respond |
 | 12. Other layers | Underdark, canopy and giant tree cities, sky islands, vines, waterfalls between layers | Extends a working surface world |
 | 13. Globe | 3D globe, flat and globe views side by side | Coordinates already support it |
+
+**Phase 3 as built (simplifications to revisit):** currents are classed warm, cold or neutral by which side of a wind cell and ocean they're on, rather than traced as streams, so mid-ocean branches and enclosed-sea gyres are approximate; the minimum current travel fades a current's effect in rather than cutting it off; the Rain Shadow Pen sets a height along its line but doesn't yet make an escarpment one-sided.
 
 ## 11. Still to design (details, when their phase comes)
 

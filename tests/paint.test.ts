@@ -113,7 +113,7 @@ describe('the painted world', () => {
   it('draws pictures in both looks, transparent outside the map', () => {
     const s = paint(['land', [50, 50], { size: 60 }], ['mountains', [40, 50, 60, 50], { size: 30 }]);
     for (const style of ['satellite', 'paper'] as const) {
-      const img = renderPicture(s, { x0: 0, y0: 0, px: 1, w: 120, h: 120, style, zones: true, seed: 1, widthKm: 100, heightKm: 100, wrap: false });
+      const img = renderPicture(s, { x0: 0, y0: 0, px: 1, w: 120, h: 120, style, zones: true, view: 'land', season: 1, seed: 1, widthKm: 100, heightKm: 100, wrap: false });
       expect(img[(50 * 120 + 50) * 4 + 3]).toBe(255);
       expect(img[(110 * 120 + 110) * 4 + 3]).toBe(0);
     }

@@ -1,5 +1,6 @@
+import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate } from '../core/climate';
 import { brushInfo, roundPath, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
-import { latitudeAt, southLatitude } from '../core/settings';
+import { cToF, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
 import { formatDistance, formatLatitude, KM_PER_DEGREE, kmToMiles, milesToKm } from '../core/units';
@@ -21,6 +22,8 @@ export interface MapViewOptions {
   world(): World;
   tool(): ToolState;
   look(): MapLook & { grid: boolean };
+  /** The latest climate, if worked out yet. */
+  climate(): Climate | null;
   /** Start a stroke: it joins the world at once and gets its id. */
   begin(stroke: Omit<Stroke, 'id'>): Stroke;
   /** The stroke being painted grew. */
@@ -37,6 +40,8 @@ export interface MapView {
   fit(): void;
   /** The strokes changed inside these bounds (km); null for everywhere. */
   surfaceChanged(bounds: [number, number, number, number] | null): void;
+  /** A new climate is ready. */
+  climateChanged(): void;
   /** The map's size or position changed (canvas options). */
   worldReset(): void;
   dispose(): void;
@@ -93,8 +98,11 @@ export function createMapView(o: MapViewOptions): MapView {
       g.fillRect(x0 - span, y0, span, y1 - y0);
       g.fillRect(x1, y0, span, y1 - y0);
     }
+    const cl = o.climate();
+    if (cl && look.view !== 'land') drawClimate(g, r, cl, look, x0, span, copies);
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
+    drawClimateTools(g, r, x0, span, copies);
     drawRoute(g, r);
     drawCursor(g, r);
     drawScale(g, r);
@@ -140,6 +148,156 @@ export function createMapView(o: MapViewOptions): MapView {
       const label = `${name} ${formatLatitude(lat)}`;
       g.fillText(label, Math.min(x1, r.width) - g.measureText(label).width - 6, y - 7);
     }
+  }
+
+  /** Climate marks over the map: the ITCZ, winds and pressure centres, or currents. */
+  function drawClimate(g: CanvasRenderingContext2D, r: DOMRect, cl: Climate, look: MapLook, x0: number, span: number, copies: number[]) {
+    const se = look.season === 1 ? cl.summer : cl.winter;
+    const s = o.world().settings;
+    const yOfLat = (lat: number) => toScreen(0, (s.northLatitude - lat) * KM_PER_DEGREE, r)[1];
+    g.save();
+    // The ITCZ: where the trade winds meet and the tropical rains follow.
+    if (look.view !== 'currents') {
+      g.strokeStyle = 'rgba(255,255,255,0.85)';
+      g.lineWidth = 2;
+      g.setLineDash([8, 6]);
+      for (const c of copies) {
+        g.beginPath();
+        for (let i = 0; i < cl.w; i++) {
+          const sx = x0 + c * span + (cl.x0 + i * cl.step) * view.scale;
+          const sy = yOfLat(se.itcz[i]);
+          if (i) g.lineTo(sx, sy);
+          else g.moveTo(sx, sy);
+        }
+        g.stroke();
+      }
+      g.setLineDash([]);
+    }
+    const arrow = (sx: number, sy: number, dx: number, dy: number, len: number, colour: string, width: number) => {
+      const m = Math.hypot(dx, dy) || 1;
+      const ux = (dx / m) * len;
+      const uy = (dy / m) * len;
+      g.strokeStyle = colour;
+      g.fillStyle = colour;
+      g.lineWidth = width;
+      g.beginPath();
+      g.moveTo(sx - ux / 2, sy - uy / 2);
+      g.lineTo(sx + ux / 2, sy + uy / 2);
+      g.stroke();
+      const hx = sx + ux / 2;
+      const hy = sy + uy / 2;
+      const a = Math.atan2(uy, ux);
+      g.beginPath();
+      g.moveTo(hx, hy);
+      g.lineTo(hx - Math.cos(a - 0.5) * 6, hy - Math.sin(a - 0.5) * 6);
+      g.lineTo(hx - Math.cos(a + 0.5) * 6, hy - Math.sin(a + 0.5) * 6);
+      g.closePath();
+      g.fill();
+    };
+    const gap = 46;
+    const sample = (fn: (x: number, y: number, sx: number, sy: number) => void) => {
+      for (let sy = gap / 2; sy < r.height; sy += gap) {
+        for (let sx = gap / 2; sx < r.width; sx += gap) {
+          const [x, y] = toWorld(sx, sy, r);
+          if (y < 0 || y > s.heightKm) continue;
+          if (s.edges !== 'wrap' && (x < 0 || x > s.widthKm)) continue;
+          fn(((x % s.widthKm) + s.widthKm) % s.widthKm, y, sx, sy);
+        }
+      }
+    };
+    if (look.view === 'pressure') {
+      sample((x, y, sx, sy) => {
+        const u = sampleField(cl, se.windU, x, y);
+        const v = sampleField(cl, se.windV, x, y);
+        const m = Math.hypot(u, v);
+        if (m < 1e-3) return;
+        arrow(sx, sy, u, -v, 10 + Math.min(16, m * 8), 'rgba(20,24,30,0.75)', 1.6);
+      });
+      g.font = `bold 20px ${css('--mono')}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      for (const c of se.centres) {
+        if (c.y < 0 || c.y > s.heightKm || c.x < 0 || c.x > s.widthKm) continue;
+        for (const k of copies) {
+          const sx = x0 + k * span + c.x * view.scale;
+          const sy = toScreen(0, c.y, r)[1];
+          if (sx < -20 || sx > r.width + 20) continue;
+          g.lineWidth = 3;
+          g.strokeStyle = 'rgba(255,255,255,0.85)';
+          g.strokeText(c.kind === 'high' ? 'H' : 'L', sx, sy);
+          g.fillStyle = c.kind === 'high' ? '#b8402e' : '#2e56b8';
+          g.fillText(c.kind === 'high' ? 'H' : 'L', sx, sy);
+        }
+      }
+    }
+    if (look.view === 'currents') {
+      sample((x, y, sx, sy) => {
+        const k = nearestPoint(cl, x, y);
+        const kind = se.current[k];
+        if (kind === -9 || cl.land[k]) return;
+        const u = sampleField(cl, se.curU, x, y);
+        const v = sampleField(cl, se.curV, x, y);
+        if (Math.hypot(u, v) < 1e-3) return;
+        arrow(sx, sy, u, -v, 18, kind > 0 ? '#d23a2a' : kind < 0 ? '#2a6fd2' : '#111418', 2);
+      });
+    }
+    g.restore();
+  }
+
+  /** Crystals are always marked; Rain Shadow Pen lines and gaps show while those tools are in hand. */
+  function drawClimateTools(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[]) {
+    const strokes = o.world().surface.strokes;
+    const t = o.tool().tool;
+    const at = (x: number, y: number, c: number): [number, number] => [x0 + c * span + x * view.scale, toScreen(0, y, r)[1]];
+    g.save();
+    if (t === 'shadowpen' || t === 'gap') {
+      for (const st of strokes) {
+        if (st.brush !== 'shadowpen' && st.brush !== 'gap') continue;
+        g.strokeStyle = st.erase ? 'rgba(255,140,120,0.7)' : st.brush === 'gap' ? 'rgba(140,220,255,0.8)' : 'rgba(255,230,150,0.85)';
+        g.lineWidth = Math.max(1.5, Math.min(st.size * view.scale, 30));
+        g.globalAlpha = 0.45;
+        g.lineCap = 'round';
+        g.lineJoin = 'round';
+        for (const c of copies) {
+          g.beginPath();
+          for (let k = 0; k < st.pts.length; k += 2) {
+            const [sx, sy] = at(st.pts[k], st.pts[k + 1], c);
+            if (k) g.lineTo(sx, sy);
+            else g.moveTo(sx, sy);
+          }
+          if (st.pts.length === 2) g.lineTo(at(st.pts[0], st.pts[1], c)[0] + 0.1, at(st.pts[0], st.pts[1], c)[1]);
+          g.stroke();
+        }
+      }
+      g.globalAlpha = 1;
+    }
+    const colours = { heat: '#ffb12e', cold: '#7fd4ff', rain: '#4f7dff' };
+    for (const st of climateCrystals(o.world().surface)) {
+      for (const c of copies) {
+        const [sx, sy] = at(st.pts[0], st.pts[1], c);
+        if (sx < -20 || sx > r.width + 20 || sy < -20 || sy > r.height + 20) continue;
+        if (t === 'crystal') {
+          g.strokeStyle = 'rgba(255,255,255,0.35)';
+          g.setLineDash([4, 4]);
+          g.beginPath();
+          g.arc(sx, sy, (st.size / 2) * view.scale, 0, Math.PI * 2);
+          g.stroke();
+          g.setLineDash([]);
+        }
+        g.fillStyle = colours[st.crystal ?? 'heat'];
+        g.strokeStyle = '#1a1a22';
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.moveTo(sx, sy - 9);
+        g.lineTo(sx + 5.5, sy);
+        g.lineTo(sx, sy + 9);
+        g.lineTo(sx - 5.5, sy);
+        g.closePath();
+        g.fill();
+        g.stroke();
+      }
+    }
+    g.restore();
   }
 
   function drawBorder(g: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, wrap: boolean) {
@@ -511,6 +669,21 @@ export function createMapView(o: MapViewOptions): MapView {
       if (p.ramp) parts.push('Ramp');
     }
     if (p.whirlpool) parts.push(p.whirlpool.dangerous ? 'Whirlpool (dangerous)' : 'Whirlpool');
+    const cl = o.climate();
+    if (cl) {
+      const c = climateAt(cl, xw, y);
+      const f = (t: number) => `${Math.round(cToF(t))}°F`;
+      if (p.ground === 'land') {
+        if (c.zone >= 0) parts.push(ZONE_INFO[c.zone].name);
+        parts.push(`Summer ${f(c.summerT)}, ${RAIN_NAMES[rainClass(c.summerRain)]}`, `Winter ${f(c.winterT)}, ${RAIN_NAMES[rainClass(c.winterRain)]}`);
+      } else {
+        parts.push(`Sea ${f(c.winterT)} to ${f(c.summerT)}`);
+        const k = nearestPoint(cl, xw, y);
+        if (cl.summer.ice[k] || cl.winter.ice[k]) parts.push(cl.summer.ice[k] ? 'Sea ice all year' : 'Sea ice in winter');
+        if (p.ground === 'shallow' && (p.reefPaint === 1 || (cl.reef[k] && p.reefPaint !== 2))) parts.push('Reef (hazard to ships)');
+        if (Math.max(cl.summer.upwell[k], cl.winter.upwell[k]) > 0.3) parts.push('Upwelling (rich fishing)');
+      }
+    }
     return `${formatLatitude(latitudeAt(s, y))} · ${formatDistance(xw)} from the west edge · ${parts.join(' · ')}`;
   };
 
@@ -563,6 +736,10 @@ export function createMapView(o: MapViewOptions): MapView {
     fit,
     surfaceChanged(bounds) {
       cache.setSurface(o.world().surface, bounds);
+      schedule();
+    },
+    climateChanged() {
+      cache.setClimate(o.climate());
       schedule();
     },
     worldReset() {

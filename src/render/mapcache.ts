@@ -1,5 +1,6 @@
+import type { Climate } from '../core/climate';
 import type { Stroke, Surface } from '../core/paint';
-import { renderPicture, type MapStyle, type RenderJob } from './paintmap';
+import { renderPicture, type MapStyle, type MapView, type RenderJob } from './paintmap';
 import RenderWorker from './worker?worker&inline';
 
 /**
@@ -31,6 +32,9 @@ interface Piece {
 export interface MapLook {
   style: MapStyle;
   zones: boolean;
+  view: MapView;
+  /** 1 northern summer, -1 northern winter. */
+  season: 1 | -1;
 }
 
 export interface MapInfo {
@@ -69,7 +73,8 @@ export class MapCache {
   private useWorkers = true;
   private frame = 0;
   private surface: Surface;
-  private look: MapLook = { style: 'satellite', zones: false };
+  private look: MapLook = { style: 'satellite', zones: false, view: 'land', season: 1 };
+  private climate: Climate | null = null;
   private info: MapInfo;
 
   constructor(surface: Surface, info: MapInfo, private onReady: () => void) {
@@ -141,6 +146,13 @@ export class MapCache {
     this.touch(bounds);
   }
 
+  /** A new climate is ready: every picture is redrawn with it. */
+  setClimate(cl: Climate | null): void {
+    this.climate = cl;
+    for (const w of this.workers) w.postMessage({ type: 'climate', climate: cl });
+    this.touch(null);
+  }
+
   setLook(look: MapLook): void {
     this.look = look;
   }
@@ -168,7 +180,7 @@ export class MapCache {
   }
 
   private keyOf(level: number, cx: number, cy: number): string {
-    return `${this.look.style}${this.look.zones ? 'z' : ''}|${level}|${cx}|${cy}`;
+    return `${this.look.style}${this.look.zones ? 'z' : ''}|${this.look.view}${this.look.view === 'land' ? '' : this.look.season}|${level}|${cx}|${cy}`;
   }
 
   /** Pieces of a level that cover the visible part of the map. */
@@ -274,7 +286,7 @@ export class MapCache {
     p.full = false;
     p.dirty = null;
     p.pending = true;
-    const render: RenderJob = { x0: p.cx * size + ox * px, y0: p.cy * size + oy * px, px, w: Math.max(1, w), h: Math.max(1, h), style: this.look.style, zones: this.look.zones, ...this.info };
+    const render: RenderJob = { x0: p.cx * size + ox * px, y0: p.cy * size + oy * px, px, w: Math.max(1, w), h: Math.max(1, h), style: this.look.style, zones: this.look.zones, view: this.look.view, season: this.look.season, ...this.info };
     return { job: { piece: p, ox, oy, w: render.w, h: render.h, live: true }, render };
   }
 
@@ -296,7 +308,7 @@ export class MapCache {
     const id = this.nextJob++;
     const { job, render } = this.makeJob(piece, patch);
     this.jobs.set(id, job);
-    setTimeout(() => this.finished(null, { id, pixels: renderPicture(this.surface, render) }), 0);
+    setTimeout(() => this.finished(null, { id, pixels: renderPicture(this.surface, render, this.climate) }), 0);
   }
 
   private finished(w: Worker | null, m: { id: number; pixels: Uint8ClampedArray }): void {

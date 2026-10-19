@@ -33,6 +33,11 @@ export type BrushId =
   | 'saltflats'
   | 'glacier'
   | 'beach'
+  | 'savanna'
+  | 'scrub'
+  | 'taiga'
+  | 'steppe'
+  | 'rockdesert'
   // Water
   | 'river'
   | 'lake'
@@ -42,6 +47,11 @@ export type BrushId =
   | 'lava'
   // Sea features
   | 'whirlpool'
+  | 'reef'
+  // Climate
+  | 'crystal'
+  | 'shadowpen'
+  | 'gap'
   // Mountain zones (by hand)
   | 'zone';
 
@@ -62,7 +72,7 @@ export type BrushKind = 'area' | 'line' | 'point';
 export interface BrushInfo {
   id: BrushId;
   name: string;
-  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Mountain zones';
+  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones';
   kind: BrushKind;
   hint: string;
   /** Default brush settings. Size is the brush's width in miles. */
@@ -102,14 +112,23 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'saltflats', name: 'Salt flats', group: 'Ground cover', kind: 'area', hint: 'White crusted plains.', sizeMi: 40, strength: 0.9, softness: 0.4, roughness: 0.5, detailMi: 3 },
   { id: 'glacier', name: 'Glacier / ice', group: 'Ground cover', kind: 'area', hint: 'Ice sheets and glaciers.', sizeMi: 60, strength: 0.9, softness: 0.4, roughness: 0.5, detailMi: 8 },
   { id: 'beach', name: 'Beach / shore', group: 'Ground cover', kind: 'area', hint: 'Paint along a coast for a sandy or rocky strip.', sizeMi: 6, strength: 0.9, softness: 0.4, roughness: 0.4, detailMi: 1 },
+  { id: 'savanna', name: 'Savanna', group: 'Ground cover', kind: 'area', hint: 'Tropical grass with scattered trees.', sizeMi: 80, strength: 0.85, softness: 0.6, roughness: 0.5, detailMi: 8 },
+  { id: 'scrub', name: 'Dry scrub', group: 'Ground cover', kind: 'area', hint: 'Low shrubs and open woodland of dry-summer coasts.', sizeMi: 60, strength: 0.85, softness: 0.6, roughness: 0.5, detailMi: 6 },
+  { id: 'taiga', name: 'Conifer forest / taiga', group: 'Ground cover', kind: 'area', hint: 'Dark, dense needle-leaf forest of cold lands.', sizeMi: 70, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 6 },
+  { id: 'steppe', name: 'Steppe grass', group: 'Ground cover', kind: 'area', hint: 'Short, dry grass around deserts and in dry interiors.', sizeMi: 90, strength: 0.8, softness: 0.6, roughness: 0.5, detailMi: 10 },
+  { id: 'rockdesert', name: 'Rocky desert', group: 'Ground cover', kind: 'area', hint: 'Bare stony desert and gravel plains.', sizeMi: 80, strength: 0.85, softness: 0.5, roughness: 0.5, detailMi: 6 },
   { id: 'whirlpool', name: 'Whirlpool', group: 'Sea', kind: 'point', hint: 'Click at sea to place one. Choose whether it is dangerous to ships.', sizeMi: 8, strength: 0.8, softness: 0.3, roughness: 0, detailMi: 1 },
+  { id: 'reef', name: 'Reef', group: 'Sea', kind: 'area', hint: 'Add coral reefs by hand on shallow sea, or erase the ones the climate made.', sizeMi: 20, strength: 1, softness: 0.4, roughness: 0.6, detailMi: 2 },
+  { id: 'crystal', name: 'Climate crystal', group: 'Climate', kind: 'point', hint: 'Click to place a crystal that changes the climate around it: heat (sun crystal), cold, or rain. Its width is how far it reaches; nearby crystals add together.', sizeMi: 150, strength: 0.6, softness: 0.5, roughness: 0, detailMi: 1 },
+  { id: 'shadowpen', name: 'Rain Shadow Pen', group: 'Climate', kind: 'line', hint: 'Mountains, plateaus and hills already cast rain shadows. Draw along a crest to add high ground the climate should see, or to change how high it is. Nothing is drawn on the map.', sizeMi: 40, strength: 1, softness: 0.5, roughness: 0, detailMi: 1 },
+  { id: 'gap', name: 'Gap (pass)', group: 'Climate', kind: 'area', hint: 'Cut a pass through high ground so moist air slips through.', sizeMi: 30, strength: 1, softness: 0.4, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
 
 export const brushInfo = (id: BrushId): BrushInfo => BRUSHES.find((b) => b.id === id)!;
 
 /** Brushes that only colour the ground (no relief). */
-export const COVER_BRUSHES = ['forest', 'jungle', 'grassland', 'tundra', 'marsh', 'dunes', 'badlands', 'saltflats', 'glacier', 'beach'] as const;
+export const COVER_BRUSHES = ['forest', 'jungle', 'grassland', 'tundra', 'marsh', 'dunes', 'badlands', 'saltflats', 'glacier', 'beach', 'savanna', 'scrub', 'taiga', 'steppe', 'rockdesert'] as const;
 export type CoverBrush = (typeof COVER_BRUSHES)[number];
 
 export interface Stroke {
@@ -159,6 +178,10 @@ export interface Stroke {
   falls?: { at: number; to: number }[];
   /** Volcanoes and lava flows: still active (glowing). */
   active?: boolean;
+  /** Climate crystals: what they do. */
+  crystal?: 'heat' | 'cold' | 'rain';
+  /** Rain Shadow Pen: the height of the high ground (km) for the climate. */
+  penHeight?: number;
 }
 
 export interface Surface {
@@ -187,6 +210,8 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'river' || id === 'lava' ? { route: 'points' as const, variation: 0 } : {}),
     ...(id === 'river' ? { width: milesToKm(0.1), wander: milesToKm(3) } : {}),
     ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
+    ...(id === 'crystal' ? { crystal: 'heat' as const } : {}),
+    ...(id === 'shadowpen' ? { penHeight: 2.5 } : {}),
   };
 }
 

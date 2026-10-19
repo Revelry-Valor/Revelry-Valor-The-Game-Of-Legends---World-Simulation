@@ -82,6 +82,10 @@ export interface Fields {
   /** Lava flows, 0–1, and the glow of active ones, 0–1. */
   lava: Float32Array;
   lavaGlow: Float32Array;
+  /** Height the climate sees (km): from mountain zones, hills, plateaus and Rain Shadow Pen lines. */
+  climateH: Float32Array;
+  /** Reefs painted by hand: 1 added, 2 removed (0: up to the climate). */
+  reefPaint: Uint8Array;
   /** For lighting the painting only. */
   relief: Float32Array;
 }
@@ -402,6 +406,8 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     volcano: new Float32Array(n),
     lava: new Float32Array(n),
     lavaGlow: new Float32Array(n),
+    climateH: new Float32Array(n),
+    reefPaint: new Uint8Array(n),
     relief: new Float32Array(n),
   };
   // Volcanic cones (relief) and their slope, for gullies.
@@ -426,10 +432,12 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
   // The same hollows as an even slope, for where a ramp leads down into them.
   const cutSmooth = new Float32Array(n);
   let zoneOverride: Int8Array | null = null;
+  let penH: Float32Array | null = null;
+  let gapMask: Float32Array | null = null;
   const px = g.px;
 
   for (const s of surface.strokes) {
-    if (s.brush === 'whirlpool') continue;
+    if (s.brush === 'whirlpool' || s.brush === 'crystal') continue;
     if (!offsetsFor(s, g, o).length) continue;
     const seed = strokeSeed(o.seed, s.id);
     const er = !!s.erase;
@@ -749,6 +757,31 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
         });
         break;
       }
+      case 'shadowpen': {
+        // High ground for the climate only: full height on the line, sloping away over the brush width.
+        penH ??= new Float32Array(n).fill(-1);
+        const H = s.penHeight ?? 2.5;
+        const r = s.size / 2;
+        lineStroke(s, g, o, (i, _x, _y, d) => {
+          if (d > r) return;
+          const v = H * (1 - smooth(0, r, d));
+          if (er) penH![i] = d < r * 0.7 ? -1 : penH![i];
+          else if (v > penH![i]) penH![i] = v;
+        });
+        break;
+      }
+      case 'gap':
+        gapMask ??= new Float32Array(n);
+        unionStroke(s, g, o, seed, (i, x, y, e, r) => {
+          const c = edge(s, x, y, e, r, px, seed);
+          if (c > 0) gapMask![i] = er ? gapMask![i] * (1 - c) : Math.max(gapMask![i], c * str);
+        });
+        break;
+      case 'reef':
+        unionStroke(s, g, o, seed, (i, x, y, e, r) => {
+          if (edge(s, x, y, e, r, px, seed) > 0.5) f.reefPaint[i] = er ? 2 : 1;
+        });
+        break;
       case 'zone':
         zoneOverride ??= new Int8Array(n).fill(-1);
         unionStroke(s, g, o, seed, (i, x, y, e, r) => {
@@ -893,8 +926,25 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
       }
     }
   }
+  // The height the climate sees (km), for cooling and rain shadows.
+  for (let i = 0; i < n; i++) {
+    if (f.ground[i] < 1.5) continue;
+    let hc = ZONE_HEIGHT[f.zone[i]];
+    // Within a zone, more paint is a little higher, so heights blend between zones.
+    const b = Math.max(f.mountain[i], cone[i] * 1.4);
+    if (f.zone[i] > 0 && f.zone[i] < 4) hc *= 0.85 + 0.3 * Math.min(1, b * 2);
+    const hl = hills[i];
+    if (hl > 0) hc = Math.max(hc, 0.3 + 0.2 * Math.min(1, hl / 0.6));
+    if (plateauIn[i] > 0 && plateauH[i] > 0) hc = Math.max(hc, 1 + (plateauH[i] - 0.06) / 0.16);
+    if (penH && penH[i] >= 0) hc = penH[i];
+    if (gapMask && gapMask[i] > 0) hc = Math.min(hc, hc * (1 - gapMask[i]) + 0.4 * gapMask[i]);
+    f.climateH[i] = hc;
+  }
   return f;
 }
+
+/** Climate heights of the mountain zones (km): none, foothills, highlands, high mountains, peaks. */
+const ZONE_HEIGHT = [0, 0.5, 1.5, 3, 4.5];
 
 /** Visit sample points within `R` km of (cx, cy), on every wrapped copy. */
 function eachNear(g: Grid, o: Options, cx0: number, cy: number, R: number, visit: (i: number, x: number, y: number, dx: number, dy: number) => void): void {
@@ -1134,6 +1184,10 @@ export interface PlaceInfo {
   /** Canyons, ravines and cliff faces block travel (ramps open them). */
   blocksTravel: boolean;
   whirlpool: Whirlpool | null;
+  /** Reef painted by hand: 0 up to the climate, 1 added, 2 removed. */
+  reefPaint: number;
+  /** Height the climate uses here (km): sets cooling and rain shadows. */
+  climateHeight: number;
 }
 
 /** What is at a place (x, y in km from the north-west corner). */
@@ -1159,5 +1213,7 @@ export function surfaceAt(surface: Surface, x: number, y: number, o: Options): P
     wet: Math.round(f.wet[0] * 100) / 100,
     volcanic: f.volcano[0] > 0.3 || f.lava[0] > 0.3,
     whirlpool: w,
+    reefPaint: f.reefPaint[0],
+    climateHeight: Math.round(f.climateH[0] * 100) / 100,
   };
 }

@@ -22,6 +22,24 @@ export interface ClimateSliders {
   altitudeCoolingC: number;
   /** Currents travelling less than this many degrees of latitude have no temperature effect. */
   minCurrentTravelDeg: number;
+  /** Warmest-season sea temperature reefs can stand (°C); hotter water bleaches them. */
+  reefMaxC: number;
+  /** ITCZ: width of land (km) needed for the path to reach the tilt line. */
+  itczLandKm: number;
+  /** ITCZ: width of open sea (km) needed for the path to sink to its lowest point. */
+  itczSeaKm: number;
+  /** ITCZ: how far (km) offshore the path starts ramping toward a coast. */
+  itczRampKm: number;
+  /** Strength of the subtropical highs (1 = Earth). */
+  subtropicalHigh: number;
+  /** How much colder than the sea (°C) land must be for a winter continental high. */
+  continentalHighC: number;
+  /** Strength of summer thermal lows (1 = Earth). */
+  thermalLow: number;
+  /** Moves the polar front (degrees; positive is poleward). */
+  polarFrontShift: number;
+  /** Landmasses closer than this (km) count as one. */
+  landJoinKm: number;
 }
 
 export const CLIMATE_DEFAULTS: ClimateSliders = {
@@ -32,6 +50,15 @@ export const CLIMATE_DEFAULTS: ClimateSliders = {
   reefMinC: 18,
   altitudeCoolingC: 6.5,
   minCurrentTravelDeg: 30,
+  reefMaxC: 30,
+  itczLandKm: 2500,
+  itczSeaKm: 4000,
+  itczRampKm: 500,
+  subtropicalHigh: 1,
+  continentalHighC: 7,
+  thermalLow: 1,
+  polarFrontShift: 0,
+  landJoinKm: 300,
 };
 
 /** Rainfall follows the world's temperature automatically, or is set by hand (100% = what the temperature would give). */
@@ -47,8 +74,10 @@ export interface WorldSettings {
   northLatitude: number;
   /** Flat maps: what lies past the east and west edges. */
   edges: EdgeMode;
-  /** Globes: the planet's radius in km. */
+  /** Globes: the planet's radius in km. Flat maps use it only when `useRadius` is on. */
   radiusKm: number;
+  /** Flat maps: use `radiusKm` for the climate (otherwise an Earth-sized planet is assumed). */
+  useRadius: boolean;
   /** Axial tilt in degrees: how harsh the seasons are, and how far the climate belts shift. */
   axialTilt: number;
   /** Length of a day in hours (Earth 24): sets where the wind belts sit. */
@@ -84,10 +113,11 @@ export function defaultSettings(overrides: Partial<WorldSettings> = {}): WorldSe
     mapType: 'flat',
     widthKm: milesToKm(preset.widthMi),
     heightKm,
-    // Centred on 40°N by default.
-    northLatitude: 40 + heightKm / KM_PER_DEGREE / 2,
+    // The equator runs through the middle of the map by default.
+    northLatitude: heightKm / KM_PER_DEGREE / 2,
     edges: 'void',
     radiusKm: EARTH_RADIUS_KM,
+    useRadius: false,
     axialTilt: 23.5,
     dayLengthHours: 24,
     rotation: 'east',
@@ -114,6 +144,15 @@ export function northForCentre(centreLatitude: number, heightKm: number): number
   return centreLatitude + heightKm / KM_PER_DEGREE / 2;
 }
 
+/** The planet radius the climate uses (km). */
+export function climateRadiusKm(s: WorldSettings): number {
+  return s.mapType === 'globe' || s.useRadius ? s.radiusKm : EARTH_RADIUS_KM;
+}
+
+/** Fahrenheit for people to read; settings are kept in °C. */
+export const cToF = (c: number) => (c * 9) / 5 + 32;
+export const fToC = (f: number) => ((f - 32) * 5) / 9;
+
 /** Problems with a world's settings, for people to read (empty when they are fine). */
 export function validateSettings(s: WorldSettings): string[] {
   const problems: string[] = [];
@@ -125,12 +164,13 @@ export function validateSettings(s: WorldSettings): string[] {
     }
     if (s.northLatitude > 90) problems.push('The map reaches past the North Pole.');
     if (southLatitude(s) < -90) problems.push('The map reaches past the South Pole.');
-  } else if (!(s.radiusKm >= 500 && s.radiusKm <= 100000)) {
+  }
+  if ((s.mapType === 'globe' || s.useRadius) && !(s.radiusKm >= 500 && s.radiusKm <= 100000)) {
     problems.push('The planet radius must be between 500 and 100,000 km.');
   }
   if (!(s.axialTilt >= 0 && s.axialTilt <= 90)) problems.push('Axial tilt must be between 0° and 90°.');
   if (!(s.dayLengthHours >= 4 && s.dayLengthHours <= 1000)) problems.push('Day length must be between 4 and 1,000 hours.');
-  if (!(s.averageTemperatureC >= -30 && s.averageTemperatureC <= 50)) problems.push('Average temperature must be between −30 °C and 50 °C.');
+  if (!(s.averageTemperatureC >= -30 && s.averageTemperatureC <= 50)) problems.push('Average temperature must be between −22 °F and 122 °F.');
   if (s.rainfall.mode === 'manual' && !(s.rainfall.percent >= 0 && s.rainfall.percent <= 200)) problems.push('Rainfall must be between 0% and 200%.');
   return problems;
 }
