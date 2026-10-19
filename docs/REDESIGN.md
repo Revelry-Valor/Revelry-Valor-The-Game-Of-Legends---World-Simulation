@@ -417,7 +417,17 @@ Pressure zones are placed fresh each season, not from a fixed latitude table. Ai
 
 *Polar current.* Above that, a neutral (black) current circles the pole east to west.
 
-*Mid-ocean currents and nearby land.* A major current crossing open ocean on its own, with a substantial landmass directly poleward or equatorward of it within a set distance (Open: how far), may split off a cold branch toward that land to complete a gyre. The reverse also holds: a warm current running along a continent within that distance of a major ocean current turns out to meet it and joins it.
+*Mid-ocean currents and nearby land.* A major current crossing open ocean on its own (no landmass in its path), with a substantial landmass directly poleward or equatorward of it within 50° of latitude, splits off a branch that runs to that land's shelf and then back the opposite way to the current it came from, completing a gyre. The branch takes the opposite temperature from its parent: warm currents send off cold branches, cold currents send off warm ones, so every gyre has a warm side and a cold side. Neutral currents (the equatorial and polar ones) are the exception: branches meeting them become neutral. The reverse also holds: a current running along a continent within 50° of a major ocean current turns out to meet it and joins it.
+
+*Day length moves the marks.* The latitudes above are for Earth's day (cell edges at 30° and 60°). On other worlds each mark keeps its place within its cell: warm boundary currents run up to the first cell edge; the crossing happens a third to two-thirds of the way through the next cell; the poleward branch reaches a third to two-thirds of the way from the last cell edge to the pole. Faster spin adds cells, so more, narrower gyres stack up toward the poles; slower spin removes them.
+
+| Day length | Cell edges | What the currents do |
+|---|---|---|
+| ½ day | 25°, 40°, 55°, 70° | Warm currents up to 25°; crossings near 30–35°; an extra gyre between 40° and 55° that alternates warm and cold sides; poleward branch to about 75–80° |
+| 1 day (Earth) | 30°, 60° | As above: up to 30°, crossing at 40–50°, poleward branch to 70–80° |
+| 2 days | 40°, 70° | Bigger subtropical gyres: up to 40°, crossing at 50–60°, poleward branch to about 80–85° |
+| 4 days | 55° | One huge gyre per ocean: up to 55°, crossing near 65–75°, no polar easterlies, so water circles near the pole instead of returning west |
+| 16 days | ~70° | Almost one ocean-wide loop per hemisphere; up to about 70°, crossing near 75–80° |
 
 *Seas closed off from the equator.* Where a sea is cut off from the equator (by continents or their shelves, which count the same), the polar currents send cold water down its western side, following the rules above; on meeting a shelf it turns east and warms, then heads poleward again to rejoin the polar flow: a gyre of its own.
 
@@ -489,7 +499,7 @@ Per season: base temperature by latitude, then corrections for currents, land vs
 
 **Sea ice (decided)**
 - The bulk of the sea ice lies between 70° and 80°.
-- It reaches further equatorward as a thin strip along cold-current coasts: up to 45° of latitude beyond the 70° line at most (Open: confirm, and whether that maximum shrinks on warmer worlds).
+- It reaches further equatorward as a thin strip along cold-current coasts, at most down to the 45° latitude line (how far it gets depends on how cold that coast's current and winters are).
 - Warm currents eat it away and cold currents build it up. It never vanishes because of a warm current; there is just less on the warm side and more on the cold side.
 - A warm current crossing the sea corrals the ice: in summer it stops the ice from crossing that current.
 - Winter: more ice, its edge toward 70° and beyond, and the cold-coast strips reach further. Summer: the edge pulls back toward 80°, more so where warm currents run, and the strips shrink.
