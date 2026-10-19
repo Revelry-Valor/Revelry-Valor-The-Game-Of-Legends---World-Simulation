@@ -351,6 +351,39 @@ Climate is built as a fixed chain of rule-based passes, run once for summer and 
 Optionally loop back to step 4 once if ice or forest cover changed a lot.
 
 ### 7.4 Pressure zones and winds
+**Adapted for this sim (proposed, from the pressure-zone packet).** The rule behind all of it: heating makes air rise (low pressure: cloudy, wet, air flows in) or sink (high pressure: clear, dry, air flows out); wind blows from high to low, bent by rotation (right in the north, left in the south; no bend at the equator, most at the poles). Highs spiral outward (clockwise in the north), lows spiral inward (counterclockwise in the north); mirrored in the south.
+
+*Fixed centres, seasonal strength and size.* Pressure centres are placed once from the land and sea, then each season changes how strong and how big they are. Latitudes are for Earth's day; on other day lengths every mark keeps its place within its cell (as for currents). With more cells, the cell edges alternate high, low, high… from the equator outward (Earth: high at 30°, low at 60°).
+
+| Centre | Where it goes | Seasons |
+|---|---|---|
+| ITCZ (low) | The decided ITCZ path (see below) | Its own summer and winter paths |
+| Subtropical highs | One per ocean basin per hemisphere where at least ~3,000 km of open water lies along the first cell edge (30°). Centre at 30°, in the eastern third of the basin, 1,000–2,000 km off the eastern coast, over the cold current from the current rules. With no land on the east side, the middle of the widest open stretch. An oval about 2–3 times wider than tall | Fixed centre. Summer: stronger and stretched poleward to cover about 25–40°. Winter: shrunk to about 20–32°. This gives dry-summer, wet-winter west coasts (Mediterranean) and the seasonal desert edge. A warmer world moves them poleward about 1° per 4 °C above 15 °C |
+| Winter continental highs | One per large landmass at 40–60° that is at least ~2,500–3,000 km across. Landmasses joined by land, by shelf (Shallow sea) or by a strait narrower than ~300 km count as one. Centre: the point farthest from the sea, pulled toward high ground (high mountain zones, plateaus) | Winter only, and only where the land is at least 5–10 °C colder than the sea at the same latitude (slider). Bigger and higher land, stronger high. Summer: off |
+| Summer thermal lows | Hot interiors of large land in the 15–40° band, pulled toward plateaus | Summer only. Draw sea air inland: moist air makes a monsoon; over desert with only dry air around they stay dry |
+| Subpolar lows | One per ocean basin at about 50–65°, over the western-middle of the ocean near the warm current | Stronger and further equatorward in winter. Where open ocean runs all the way around at that latitude (no land in the way), they merge into a continuous ring of storms |
+| Polar highs | One per pole, pulled toward the middle of any land or ice covering it | Strong over land and ice, weak over open polar sea. On flat maps the pole is placed even when it lies off the map, so its winds still reach the map |
+
+*Pressure field and winds (on the climate points, no tiles).*
+1. Add a smooth bump for each centre (up for highs, down for lows, sized and weighted for the season) to make a pressure field.
+2. Wind flows from high to low, turned by rotation: strongly away from the equator, nearly straight across it. How strongly depends on day length (and on planet size for globes).
+3. Where wind crosses the equator, its east–west bend flips. This gives monsoon directions by itself: a SE trade crossing north becomes a SW wind.
+4. Mountains: a range at a shallow angle to the wind steers it along the range; a range across the wind lets the wind through but takes its moisture (rain shadows).
+5. Prevailing winds come out of this as trades (0–30°, from the NE in the north, the SE in the south), westerlies (30–60°, from the SW and NW; stormy, strongest in winter) and polar easterlies (60–90°).
+
+*Monsoons.* Strongest with a large landmass at 10–30°, warm sea on its equator side, high plateaus, and large tilt. Weak or absent on small continents, land far from the tropics, coasts facing cold currents, and low-tilt worlds. Summer: thermal low plus the ITCZ over land, wind from sea to land, wet season. Winter: land cools, a high may form, wind from land to sea, dry season.
+
+*Fronts.* Rainy boundaries handed to the rain pass:
+- Polar front: where the westerlies meet polar air, about 50–65°; reaches about 30–40° in winter, pulls poleward in summer. Stronger where cold land sits next to warm sea in winter. In winter it brings most of the rain to mid-latitude west coasts.
+- Between neighbouring highs: where their winds meet, placed closer to the western high, slanting equatorward at its west end and poleward at its east end.
+
+*Order per season:* wind belts → currents → temperature → ITCZ path → pressure centres → pressure field and winds → equator flip → fronts → upwelling, then rain.
+
+*Map view "Pressure & winds":* H and L marks for each centre (sized by strength), soft shading for high and low pressure, wind arrows, the ITCZ path, and fronts as lines; summer or winter.
+
+*Sliders (proposed):* subtropical high strength, continental high threshold (°C colder than sea, default 7), thermal low strength, polar front shift by season. Rotation strength follows day length automatically.
+
+**General notes (from the Worldbuilding Pasta method):**
 Pressure zones are placed fresh each season, not from a fixed latitude table. Air flows from high to low pressure; Coriolis deflects it right in the north and left in the south.
 
 | Zone | Latitude | Summer vs winter | Air | Weather |
