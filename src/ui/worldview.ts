@@ -12,6 +12,7 @@ import { createMapView } from './mapview';
 import { planetFields } from './settingsform';
 import { createToolPanel } from './toolpanel';
 import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
+import { climateReport } from './report';
 
 /**
  * The world screen: the map, the painting tools (Phase 1), the layer list, the world's
@@ -193,6 +194,7 @@ export function showWorld(app: App, start: World): () => void {
     { class: 'view-panel' },
     h('h2', {}, 'Climate maps'),
     h('div', { class: 'climate-run' }, climateBtn, climateStatus),
+    h('button', { type: 'button', class: 'ghost small', title: 'Text describing the continents, the ITCZ and the currents, plus a compact copy of this world, to paste into a conversation.', onclick: () => void showReport() }, 'Climate report…'),
     choice<MapView>(
       'Map',
       [
@@ -240,6 +242,32 @@ export function showWorld(app: App, start: World): () => void {
   const openDialog = (...content: (Node | string)[]) => {
     dialog.replaceChildren(...content);
     dialog.showModal();
+  };
+
+  const showReport = async () => {
+    const box = h('textarea', { class: 'report-box', readonly: true, rows: 14, 'aria-label': 'Climate report' }) as HTMLTextAreaElement;
+    const status = h('p', { class: 'muted small', 'aria-live': 'polite' }, climate.climate ? '' : 'The climate is still being worked out: the report has the world but no currents yet.');
+    const copy = h('button', { type: 'button', class: 'primary' }, 'Copy');
+    copy.addEventListener('click', async () => {
+      box.focus();
+      box.select();
+      try {
+        await navigator.clipboard.writeText(box.value);
+        status.textContent = 'Copied. Paste it into the conversation.';
+      } catch {
+        const ok = document.execCommand?.('copy');
+        status.textContent = ok ? 'Copied. Paste it into the conversation.' : 'Copying was blocked here: the text is selected, so use your device’s Copy (or long-press, Select all, Copy).';
+      }
+    });
+    openDialog(
+      h('h2', {}, 'Climate report'),
+      h('p', { class: 'muted small' }, 'Where the continents sit, the ITCZ, and every major current (warm, cold or neutral, from where to where), for both seasons. The last line is a compact copy of this world, so the same climate can be rebuilt and checked.'),
+      box,
+      status,
+      h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Close'), copy),
+    );
+    box.value = 'Writing the report…';
+    box.value = await climateReport(world, climate.climate);
   };
 
   const canvasOptions = () => {
