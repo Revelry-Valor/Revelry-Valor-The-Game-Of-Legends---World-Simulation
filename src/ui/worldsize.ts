@@ -1,6 +1,6 @@
 import { centreLatitude, kmPerDegree, planetAreaKm2, planetRadiusKm, placeAtLatitude, southLatitude, type WorldSettings } from '../core/settings';
 import { EARTH_RADIUS_KM, formatLatitude, kmToMiles } from '../core/units';
-import { h } from './dom';
+import { choice, h } from './dom';
 
 /** Real planets to compare with (mean radius, km). */
 const PLANETS = [
@@ -19,7 +19,7 @@ const LOG0 = Math.log10(2e5);
 const LOG1 = Math.log10(area(69911) * 1.2);
 const pos = (a: number) => Math.max(0, Math.min(100, ((Math.log10(Math.max(1, a)) - LOG0) / (LOG1 - LOG0)) * 100));
 
-const times = (v: number) => (v >= 10 ? Math.round(v).toLocaleString('en-US') : v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(3) : v.toExponential(1));
+const times = (v: number) => (v >= 10 ? Math.round(v).toLocaleString('en-US') : v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(3) : String(Number(v.toPrecision(2))));
 const sqmi = (km2: number) => {
   const mi2 = km2 * 0.386102;
   return mi2 >= 1e6 ? `${(mi2 / 1e6).toFixed(mi2 >= 1e8 ? 0 : 2)} million sq mi` : `${Math.round(mi2).toLocaleString('en-US')} sq mi`;
@@ -83,15 +83,30 @@ export function sizeMeter(onPick?: (areaKm2: number) => void): { el: HTMLElement
       text.textContent = `This map: ${sqmi(mapArea)}, ${times(ratio)}× Earth's surface (${(ratio * 100 < 0.1 ? (ratio * 100).toFixed(3) : (ratio * 100).toFixed(1))}%). Closest planet surface: ${nearest.name}.`;
       const r = planetRadiusKm(s);
       const k = kmPerDegree(s);
-      const deg = `1° of latitude = ${Math.round(kmToMiles(k))} mi (${Math.round(k)} km)`;
+      const deg = `1° of latitude = ${k < 10 ? kmToMiles(k).toFixed(1) : Math.round(kmToMiles(k))} mi (${k < 10 ? k.toFixed(1) : Math.round(k)} km)`;
       planet.textContent =
         s.useRadius || s.mapType === 'globe'
           ? `Its planet: ${(r / EARTH_RADIUS_KM).toFixed(2)}× Earth's radius (set by you). ${deg}.`
-          : r > EARTH_RADIUS_KM + 1
+          : s.degreeScale === 'map'
+            ? `The map is its whole world: its planet is ${(r / EARTH_RADIUS_KM).toFixed(r < EARTH_RADIUS_KM * 0.1 ? 3 : 2)}× Earth's radius, ${times((r / EARTH_RADIUS_KM) ** 2)}× its surface. ${deg}.`
+            : r > EARTH_RADIUS_KM + 1
             ? `Its planet has grown to fit the map: ${(r / EARTH_RADIUS_KM).toFixed(2)}× Earth's radius, ${times((r / EARTH_RADIUS_KM) ** 2)}× its surface. ${deg}.`
             : `Its planet: Earth-sized. ${deg}. Past Earth's size the planet grows with the map.`;
     },
   };
+}
+
+/** The degrees setting shown with the size bar. */
+export function degreeChoice(value: WorldSettings['degreeScale'], change: (v: WorldSettings['degreeScale']) => void): HTMLElement {
+  return choice<WorldSettings['degreeScale']>(
+    'Degrees',
+    [
+      { value: 'earth', label: 'Earth scale', title: 'The planet is Earth-sized; it grows only once the map is bigger than Earth.' },
+      { value: 'map', label: 'Match the map', title: 'The map is the whole world: the planet and its degrees shrink or grow with the map.' },
+    ],
+    value,
+    change,
+  );
 }
 
 /**

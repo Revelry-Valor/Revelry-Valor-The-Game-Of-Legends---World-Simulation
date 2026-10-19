@@ -141,3 +141,21 @@ describe('the planet grows with a map bigger than Earth', () => {
     expect(Math.abs(latitudeAt(g.settings, 5000 + 8000) - before)).toBeLessThan(0.5);
   });
 });
+
+describe('degrees that match the map', () => {
+  it('makes a small map its whole world, pole to pole', () => {
+    const s = defaultSettings({ widthKm: 1000, heightKm: 800, degreeScale: 'map' });
+    s.northLatitude = placeAtLatitude(s, 0);
+    expect(kmPerDegree(s)).toBeCloseTo(Math.max(800 / 180, 1000 / 360), 6);
+    expect(planetRadiusKm(s)).toBeLessThan(EARTH_RADIUS_KM / 10);
+    expect(s.northLatitude).toBeCloseTo(90, 6);
+    expect(southLatitude(s)).toBeCloseTo(-90, 6);
+    expect(validateSettings(s)).toEqual([]);
+  });
+  it('keeps up as the canvas grows', () => {
+    const w = createWorld(defaultSettings({ widthKm: 2000, heightKm: 1000, degreeScale: 'map', northLatitude: 90 }));
+    const g = expandWorld(w, { north: 500, south: 500, east: 0, west: 0 });
+    expect(kmPerDegree(g.settings)).toBeCloseTo(2000 / 180, 6);
+    expect(southLatitude(g.settings)).toBeCloseTo(-90, 6);
+  });
+});

@@ -4,7 +4,7 @@ import { createWorld } from '../core/world';
 import type { App } from './main';
 import { choice, h, numberField } from './dom';
 import { planetFields } from './settingsform';
-import { sizeMeter, worldLocator } from './worldsize';
+import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
 
 /** The Create world form: the world's size, its place on the globe, and its planet. */
 export function showCreate(app: App): void {
@@ -140,6 +140,8 @@ export function showCreate(app: App): void {
       h('h3', {}, 'How big it is'),
       meter.el,
       h('p', { class: 'muted small' }, 'Drag along the bar to make the map bigger or smaller (it keeps its shape), or click a planet to match its size.'),
+      degreeChoice(s.degreeScale, (v) => { s.degreeScale = v; update(); }),
+      h('p', { class: 'muted small' }, 'Earth scale: the planet is Earth-sized, and grows only once the map is bigger than Earth. Match the map: the map is its whole world, so the planet and each degree shrink or grow with it. (A planet size set under The planet overrides both.)'),
     ),
     h('section', { class: 'card' }, h('h2', {}, 'The planet'), planetFields(s, update)),
     h(

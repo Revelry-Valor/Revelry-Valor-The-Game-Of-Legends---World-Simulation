@@ -143,7 +143,9 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
   grows the map evenly on all sides, keeping its shape.
 - **Degrees grow with big maps:** the planet is Earth-sized until the map outgrows it (taller than
   pole to pole or wider than Earth is around). Past that the planet grows to fit, and each degree
-  covers more ground. Maps can now be up to 120,000 km a side.
+  covers more ground. Maps can now be up to 120,000 km a side. Beside the size bar, **Degrees**
+  picks this (**Earth scale**) or **Match the map**: the map is its whole world, so its planet
+  and each degree shrink or grow with it, smaller than Earth too.
 - **Settings:** the equator runs through the middle of a new flat map; **Centre latitude**
   moves the map (also in World settings). Temperatures show in °F. Optional planet size for
   flat maps. **Climate fine-tuning** has sliders for rain, cooling with height, currents, reef

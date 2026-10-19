@@ -11,7 +11,7 @@ import { deleteWorld } from '../core/storage';
 import { createMapView } from './mapview';
 import { planetFields } from './settingsform';
 import { createToolPanel } from './toolpanel';
-import { sizeMeter, worldLocator } from './worldsize';
+import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
 
 /**
  * The world screen: the map, the painting tools (Phase 1), the layer list, the world's
@@ -295,6 +295,20 @@ export function showWorld(app: App, start: World): () => void {
       preview,
       h('h3', {}, 'How big it is'),
       meter.el,
+      degreeChoice(world.settings.degreeScale, (v) => {
+        // Applies straight away: the painting stays, its latitudes rescale around the map's middle.
+        const s = world.settings;
+        const next = { ...s, degreeScale: v };
+        next.northLatitude = placeAtLatitude(next, centreLatitude(s));
+        world = { ...world, settings: next };
+        changed();
+        save();
+        updateHead();
+        map.worldReset();
+        climate.now();
+        update();
+      }),
+      h('p', { class: 'muted small' }, 'Degrees — Earth scale: the planet is Earth-sized and grows only once the map outgrows Earth. Match the map: the map is its whole world, so its planet and each degree shrink or grow with it.'),
       h('p', { class: 'muted small' }, 'Drag along the bar to grow the map (evenly on all sides), or click a planet to match its size. Hollow dot: the map now. Solid dot: after growing. Red line: its planet’s whole surface (when not Earth-sized).'),
       problem,
       h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Cancel'), apply),

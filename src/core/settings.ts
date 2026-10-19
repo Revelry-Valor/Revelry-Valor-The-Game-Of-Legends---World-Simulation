@@ -80,6 +80,12 @@ export interface WorldSettings {
   radiusKm: number;
   /** Flat maps: use `radiusKm` for the climate (otherwise an Earth-sized planet is assumed). */
   useRadius: boolean;
+  /**
+   * Flat maps, how degrees relate to distance: 'earth' keeps Earth's planet (it grows only once
+   * the map outgrows Earth); 'map' makes the map the whole world, so the planet (and each degree)
+   * shrinks or grows with the map.
+   */
+  degreeScale: 'earth' | 'map';
   /** Axial tilt in degrees: how harsh the seasons are, and how far the climate belts shift. */
   axialTilt: number;
   /** Length of a day in hours (Earth 24): sets where the wind belts sit. */
@@ -122,6 +128,7 @@ export function defaultSettings(overrides: Partial<WorldSettings> = {}): WorldSe
     edges: 'void',
     radiusKm: EARTH_RADIUS_KM,
     useRadius: false,
+    degreeScale: 'earth',
     axialTilt: 23.5,
     dayLengthHours: 24,
     rotation: 'east',
@@ -138,13 +145,17 @@ export function defaultSettings(overrides: Partial<WorldSettings> = {}): WorldSe
  * otherwise Earth's, until the map outgrows Earth (taller than pole to pole, or wider than the
  * equator): then the planet grows to fit, and each degree covers more ground.
  */
-export function planetRadiusKm(s: Pick<WorldSettings, 'mapType' | 'useRadius' | 'radiusKm' | 'widthKm' | 'heightKm'>): number {
+export function planetRadiusKm(s: PlanetSize): number {
   if (s.mapType === 'globe' || s.useRadius) return s.radiusKm;
-  return Math.max(EARTH_RADIUS_KM, (EARTH_RADIUS_KM * s.heightKm) / (180 * KM_PER_DEGREE), (EARTH_RADIUS_KM * s.widthKm) / (360 * KM_PER_DEGREE));
+  // The smallest planet the map fits on: pole to pole, or once around.
+  const fit = Math.max((EARTH_RADIUS_KM * s.heightKm) / (180 * KM_PER_DEGREE), (EARTH_RADIUS_KM * s.widthKm) / (360 * KM_PER_DEGREE));
+  return s.degreeScale === 'map' ? fit : Math.max(EARTH_RADIUS_KM, fit);
 }
 
+type PlanetSize = Pick<WorldSettings, 'mapType' | 'useRadius' | 'radiusKm' | 'widthKm' | 'heightKm'> & { degreeScale?: WorldSettings['degreeScale'] };
+
 /** Kilometres in one degree of latitude on this world's planet. */
-export function kmPerDegree(s: Pick<WorldSettings, 'mapType' | 'useRadius' | 'radiusKm' | 'widthKm' | 'heightKm'>): number {
+export function kmPerDegree(s: PlanetSize): number {
   return (KM_PER_DEGREE * planetRadiusKm(s)) / EARTH_RADIUS_KM;
 }
 
