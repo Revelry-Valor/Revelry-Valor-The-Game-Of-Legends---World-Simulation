@@ -66,3 +66,16 @@ export function choice<T extends string>(label: string, options: { value: T; lab
 export function clear(el: HTMLElement): void {
   el.replaceChildren();
 }
+
+/** A short message at the bottom of the screen (pop-up alerts can be blocked where the app is hosted). */
+export function toast(text: string, ms = 6000): void {
+  let el = document.querySelector<HTMLElement>('.toast');
+  if (!el) {
+    el = h('div', { class: 'toast', role: 'status', 'aria-live': 'polite' });
+    document.body.append(el);
+  }
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(Number(el.dataset.timer));
+  el.dataset.timer = String(window.setTimeout(() => (el!.hidden = true), ms));
+}

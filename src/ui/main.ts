@@ -4,6 +4,7 @@ import type { World } from '../core/world';
 import { showCreate } from './create';
 import { showStart } from './start';
 import { showWorld } from './worldview';
+import { toast } from './dom';
 
 /**
  * The app: a start screen (Create world / Continue sim), the Create world form, and the world
@@ -42,7 +43,7 @@ const app: App = {
       saveWorld(store, world);
       return true;
     } catch (err) {
-      alert((err as Error).message);
+      toast(`${(err as Error).message} Deleting worlds you no longer need frees space.`, 10000);
       return false;
     }
   },

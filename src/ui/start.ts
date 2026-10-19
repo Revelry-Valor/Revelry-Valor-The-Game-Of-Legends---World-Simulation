@@ -1,7 +1,7 @@
 import { deleteWorld, importWorld, listWorlds, loadWorld } from '../core/storage';
 import { formatDistance } from '../core/units';
 import type { App } from './main';
-import { h } from './dom';
+import { h, toast } from './dom';
 
 /** The start screen: Create world, or Continue a saved one. */
 export function showStart(app: App): void {
@@ -18,27 +18,22 @@ export function showStart(app: App): void {
               const open = () => {
                 const world = loadWorld(app.store, w.id);
                 if (world) app.open(world);
-                else alert('This world could not be opened. It may be damaged.');
+                else toast('This world could not be opened. It may be damaged.');
               };
+              const actions = h('div', { class: 'save-actions' });
+              const ask = () =>
+                actions.replaceChildren(
+                  h('span', { class: 'small' }, 'Delete for good?'),
+                  h('button', { type: 'button', class: 'danger-solid', onclick: () => { deleteWorld(app.store, w.id); toast(`Deleted "${w.name}".`); render(); } }, 'Delete'),
+                  h('button', { type: 'button', class: 'ghost', onclick: idle }, 'Keep'),
+                );
+              const idle = () => actions.replaceChildren(h('button', { type: 'button', class: 'ghost danger', 'aria-label': `Delete ${w.name}`, onclick: ask }, 'Delete'));
+              idle();
               return h(
                 'li',
                 {},
                 h('button', { type: 'button', class: 'save-open', onclick: open }, h('strong', {}, w.name), h('span', { class: 'muted' }, `${size} · saved ${new Date(w.updatedAt).toLocaleString()}`)),
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    class: 'ghost danger',
-                    'aria-label': `Delete ${w.name}`,
-                    onclick: () => {
-                      if (confirm(`Delete "${w.name}"? This can't be undone.`)) {
-                        deleteWorld(app.store, w.id);
-                        render();
-                      }
-                    },
-                  },
-                  'Delete',
-                ),
+                actions,
               );
             }),
           )
@@ -55,7 +50,7 @@ export function showStart(app: App): void {
       importWorld(app.store, await f.text());
       render();
     } catch (err) {
-      alert((err as Error).message);
+      toast((err as Error).message);
     }
     file.value = '';
   });

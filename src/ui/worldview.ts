@@ -6,7 +6,8 @@ import { ZONE_INFO } from '../core/climate';
 import { RAIN_LEGEND, TEMP_LEGEND, type MapStyle, type MapView } from '../render/paintmap';
 import { createClimateRunner } from './climaterun';
 import type { App } from './main';
-import { choice, h, numberField } from './dom';
+import { choice, h, numberField, toast } from './dom';
+import { deleteWorld } from '../core/storage';
 import { createMapView } from './mapview';
 import { planetFields } from './settingsform';
 import { createToolPanel } from './toolpanel';
@@ -317,6 +318,22 @@ export function showWorld(app: App, start: World): () => void {
       problems.replaceChildren(...list.map((p) => h('li', {}, p)));
       apply.disabled = list.length > 0;
     };
+    // Deleting the world: asked here on the page (pop-ups can be blocked where the app is hosted).
+    const dangerZone = h('div', { class: 'danger-zone' });
+    const askDelete = () =>
+      dangerZone.replaceChildren(
+        h('span', { class: 'small' }, `Delete "${world.settings.name}" for good? This can't be undone.`),
+        h('button', { type: 'button', class: 'danger-solid', onclick: () => {
+          dirty = false;
+          dialog.close();
+          deleteWorld(app.store, world.id);
+          toast(`Deleted "${world.settings.name}".`);
+          app.start();
+        } }, 'Delete'),
+        h('button', { type: 'button', class: 'ghost', onclick: idleDelete }, 'Keep'),
+      );
+    const idleDelete = () => dangerZone.replaceChildren(h('button', { type: 'button', class: 'ghost danger', onclick: askDelete }, 'Delete this world…'));
+    idleDelete();
     apply.addEventListener('click', () => {
       world = { ...world, settings: { ...s } };
       changed();
@@ -334,6 +351,7 @@ export function showWorld(app: App, start: World): () => void {
       planetFields(s, check),
       problems,
       h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Cancel'), apply),
+      dangerZone,
     );
   };
 
