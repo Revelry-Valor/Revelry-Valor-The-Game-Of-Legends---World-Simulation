@@ -331,7 +331,8 @@ Climate is built as a fixed chain of rule-based passes, run once for summer and 
 | Moisture blocking relief | 1 km | Height that stops moisture and creates a rain shadow |
 | Warm current strength | +15 °C max | Peak warming of coasts by poleward currents |
 | Cold current strength | −10 °C max | Peak cooling of coasts by equatorward currents |
-| Reef minimum water temperature | 18 °C | Coldest-month sea temperature reefs need |
+| Reef coldest water | 64 °F | Coldest-season sea temperature reefs need |
+| Reef warmest water | 86 °F | Warmest-season sea temperature reefs can stand (hotter bleaches them) |
 | Global average temperature | 15 °C | Overall warmth; widens the Hadley cell about 1° per 4 °C warmer |
 | Altitude cooling rate | 6.5 °C per km | Temperature drop with height class |
 | Minimum current travel | 30° latitude | Currents shorter than this get no temperature effect |
@@ -508,6 +509,13 @@ A current's temperature is relative to where it is now:
 **Map edges:** on a flat map, follow the world's edge setting (wrap east–west, or off-map has no effect).
 
 ### 7.6 Upwelling, downwelling, fog and fisheries
+**Adapted for this sim (decided).**
+- Each coastal sea point gets one state per season from the decided wind along the coast: surface water is pushed to the right of the wind in the north (left in the south). Pushed out to sea: upwelling; piled against the coast: downwelling.
+- Stronger with steady winds (trade coasts most), a cold current along the coast, and a narrow shelf. Cancelled where the countercurrent lands while it is strong. Monsoon winds can switch a coast between upwelling and not, season by season.
+- **Equatorial upwelling:** the trades also raise a strip of cold water along the equator on the eastern side of oceans; this is what holds the ITCZ away from the equator there.
+- **Fog** over upwelling coasts is shown as a soft white haze along the coast in the map looks.
+- Effects as in the table below: rich fishing, fog, cooler and drier coast, reefs blocked (especially in winter).
+
 Each coastal ocean point gets one state per season, from the wind direction along the coast.
 
 | | Upwelling | Downwelling |
@@ -636,6 +644,15 @@ From each point's warmest and coldest season temperatures and its summer and win
 West coast pattern: tropical → arid → Mediterranean → oceanic → subarctic. East coast: tropical → humid subtropical → continental → subarctic.
 
 ### 7.10 Coral reefs
+**Adapted for this sim (decided).**
+- A reef forms on Shallow sea where the water stays within the reefs' temperature range all year, and there is no winter upwelling (except the warmest near-equatorial water).
+- **Temperature range sliders:** coldest water reefs thrive in (default 64 °F, the coldest season must stay at or above it) and warmest water they thrive in (default 86 °F; hotter water bleaches them, so the warmest season must stay at or below it).
+- Best on wide warm shelves where the equatorial current arrives, and near the countercurrent's landfall; warm currents push them poleward along east coasts, upwelling keeps them off west coasts.
+- **Big river mouths** dump mud that kills reefs near them, scaled by river width.
+- **Look:** still one type in the data, drawn as a turquoise textured band along the outer edge of wide shelves (barrier look), hugging the coast on narrow shelves, and ringing small islands.
+- **Reef brush:** add or remove reefs by hand (overrides the climate there).
+- **For the simulation:** reefs are a hazard to ships (like whirlpools), give rich fishing, and yield coral, pearls and shells.
+
 A sea point has a reef when all three hold (no reef types):
 - Coldest-season sea temperature ≥ the reef slider (18 °C).
 - No upwelling in winter (except the warmest near-equatorial water).
