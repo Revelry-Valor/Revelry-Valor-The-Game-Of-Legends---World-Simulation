@@ -157,7 +157,7 @@ export function createMapView(o: MapViewOptions): MapView {
     const yOfLat = (lat: number) => toScreen(0, (s.northLatitude - lat) * KM_PER_DEGREE, r)[1];
     g.save();
     // The ITCZ: where the trade winds meet and the tropical rains follow.
-    if (look.view !== 'currents') {
+    {
       g.strokeStyle = 'rgba(255,255,255,0.85)';
       g.lineWidth = 2;
       g.setLineDash([8, 6]);

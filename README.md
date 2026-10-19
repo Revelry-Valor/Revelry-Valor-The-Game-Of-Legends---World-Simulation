@@ -115,10 +115,17 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
   look where it's painted.
 - **Sidebar tabs:** Land & water, Terrain, Ground cover, Climate and View, so only the tools
   for the work at hand show.
-- **Wind and current paths** are fixed to the map (they don't move as you pan) and get finer as
-  you zoom in. Winds spiral out of the highs and meet along fronts and at the ITCZ. Major
-  currents run through deep water, steered by the continents and the edge of the shallow shelf,
-  joining into gyres; thinner paths through bays and shallows show their water's warmth and flow.
+- **Wind and current paths** are fixed to the map (they don't move as you pan). Winds spiral out
+  of the highs, meet along fronts and at the ITCZ, and turn to run along mountain ranges.
+- **Currents** are built per ocean as a few continuous paths following the gyre rules: the
+  equatorial current runs west (black, neutral) to a coast, turns poleward along it as a warm
+  current (red), crosses the ocean eastward, then splits: a cold current (blue) runs back toward
+  the equator down the far coast to close the loop, and a warm branch runs poleward, turns west
+  as the polar-side current and comes back down as a cold current. The countercurrent and polar
+  current are neutral. Coasts and the shallow shelf steer them; the water temperature beside each
+  current comes from it. Thinner paths in bays and shallows show their water's warmth and drift.
+- **Mountains** turn the winds, wring rain out on the windward side and leave a dry lee, in both
+  seasons, and are colder with height.
 - **Map views:** Land, Climate zones, Temperature (°F), Rainfall (dry / wet / very wet heat
   map), Pressure & winds (H and L, wind arrows, fronts as a grey zone), Currents & sea (current
   arrows, upwelling, sea ice, reefs), each for **Northern summer** or **Northern winter**. The
