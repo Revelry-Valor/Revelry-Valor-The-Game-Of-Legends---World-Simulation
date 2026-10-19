@@ -147,3 +147,21 @@ describe('climate tools', () => {
     expect(climateAt(flat, 5400, yAt(45)).summerRain + climateAt(flat, 5400, yAt(45)).winterRain).toBeGreaterThan(sumRain(5400, 45));
   }, 60000);
 });
+
+describe('the ITCZ follows the land, not past it', () => {
+  it('stops near how far the land reaches toward the pole, and never passes the tilt line', () => {
+    const n2 = 50;
+    const set2 = defaultSettings({ widthKm: 16000, heightKm: 100 * KM_PER_DEGREE, northLatitude: n2, edges: 'wrap', seed: 3 });
+    const y2 = (lat: number) => (n2 - lat) * KM_PER_DEGREE;
+    const s: Surface = { strokes: [], nextId: 1 };
+    const add = (pts: number[], size: number) => s.strokes.push({ ...brushDefaults('land'), id: s.nextId++, pts, size, roughness: 0.1 } as Stroke);
+    // Wide land reaching only about 12°N, and wide land reaching 30°N.
+    add(line([[1000, y2(5)], [5000, y2(5)]]), 1500);
+    add(line([[7000, y2(15)], [10000, y2(15)]]), 3300);
+    const c2 = computeClimate(s, set2);
+    const col = (x: number) => Math.round((x - c2.x0) / c2.step);
+    expect(c2.summer.itcz[col(3000)]).toBeLessThan(14);
+    expect(c2.summer.itcz[col(8500)]).toBeGreaterThan(20);
+    for (const v of c2.summer.itcz) expect(v).toBeLessThanOrEqual(set2.axialTilt + 1e-3);
+  }, 60000);
+});

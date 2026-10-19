@@ -519,6 +519,8 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
   // Land in the band between the equator and the tilt line in the summer hemisphere.
   const frac = new Float32Array(w);
   const hgt = new Float32Array(w);
+  // How far toward the pole the land in each column reaches (within the band).
+  const top = new Float32Array(w);
   const expected = Math.max(1, (tilt * ctx.kpd) / ctx.stepY);
   for (let i = 0; i < w; i++) {
     let lc = 0;
@@ -529,6 +531,7 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
       if (land[j * w + i]) {
         lc++;
         hs += ctx.height[j * w + i];
+        top[i] = Math.max(top[i], la);
       }
     }
     frac[i] = Math.min(1, lc / expected);
@@ -555,6 +558,7 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
   }
   const A = new Float32Array(w);
   const eastSide = new Float32Array(w);
+  const capLat = new Float32Array(w).fill(Infinity);
   if (runs.length) {
     // Inside land: half the run's pull at the coast, all of it in the middle.
     for (const r of runs) {
@@ -563,6 +567,17 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
         A[(k + w) % w] = r.amp * (0.5 + 0.5 * Math.sin(Math.PI * t));
       }
     }
+    // The belt follows the heated land, never past it: in each column it stops a little beyond
+    // the land's furthest reach toward the pole, however wide the land is.
+    for (const r of runs) {
+      for (let k = r.a; k <= r.b; k++) {
+        const kk = (k + w) % w;
+        const cap = (top[kk] + 1.5 - oceanLat) / Math.max(1e-6, tilt - oceanLat);
+        A[kk] = Math.min(A[kk], Math.max(0, cap));
+        capLat[kk] = Math.max(oceanLat, top[kk] + 1.5);
+      }
+    }
+    const coastA = (k: number) => A[(k + w) % w];
     // Seas between runs: from one coast's value to the other's, dipping in the middle if wide.
     const order = runs.slice().sort((p, q) => p.a - q.a);
     for (let r = 0; r < order.length; r++) {
@@ -571,8 +586,8 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
       const start = left.b + 1;
       const end = right ? right.a - 1 : w - 1;
       const open = !right;
-      fillSea(start, end, left.amp * 0.5, right ? right.amp * 0.5 : 0, open);
-      if (r === 0 && !wrap && left.a > 0) fillSea(0, left.a - 1, 0, left.amp * 0.5, true);
+      fillSea(start, end, coastA(left.b), right ? coastA(right.a) : 0, open);
+      if (r === 0 && !wrap && left.a > 0) fillSea(0, left.a - 1, 0, coastA(left.a), true);
     }
     function fillSea(a: number, b: number, va: number, vb: number, open: boolean) {
       if (b < a) return;
@@ -609,7 +624,11 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
     let v = s * (oceanLat + (tilt - oceanLat) * A[i]);
     // Cold water on the eastern side of oceans holds it away from the equator.
     if (eastSide[i] > 0) v = s > 0 ? Math.max(v, v + (oceanLat * 1.6 - v) * eastSide[i] * 0.6) : v + (oceanLat - v) * eastSide[i] * 0.8;
-    raw[i] = Math.max(-(tilt + 5), Math.min(tilt + 5, v + imbalance));
+    // The hemisphere imbalance shifts the belt, but never past the tilt line (only high plateaus overshoot it).
+    const lim = Math.max(tilt, Math.abs(v));
+    raw[i] = Math.max(-lim, Math.min(lim, v + imbalance));
+    // Over land, not past the land's reach (the shift included).
+    if (Math.abs(raw[i]) > capLat[i] && Math.sign(raw[i]) === s) raw[i] = s * Math.max(capLat[i], Math.abs(v));
   }
   // Smooth so the path never zigzags.
   const radius = Math.max(1, Math.round(600 / stepX));

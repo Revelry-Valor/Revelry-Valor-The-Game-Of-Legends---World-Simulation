@@ -1064,6 +1064,8 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 | 12. Other layers | Underdark, canopy and giant tree cities, sky islands, vines, waterfalls between layers | Extends a working surface world |
 | 13. Globe | 3D globe, flat and globe views side by side | Coordinates already support it |
 
+**ITCZ over land (clarified after testing):** land width decides how far the belt tries to go, but in each place it stops about 1.5° beyond the land's furthest reach toward the pole, and the hemisphere-imbalance shift never pushes it past the tilt line (only high plateaus overshoot).
+
 **Phase 3 as built (simplifications to revisit):** currents are classed warm, cold or neutral by which side of a wind cell and ocean they're on, rather than traced as streams, so mid-ocean branches and enclosed-sea gyres are approximate; the minimum current travel fades a current's effect in rather than cutting it off; the Rain Shadow Pen sets a height along its line but doesn't yet make an escarpment one-sided.
 
 ## 11. Still to design (details, when their phase comes)
