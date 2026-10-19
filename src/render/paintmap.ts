@@ -302,8 +302,12 @@ export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | nu
       if (cl && se) {
         // Fog over cold upwelling coasts, as a soft haze.
         const fog = sampleField(cl, se.fog, x, y);
-        if (fog > 0.02) col = mix(col, [236, 240, 242], Math.min(0.5, fog * 0.55) * (0.8 + 0.2 * fbm(x, y, 40, Math.max(px, 4), seed + 210, 3)));
-        if (job.view !== 'land') col = climateView(col, job.view, cl, se, x, y, land, bright, climatePoint);
+        if (fog > 0.02) {
+          // Patchy banks of sea fog, not an even wash.
+          const patch = smooth(-0.1, 0.45, fbm(x, y, 70, Math.max(px, 5), seed + 210, 4)) * (0.7 + 0.3 * fbm(x, y, 12, Math.max(px, 1.5), seed + 211, 3));
+          col = mix(col, [226, 231, 234], Math.min(0.38, fog * 0.45) * patch);
+        }
+        if (job.view !== 'land') col = climateView(col, job.view, cl, se, x, y, land, bright, climatePoint, px, seed);
       }
 
       if (job.zones && f.zone[k] && land > 0.5) {
@@ -461,7 +465,7 @@ export const TEMP_LEGEND = TEMP_F;
 export const RAIN_LEGEND = RAIN_RAMP;
 
 /** The climate map views, laid over the painted map. */
-function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer'], x: number, y: number, land: number, bright: number, climatePoint: (x: number, y: number, l: boolean) => number): RGB {
+function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer'], x: number, y: number, land: number, bright: number, climatePoint: (x: number, y: number, l: boolean) => number, px: number, seed: number): RGB {
   const shade = 0.75 + 0.25 * Math.min(1.3, bright);
   const grey = (c: RGB, t: number): RGB => mix(c, [128, 132, 136], t);
   switch (view) {
@@ -493,10 +497,16 @@ function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer']
     }
     case 'currents': {
       if (land >= 0.5) return grey(col, 0.6);
+      // A gentle tint for warm or cold water; the current paths carry the strong colour.
+      const base = grey(col, 0.25);
       const a = sampleField(cl, se.curAnomaly, x, y);
-      let c = a > 0 ? mix(col, [205, 80, 60], Math.min(0.7, a / 6)) : mix(col, [80, 150, 230], Math.min(0.7, -a / 5));
+      let c = a > 0 ? mix(base, [196, 92, 74], Math.min(0.35, a / 12)) : mix(base, [74, 128, 200], Math.min(0.35, -a / 10));
+      // Upwelling: cold, rich water as a fine teal stipple.
       const up = sampleField(cl, se.upwell, x, y);
-      c = mix(c, [120, 220, 230], Math.min(0.5, up * 0.6));
+      if (up > 0.08) {
+        const dots = smooth(0.25, 0.45, fbm(x, y, Math.max(px * 3, 3), Math.max(px, 1), seed + 220, 2));
+        c = mix(c, [96, 200, 196], Math.min(0.55, up * 0.7) * (0.35 + 0.65 * dots));
+      }
       return c;
     }
   }

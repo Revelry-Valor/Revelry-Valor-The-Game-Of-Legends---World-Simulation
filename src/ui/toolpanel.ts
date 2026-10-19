@@ -11,6 +11,8 @@ export interface ToolPanel {
   setErase(on: boolean): void;
   /** Grow or shrink the brush (the [ and ] keys). */
   resize(factor: number): void;
+  /** Show only the brushes of these groups (a sidebar tab). */
+  showGroups(groups: string[]): void;
 }
 
 export function createToolPanel(changed: () => void): ToolPanel {
@@ -27,9 +29,11 @@ export function createToolPanel(changed: () => void): ToolPanel {
   const eraseBtn = h('button', { type: 'button', class: 'ghost', 'aria-pressed': 'false', title: 'Erase only the selected brush’s own layer (E)' }, 'Erase');
   const panBtn = h('button', { type: 'button', class: 'ghost', 'aria-pressed': 'false', title: 'Drag to move the map. You can also hold Space, or drag with the right mouse button.' }, 'Move map');
 
+  let shown: string[] | null = null;
   const renderPickers = () => {
     const groups = new Map<string, HTMLElement[]>();
     for (const b of BRUSHES) {
+      if (shown && !shown.includes(b.group)) continue;
       const btn = h('button', { type: 'button', class: 'brush', 'aria-pressed': state.tool === b.id ? 'true' : 'false', title: b.hint, onclick: () => select(b.id) }, b.name);
       groups.set(b.group, [...(groups.get(b.group) ?? []), btn]);
     }
@@ -148,6 +152,17 @@ export function createToolPanel(changed: () => void): ToolPanel {
     state,
     select,
     setErase,
+    showGroups(groups) {
+      shown = groups;
+      if (state.tool !== 'pan' && !groups.includes(brushInfo(state.tool).group)) {
+        const first = BRUSHES.find((b) => groups.includes(b.group));
+        if (first) {
+          select(first.id);
+          return;
+        }
+      }
+      renderPickers();
+    },
     resize(factor) {
       if (state.tool === 'pan') return;
       state.settings.size = Math.max(milesToKm(0.5), Math.min(milesToKm(1500), state.settings.size * factor));

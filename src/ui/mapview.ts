@@ -1,4 +1,4 @@
-import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate } from '../core/climate';
+import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
 import { brushInfo, roundPath, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
@@ -173,46 +173,8 @@ export function createMapView(o: MapViewOptions): MapView {
       }
       g.setLineDash([]);
     }
-    const arrow = (sx: number, sy: number, dx: number, dy: number, len: number, colour: string, width: number) => {
-      const m = Math.hypot(dx, dy) || 1;
-      const ux = (dx / m) * len;
-      const uy = (dy / m) * len;
-      g.strokeStyle = colour;
-      g.fillStyle = colour;
-      g.lineWidth = width;
-      g.beginPath();
-      g.moveTo(sx - ux / 2, sy - uy / 2);
-      g.lineTo(sx + ux / 2, sy + uy / 2);
-      g.stroke();
-      const hx = sx + ux / 2;
-      const hy = sy + uy / 2;
-      const a = Math.atan2(uy, ux);
-      g.beginPath();
-      g.moveTo(hx, hy);
-      g.lineTo(hx - Math.cos(a - 0.5) * 6, hy - Math.sin(a - 0.5) * 6);
-      g.lineTo(hx - Math.cos(a + 0.5) * 6, hy - Math.sin(a + 0.5) * 6);
-      g.closePath();
-      g.fill();
-    };
-    const gap = 46;
-    const sample = (fn: (x: number, y: number, sx: number, sy: number) => void) => {
-      for (let sy = gap / 2; sy < r.height; sy += gap) {
-        for (let sx = gap / 2; sx < r.width; sx += gap) {
-          const [x, y] = toWorld(sx, sy, r);
-          if (y < 0 || y > s.heightKm) continue;
-          if (s.edges !== 'wrap' && (x < 0 || x > s.widthKm)) continue;
-          fn(((x % s.widthKm) + s.widthKm) % s.widthKm, y, sx, sy);
-        }
-      }
-    };
     if (look.view === 'pressure') {
-      sample((x, y, sx, sy) => {
-        const u = sampleField(cl, se.windU, x, y);
-        const v = sampleField(cl, se.windV, x, y);
-        const m = Math.hypot(u, v);
-        if (m < 1e-3) return;
-        arrow(sx, sy, u, -v, 10 + Math.min(16, m * 8), 'rgba(20,24,30,0.75)', 1.6);
-      });
+      drawPaths(g, r, se.windPaths, x0, span, copies, () => 'rgba(16,20,26,0.7)', () => 1.4);
       g.font = `bold 20px ${css('--mono')}`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
@@ -231,17 +193,85 @@ export function createMapView(o: MapViewOptions): MapView {
       }
     }
     if (look.view === 'currents') {
-      sample((x, y, sx, sy) => {
-        const k = nearestPoint(cl, x, y);
-        const kind = se.current[k];
-        if (kind === -9 || cl.land[k]) return;
-        const u = sampleField(cl, se.curU, x, y);
-        const v = sampleField(cl, se.curV, x, y);
-        if (Math.hypot(u, v) < 1e-3) return;
-        arrow(sx, sy, u, -v, 18, kind > 0 ? '#d23a2a' : kind < 0 ? '#2a6fd2' : '#111418', 2);
-      });
+      const colour = (p: FlowPath, k: number) => {
+        const c = p.kind[k];
+        if (p.major) return c > 0 ? '#d8321f' : c < 0 ? '#1f63d8' : '#101418';
+        return c > 0 ? 'rgba(232,110,90,0.9)' : c < 0 ? 'rgba(90,150,240,0.9)' : 'rgba(40,46,54,0.75)';
+      };
+      drawPaths(g, r, se.currentPaths, x0, span, copies, colour, (p) => (p.major ? 2.4 : 1.2));
     }
     g.restore();
+  }
+
+  /**
+   * Flow paths (winds or currents), fixed to the map: lines with arrowheads at fixed distances
+   * along them, so they don't move when the map does. Finer paths show when zoomed in.
+   */
+  function drawPaths(g: CanvasRenderingContext2D, r: DOMRect, levels: FlowPath[][], x0: number, span: number, copies: number[], colour: (p: FlowPath, k: number) => string, width: (p: FlowPath) => number) {
+    if (!levels.length) return;
+    const s = o.world().settings;
+    const coarse = Math.max(s.widthKm, s.heightKm) / 24;
+    const lv = coarse * view.scale > 230 && levels[1] ? 1 : 0;
+    const gapKm = (lv ? coarse / 3 : coarse) * 1.6;
+    const yTop = toScreen(0, 0, r)[1];
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (const p of levels[lv]) {
+      const pts = p.pts;
+      for (const c of copies) {
+        const ox = x0 + c * span;
+        const sx = (q: number) => ox + pts[q] * view.scale;
+        const sy = (q: number) => yTop + pts[q + 1] * view.scale;
+        // Skip paths entirely off screen.
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
+        for (let q = 0; q < pts.length; q += 2) {
+          minX = Math.min(minX, pts[q]);
+          maxX = Math.max(maxX, pts[q]);
+          minY = Math.min(minY, pts[q + 1]);
+          maxY = Math.max(maxY, pts[q + 1]);
+        }
+        if (ox + maxX * view.scale < -20 || ox + minX * view.scale > r.width + 20 || yTop + maxY * view.scale < -20 || yTop + minY * view.scale > r.height + 20) continue;
+        g.lineWidth = width(p);
+        // Segments in runs of one colour.
+        let q = 0;
+        while (q < pts.length - 2) {
+          const col = colour(p, q / 2);
+          g.strokeStyle = col;
+          g.beginPath();
+          g.moveTo(sx(q), sy(q));
+          while (q < pts.length - 2 && colour(p, q / 2) === col) {
+            q += 2;
+            g.lineTo(sx(q), sy(q));
+          }
+          g.stroke();
+        }
+        // Arrowheads every so far along the path, measured from its start.
+        let along = 0;
+        let next = gapKm * 0.5;
+        for (let q2 = 2; q2 < pts.length; q2 += 2) {
+          const dx = pts[q2] - pts[q2 - 2];
+          const dy = pts[q2 + 1] - pts[q2 - 1];
+          along += Math.hypot(dx, dy);
+          if (along < next) continue;
+          next += gapKm;
+          const hx = sx(q2);
+          const hy = sy(q2);
+          if (hx < -10 || hx > r.width + 10 || hy < -10 || hy > r.height + 10) continue;
+          const a = Math.atan2(dy, dx);
+          const len = 4 + width(p) * 2.2;
+          g.fillStyle = colour(p, q2 / 2);
+          g.beginPath();
+          g.moveTo(hx + Math.cos(a) * len * 0.6, hy + Math.sin(a) * len * 0.6);
+          g.lineTo(hx - Math.cos(a - 0.45) * len, hy - Math.sin(a - 0.45) * len);
+          g.lineTo(hx - Math.cos(a + 0.45) * len, hy - Math.sin(a + 0.45) * len);
+          g.closePath();
+          g.fill();
+        }
+      }
+    }
   }
 
   /** Crystals are always marked; Rain Shadow Pen lines and gaps show while those tools are in hand. */

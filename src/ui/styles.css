@@ -185,3 +185,9 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
   .expand-grid { grid-template-columns: 1fr; }
   input[type='number'] { width: 6rem; }
 }
+
+/* Sidebar tabs: one set of tools at a time. */
+.tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; position: sticky; top: -1rem; z-index: 2; background: var(--panel); padding: 0.4rem 0; margin: -0.4rem 0 0; border-bottom: 1px solid var(--line); }
+.tab { flex: 1 1 auto; padding: 0.35rem 0.55rem; font-size: 0.85rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.tab[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.tab-body { display: flex; flex-direction: column; gap: 1.25rem; }

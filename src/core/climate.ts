@@ -75,6 +75,18 @@ export interface SeasonClimate {
   /** ITCZ latitude for each column. */
   itcz: Float32Array;
   centres: PressureCentre[];
+  /** Paths for the map: winds and currents, coarse and fine (km, fixed to the map). */
+  windPaths: FlowPath[][];
+  currentPaths: FlowPath[][];
+}
+
+/** A traced path through a flow, in km from the map's north-west corner (x may run past the edges on wrapping maps). */
+export interface FlowPath {
+  pts: Float32Array;
+  /** Per point: 1 warm, −1 cold, 0 neutral (currents); 0 for winds. */
+  kind: Int8Array;
+  /** Major current (deep water, steered by coasts and shelves) or minor (shallow sea). */
+  major: boolean;
 }
 
 export interface Climate {
@@ -250,7 +262,9 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
   const winter = season(ctx, surface, -1);
   const zone = zones(ctx, summer, winter);
   const reef = reefs(ctx, surface, summer, winter);
-  return { x0: stepX / 2, y0: stepY / 2, step: stepX, w, h, wrapKm: wrap ? W : 0, lat, land, ground, height, distSea, summer, winter, zone, reef };
+  const cl: Climate = { x0: stepX / 2, y0: stepY / 2, step: stepX, w, h, wrapKm: wrap ? W : 0, lat, land, ground, height, distSea, summer, winter, zone, reef };
+  for (const se of [summer, winter]) flowPaths(cl, se, W, H);
+  return cl;
 }
 
 interface Ctx {
@@ -319,6 +333,8 @@ function season(ctx: Ctx, surface: Surface, s: number): SeasonClimate {
     snow: new Uint8Array(n),
     itcz: new Float32Array(w),
     centres: [],
+    windPaths: [],
+    currentPaths: [],
   };
 
   // 1. ITCZ path.
@@ -326,6 +342,7 @@ function season(ctx: Ctx, surface: Surface, s: number): SeasonClimate {
 
   // 2. Ocean currents.
   currents(ctx, s, out);
+  currentFlow(ctx, s, out);
 
   // 3. Sea temperature with currents.
   const sst = new Float32Array(n);
@@ -686,6 +703,302 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
   for (let k = 0; k < n; k++) if (!land[k]) out.curAnomaly[k] = sm[k];
 }
 
+/** Average over sea points only, a few passes. */
+function maskedBlur(src: Float32Array, mask: Uint8Array, w: number, h: number, wrap: boolean, passes: number): Float32Array {
+  let a = src;
+  for (let p = 0; p < passes; p++) {
+    const b = new Float32Array(w * h);
+    for (let j = 0; j < h; j++) {
+      for (let i = 0; i < w; i++) {
+        const k = j * w + i;
+        if (!mask[k]) continue;
+        let sum = 0;
+        let cnt = 0;
+        for (let dj = -1; dj <= 1; dj++) {
+          const jj = j + dj;
+          if (jj < 0 || jj >= h) continue;
+          for (let di = -1; di <= 1; di++) {
+            let ii = i + di;
+            if (ii < 0 || ii >= w) {
+              if (!wrap) continue;
+              ii = (ii + w) % w;
+            }
+            const kk = jj * w + ii;
+            if (!mask[kk]) continue;
+            sum += a[kk];
+            cnt++;
+          }
+        }
+        b[k] = cnt ? sum / cnt : a[k];
+      }
+    }
+    a = b;
+  }
+  return a;
+}
+
+/**
+ * Which way the water flows: a smooth field the currents can be traced along. The winds push the
+ * open ocean (west in the trades, east in the westerlies, west near the poles, the countercurrent
+ * east under the ITCZ). Coasts turn it: major currents are steered by the continents and the edge
+ * of the shallow shelf, running poleward on one side of an ocean and back toward the equator on the
+ * other, so they join up into gyres. Shallow seas get their own gentler flow, steered by the coast.
+ */
+function currentFlow(ctx: Ctx, s: number, out: SeasonClimate): void {
+  const { w, h, n, land, ground, stepX, stepY, wrap, edges } = ctx;
+  const lastEdge = edges[edges.length - 1];
+  const build = (wall: (k: number) => boolean, reach: number) => {
+    const dW = distanceField(w, h, Math.min(stepX, stepY), wrap, wall, false);
+    const U = new Float32Array(n);
+    const V = new Float32Array(n);
+    const NX = new Float32Array(n);
+    const NY = new Float32Array(n);
+    const mask = new Uint8Array(n);
+    for (let j = 0; j < h; j++) {
+      for (let i = 0; i < w; i++) {
+        const k = j * w + i;
+        if (wall(k)) continue;
+        mask[k] = 1;
+        const il = i > 0 ? k - 1 : wrap ? k + w - 1 : k;
+        const ir = i < w - 1 ? k + 1 : wrap ? k - w + 1 : k;
+        const ju = j > 0 ? k - w : k;
+        const jd = j < h - 1 ? k + w : k;
+        const gx = dW[ir] - dW[il];
+        const gy = dW[ju] - dW[jd];
+        const gl = Math.hypot(gx, gy) || 1;
+        const nx = -gx / gl;
+        const ny = -gy / gl;
+        NX[k] = nx;
+        NY[k] = ny;
+        const la = ctx.lat[j];
+        const l = la - s * 2.5 * ctx.tiltF;
+        const al = Math.abs(l);
+        const hemi = Math.sign(l || 1);
+        const itcz = out.itcz[i];
+        let u: number;
+        let v: number;
+        if (Math.abs(la - itcz) < 3 && Math.abs(itcz) > 3) {
+          u = 1;
+          v = 0;
+        } else if (al < 5) {
+          u = -1;
+          v = 0;
+        } else if (al > lastEdge + (90 - lastEdge) * 0.45) {
+          u = -1;
+          v = 0;
+        } else {
+          const b = belt(ctx, la, s);
+          u = b.u;
+          v = (b.u > 0 ? 0.2 : -0.2) * hemi;
+        }
+        const a = Math.exp(-dW[k] / reach);
+        if (a > 0.02) {
+          let tx = -ny;
+          let ty = nx;
+          if (Math.abs(nx) > 0.45 && al >= 5) {
+            // A coast running north–south: the gyre decides the way.
+            let idx = 0;
+            for (let e = 1; e < edges.length; e++) if (Math.abs(al - edges[e]) < Math.abs(al - edges[idx])) idx = e;
+            const highGyre = idx % 2 === 0;
+            const westSide = nx < 0;
+            const poleward = highGyre === westSide;
+            if (Math.sign(ty) !== (poleward ? hemi : -hemi)) {
+              tx = -tx;
+              ty = -ty;
+            }
+          } else if (tx * u + ty * v < 0) {
+            tx = -tx;
+            ty = -ty;
+          }
+          u = u * (1 - a) + tx * a * 1.6;
+          v = v * (1 - a) + ty * a * 1.6;
+        }
+        U[k] = u;
+        V[k] = v;
+      }
+    }
+    // Smooth into a flowing field, never running into a wall.
+    let su: Float32Array = U;
+    let sv: Float32Array = V;
+    for (let p = 0; p < 4; p++) {
+      su = maskedBlur(su, mask, w, h, wrap, 2);
+      sv = maskedBlur(sv, mask, w, h, wrap, 2);
+      for (let k = 0; k < n; k++) {
+        if (!mask[k] || dW[k] > reach * 2) continue;
+        const into = su[k] * NX[k] + sv[k] * NY[k];
+        if (into > 0) {
+          su[k] -= into * NX[k];
+          sv[k] -= into * NY[k];
+        }
+      }
+    }
+    return { u: su, v: sv };
+  };
+  // Major currents: deep water, walled by land and the shelf. Minor: shallow sea, walled by land only.
+  const major = build((k) => ground[k] >= 0.5, 300);
+  const minor = build((k) => land[k] === 1, 120);
+  for (let k = 0; k < n; k++) {
+    if (land[k]) {
+      out.curU[k] = 0;
+      out.curV[k] = 0;
+    } else if (ground[k] < 0.5) {
+      out.curU[k] = major.u[k];
+      out.curV[k] = major.v[k];
+    } else {
+      out.curU[k] = minor.u[k] * 0.5;
+      out.curV[k] = minor.v[k] * 0.5;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Paths for the map: streamlines traced through the winds and currents, evenly spaced, worked out
+// once with the climate so they stay fixed to the map.
+
+function traceField(
+  cl: Climate,
+  U: Float32Array,
+  V: Float32Array,
+  ok: (x: number, y: number) => boolean,
+  dsep: number,
+  seeds: [number, number][],
+  W: number,
+  H: number,
+): number[][] {
+  const wrap = cl.wrapKm > 0;
+  const cell = dsep / 2;
+  const gw = Math.ceil(W / cell) + 1;
+  const gh = Math.ceil(H / cell) + 1;
+  const grid = new Map<number, number[]>();
+  const wx = (x: number) => (wrap ? ((x % W) + W) % W : x);
+  const key = (x: number, y: number) => Math.floor(y / cell) * gw + Math.floor(wx(x) / cell);
+  const near = (x: number, y: number, d: number, line: number, minIdx: number): boolean => {
+    const cx = Math.floor(wx(x) / cell);
+    const cy = Math.floor(y / cell);
+    const r = Math.ceil(d / cell);
+    for (let dy = -r; dy <= r; dy++) {
+      const yy = cy + dy;
+      if (yy < 0 || yy >= gh) continue;
+      for (let dx = -r; dx <= r; dx++) {
+        let xx = cx + dx;
+        if (xx < 0 || xx >= gw) {
+          if (!wrap) continue;
+          xx = (xx + gw) % gw;
+        }
+        const list = grid.get(yy * gw + xx);
+        if (!list) continue;
+        for (let q = 0; q < list.length; q += 4) {
+          if (list[q + 2] === line && list[q + 3] > minIdx) continue;
+          let ddx = Math.abs(list[q] - wx(x));
+          if (wrap) ddx = Math.min(ddx, W - ddx);
+          if (ddx * ddx + (list[q + 1] - y) ** 2 < d * d) return true;
+        }
+      }
+    }
+    return false;
+  };
+  const add = (x: number, y: number, line: number, idx: number) => {
+    const kk = key(x, y);
+    let list = grid.get(kk);
+    if (!list) grid.set(kk, (list = []));
+    list.push(wx(x), y, line, idx);
+  };
+  let vmax = 1e-6;
+  for (let k = 0; k < U.length; k++) vmax = Math.max(vmax, Math.hypot(U[k], V[k]));
+  const dir = (x: number, y: number): [number, number] | null => {
+    const u = sampleField(cl, U, wx(x), y);
+    const v = sampleField(cl, V, wx(x), y);
+    const m = Math.hypot(u, v);
+    if (m < vmax * 0.04) return null;
+    // y grows southward on the map.
+    return [u / m, -v / m];
+  };
+  const step = dsep / 5;
+  const dtest = dsep * 0.5;
+  const lines: number[][] = [];
+  let id = 0;
+  for (const [sx, sy] of seeds) {
+    if (!ok(sx, sy) || near(sx, sy, dsep * 0.9, -1, 0)) continue;
+    const line = id++;
+    const half = (sign: number, base: number): number[] => {
+      const pts: number[] = [];
+      let x = sx;
+      let y = sy;
+      for (let t = 0; t < 1500; t++) {
+        const d1 = dir(x, y);
+        if (!d1) break;
+        const mx = x + d1[0] * step * 0.5 * sign;
+        const my = y + d1[1] * step * 0.5 * sign;
+        const d2 = dir(mx, my);
+        if (!d2) break;
+        const nx = x + d2[0] * step * sign;
+        const ny = y + d2[1] * step * sign;
+        if (ny < 0 || ny > H || (!wrap && (nx < 0 || nx > W)) || !ok(wx(nx), ny)) break;
+        // Other paths stop it; so does its own, once it has moved on (closing a loop).
+        if (near(nx, ny, dtest, line, t > 12 ? base + t - 12 : -1)) break;
+        x = nx;
+        y = ny;
+        pts.push(x, y);
+        add(x, y, line, base + t);
+      }
+      return pts;
+    };
+    add(sx, sy, line, 0);
+    const fwd = half(1, 1);
+    const back = half(-1, 100000);
+    const pts: number[] = [];
+    for (let q = back.length - 2; q >= 0; q -= 2) pts.push(back[q], back[q + 1]);
+    pts.push(sx, sy, ...fwd);
+    if (pts.length / 2 >= 6) lines.push(pts);
+  }
+  return lines;
+}
+
+function flowPaths(cl: Climate, se: SeasonClimate, W: number, H: number): void {
+  const big = Math.max(W, H);
+  const grid = (d: number): [number, number][] => {
+    const out: [number, number][] = [];
+    for (let y = d / 2; y < H; y += d) for (let x = d / 2; x < W; x += d) out.push([x, y]);
+    return out;
+  };
+  const groundAt = (x: number, y: number) => cl.ground[nearestPoint(cl, x, y)];
+  se.windPaths = [];
+  se.currentPaths = [];
+  for (const dsep of [big / 24, big / 70]) {
+    // Winds: start from the highs so the paths spiral out of them.
+    const seeds: [number, number][] = [];
+    for (const c of se.centres) {
+      if (c.kind !== 'high' || c.x < 0 || c.x > W || c.y < 0 || c.y > H) continue;
+      for (let a = 0; a < 8; a++) seeds.push([c.x + Math.cos((a * Math.PI) / 4) * dsep * 0.7, c.y + Math.sin((a * Math.PI) / 4) * dsep * 0.7]);
+    }
+    seeds.push(...grid(dsep));
+    const inMap = (x: number, y: number) => y >= 0 && y <= H && x >= 0 && x <= W;
+    se.windPaths.push(traceField(cl, se.windU, se.windV, inMap, dsep, seeds, W, H).map((p) => ({ pts: Float32Array.from(p), kind: new Int8Array(p.length / 2), major: true })));
+    // Currents: the strongest boundary currents first, so they get long unbroken paths.
+    const deep = (x: number, y: number) => inMap(x, y) && groundAt(x, y) < 0.5;
+    const shelf = (x: number, y: number) => inMap(x, y) && groundAt(x, y) >= 0.5 && groundAt(x, y) < 1.5;
+    const strong: [number, number, number][] = [];
+    for (let k = 0; k < cl.w * cl.h; k++) {
+      const a = Math.abs(se.curAnomaly[k]);
+      if (a > 1.5 && cl.ground[k] < 0.5) strong.push([cl.x0 + (k % cl.w) * cl.step, cl.y0 + Math.floor(k / cl.w) * cl.step, a]);
+    }
+    strong.sort((p, q) => q[2] - p[2]);
+    const cseeds: [number, number][] = [...strong.filter((_, q) => q % 3 === 0).map(([x, y]) => [x, y] as [number, number]), ...grid(dsep)];
+    const kindAt = (x: number, y: number) => {
+      const a = sampleField(cl, se.curAnomaly, ((x % W) + W) % W, y);
+      return a > 0.8 ? 1 : a < -0.8 ? -1 : 0;
+    };
+    const tag = (p: number[], major: boolean): FlowPath => {
+      const kind = new Int8Array(p.length / 2);
+      for (let q = 0; q < p.length; q += 2) kind[q / 2] = kindAt(p[q], p[q + 1]);
+      return { pts: Float32Array.from(p), kind, major };
+    };
+    const majors = traceField(cl, se.curU, se.curV, deep, dsep * 0.8, cseeds, W, H).map((p) => tag(p, true));
+    const minors = traceField(cl, se.curU, se.curV, shelf, dsep * 0.35, grid(dsep * 0.35), W, H).map((p) => tag(p, false));
+    se.currentPaths.push([...majors, ...minors]);
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Pressure centres (fixed places, seasonal strength and size) and the pressure field.
 
@@ -1016,7 +1329,7 @@ function upwelling(ctx: Ctx, s: number, out: SeasonClimate): void {
     out.upwell[k] = sm[k];
     const la = ctx.latOf(k);
     const summerHere = Math.sign(la) === s;
-    out.fog[k] = smooth(0.2, 0.6, out.upwell[k]) * (summerHere ? 1 : 0.6) * (distLand[k] < 200 ? 1 : 0.4);
+    out.fog[k] = smooth(0.2, 0.6, out.upwell[k]) * (summerHere ? 1 : 0.6) * Math.exp(-distLand[k] / 140);
   }
 }
 
@@ -1209,7 +1522,7 @@ function zones(ctx: Ctx, a: SeasonClimate, b: SeasonClimate): Int8Array {
     const north = ctx.latOf(k) >= 0;
     const minRain = Math.min(a.rain[k], b.rain[k]);
     const maxRain = Math.max(north ? a.rain[k] : b.rain[k], north ? b.rain[k] : a.rain[k]);
-    if ((dd[k] <= border && minRain < RAIN_WET) || (maxRain < RAIN_WET * 1.6 && minRain < RAIN_WET && z !== 7)) {
+    if ((dd[k] <= border && minRain < RAIN_WET && maxRain < RAIN_VERY_WET) || (maxRain < RAIN_WET * 1.6 && minRain < RAIN_WET && z !== 7)) {
       const mean = (a.temp[k] + b.temp[k]) / 2;
       zone[k] = mean >= 18 ? 5 : 6;
     }

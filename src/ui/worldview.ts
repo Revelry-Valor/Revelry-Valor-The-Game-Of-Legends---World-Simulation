@@ -173,13 +173,24 @@ export function showWorld(app: App, start: World): () => void {
     climateLegend.hidden = look.view === 'land';
   };
   renderClimateLegend();
-  const viewPanel = h(
+  const lookPanel = h(
     'section',
     { class: 'view-panel' },
-    h('h2', {}, 'View'),
+    h('h2', {}, 'Map look'),
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
+    choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
+  );
+  const zonesPanel = h(
+    'section',
+    { class: 'view-panel' },
     choice<'off' | 'on'>('Mountain zones', [{ value: 'off', label: 'Hidden' }, { value: 'on', label: 'Shown' }], 'off', (v) => { look.zones = v === 'on'; legend.hidden = !look.zones; map.redraw(); }),
     legend,
+  );
+  const climatePanel = h(
+    'section',
+    { class: 'view-panel' },
+    h('h2', {}, 'Climate maps'),
+    h('div', { class: 'climate-run' }, climateBtn, climateStatus),
     choice<MapView>(
       'Map',
       [
@@ -195,8 +206,6 @@ export function showWorld(app: App, start: World): () => void {
     ),
     choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; map.redraw(); }),
     climateLegend,
-    h('div', { class: 'climate-run' }, climateBtn, climateStatus),
-    choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
   );
 
   // ---- Layers ----
@@ -344,15 +353,28 @@ export function showWorld(app: App, start: World): () => void {
   window.addEventListener('keydown', keydown);
 
   const sideToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true' }, 'Tools');
-  const side = h(
-    'aside',
-    { class: 'side' },
-    h('h2', {}, 'Paint'),
-    notice,
-    tools.el,
-    viewPanel,
-    h('section', {}, h('h2', {}, 'Layers'), layerList, h('p', { class: 'muted small' }, 'Other layers get their own views in a later phase.')),
+  const layersPanel = h('section', {}, h('h2', {}, 'Layers'), layerList, h('p', { class: 'muted small' }, 'Other layers get their own views in a later phase.'));
+  // Tabs: each shows only the tools and options for one kind of work.
+  const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
+    { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
+    { id: 'terrain', name: 'Terrain', groups: ['Relief', 'Volcanic', 'Mountain zones'], extra: [zonesPanel] },
+    { id: 'cover', name: 'Ground cover', groups: ['Ground cover'], extra: [] },
+    { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
+    { id: 'view', name: 'View', groups: [], extra: [lookPanel, layersPanel] },
+  ];
+  const tabBody = h('div', { class: 'tab-body' });
+  const tabButtons = TABS.map((t) =>
+    h('button', { type: 'button', role: 'tab', class: 'tab', 'aria-selected': 'false', onclick: () => showTab(t.id) }, t.name),
   );
+  const showTab = (id: string) => {
+    const t = TABS.find((x) => x.id === id) ?? TABS[0];
+    tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
+    if (t.groups.length) tools.showGroups(t.groups);
+    tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
+    map.redraw();
+  };
+  const side = h('aside', { class: 'side' }, h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Tool sets' }, ...tabButtons), tabBody);
+  showTab('land');
   sideToggle.addEventListener('click', () => {
     const open = side.classList.toggle('closed');
     sideToggle.setAttribute('aria-expanded', open ? 'false' : 'true');

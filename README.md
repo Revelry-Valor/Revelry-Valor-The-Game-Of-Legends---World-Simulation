@@ -113,6 +113,12 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 - **14 climate zones** (rainforest to ice cap). They set the look of unpainted land: forest,
   grassland, savanna, steppe, desert, taiga or tundra. Painted ground cover still decides the
   look where it's painted.
+- **Sidebar tabs:** Land & water, Terrain, Ground cover, Climate and View, so only the tools
+  for the work at hand show.
+- **Wind and current paths** are fixed to the map (they don't move as you pan) and get finer as
+  you zoom in. Winds spiral out of the highs and meet along fronts and at the ITCZ. Major
+  currents run through deep water, steered by the continents and the edge of the shallow shelf,
+  joining into gyres; thinner paths through bays and shallows show their water's warmth and flow.
 - **Map views:** Land, Climate zones, Temperature (°F), Rainfall (dry / wet / very wet heat
   map), Pressure & winds (H and L, wind arrows, fronts as a grey zone), Currents & sea (current
   arrows, upwelling, sea ice, reefs), each for **Northern summer** or **Northern winter**. The
