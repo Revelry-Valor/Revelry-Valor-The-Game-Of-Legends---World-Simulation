@@ -172,6 +172,8 @@ Every mountain area has altitude zones, like the bands on a real mountain. They 
 **Ground cover** (forest, jungle, swamp, dunes, grassland, tundra, ice): either worked out from the climate automatically, or painted by hand. Painted cover overrides the climate in that spot.
 
 ### 6.3 Rain Shadow Pen
+**Decided (Phase 3 discussion):** painted mountains, plateaus, cliffs, hills and volcanoes cast rain shadows and cool the land by themselves, using hidden climate heights (see 7.7). The Pen is kept for adjusting that: drawing lines where extra high ground should block moisture, overriding a feature's height, and the Gap tool for passes.
+
 A separate tool. You draw lines along crests and edges by hand (never suggested automatically). They tell the climate where high ground is. Nothing is drawn on the map from them.
 
 | Type | Hidden height class (climate only) | Shape |
@@ -520,6 +522,30 @@ Each coastal ocean point gets one state per season, from the wind direction alon
 Typical upwelling coasts: west coasts at ~15–35°, under the cold eastern boundary currents.
 
 ### 7.7 Temperature
+**Adapted for this sim (decided).** Worked out for summer and winter on the climate points.
+1. **Base by latitude and season:** the warmest band follows the sun toward the summer pole as far as the tilt allows; the world's average temperature shifts everything (a warmer world also pushes the subtropical highs poleward about 1° per 4 °C).
+2. **Land vs sea:** land swings further toward each season's extreme than sea.
+3. **Distance from the sea, measured upwind** along the decided winds: the longer the trace back to the sea, the bigger the summer–winter swing. High ranges cut sea air off near the coast.
+4. **Currents:** the red and blue currents warm or cool nearby coasts, scaled by how onshore the wind is and by shelf width (narrow shelf strong, wide shelf soft).
+5. **Height:** cools about 6.5 °C per km (slider), using hidden climate heights for painted features:
+
+| Painted feature | Climate height |
+|---|---|
+| Hills | 0.3–0.5 km |
+| Foothills | 0.5 km |
+| Highlands | 1.5 km |
+| High mountains | 3 km |
+| Peaks | 4.5 km |
+| Plateau | 1–2 km, by its Strength |
+| Volcano | By its zone, like mountains |
+| Rain Shadow Pen line | Overrides any of these |
+
+6. **Climate crystals:** heat and cold crystals add their local change.
+7. **Ice:** land where summer stays below freezing is ice cap; peaks keep snow where their summer is below freezing; sea ice follows the decided sea ice rules.
+8. **Winter snow cover:** where winter is below freezing and wet, the ground is snow-covered in winter: white on the winter map, and slower winter travel later.
+
+**Units:** temperatures are shown in °F only.
+
 Per season: base temperature by latitude, then corrections for currents, land vs ocean, continentality, altitude (height class) and climate crystals.
 
 - **Land vs ocean:** each point has a heat capacity (land low, ocean high); land moves further toward each season's extreme. Without this, interiors match coasts, continental climates never form, the ITCZ can't swing over land, monsoons are weak, and winter highs never form.
@@ -543,6 +569,14 @@ Per season: base temperature by latitude, then corrections for currents, land vs
 - Lowland ice past ~40° from the poles risks a runaway snowball planet.
 
 ### 7.8 Precipitation
+**Adapted for this sim (decided).** Worked out for summer and winter.
+1. Moisture starts at the sea, strongest off warm water and warm-current coasts with onshore wind, and is carried along the decided winds, fading over the moisture carry distance (slider).
+2. Wet: the ITCZ band (very wet), the grey front zones and the polar front belt, and monsoon rain drawn inland by summer thermal lows where the arriving air is moist.
+3. Dry: under the subtropical highs (at their seasonal size), winter continental highs, and cold upwelling coasts (fog, little rain).
+4. Rain shadows from painted features and Pen lines: rain falls on the windward slope (peaking at about 1–1.5 km of height; air above about 4 km is dry); behind, dry until new moisture arrives.
+5. Lakes, rivers, waterfalls (oases) and rain crystals wet the ground near them. The world's Rainfall setting shifts the carry distance and thresholds.
+6. **Shown as a rainfall heat map** (a continuous scale from dry to very wet), while the climate and simulation keep the three main types per season: dry, wet, very wet.
+
 Each land point gets one state per season: dry, wet or very wet. Moisture is stored as a number while tracing, then thresholded (keeping the option of real rainfall figures later).
 
 1. **Warm coasts:** seed "wet" on coasts with warm currents (including equatorial currents) and onshore wind. Carry it downwind until it hits a front or the ITCZ, crosses relief above the blocking slider, or exceeds the carry distance. Ignore enclosed seas.
