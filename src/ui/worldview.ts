@@ -1,6 +1,6 @@
 import { strokeBounds, ZONES, type Stroke } from '../core/paint';
-import { centreLatitude, kmPerDegree, placeAtLatitude, southLatitude, validateSettings } from '../core/settings';
-import { formatDistance, formatLatitude, milesToKm } from '../core/units';
+import { centreLatitude, kmPerDegree, MAX_SIDE_KM, placeAtLatitude, southLatitude, validateSettings } from '../core/settings';
+import { formatDistance, formatLatitude, kmToMiles, milesToKm } from '../core/units';
 import { expandedSettings, expandWorld, expansionProblem, LAYERS, type Expansion, type World } from '../core/world';
 import { ZONE_INFO } from '../core/climate';
 import { RAIN_LEGEND, TEMP_LEGEND, type MapStyle, type MapView } from '../render/paintmap';
@@ -244,7 +244,19 @@ export function showWorld(app: App, start: World): () => void {
 
   const canvasOptions = () => {
     const e: Expansion = { north: 0, south: 0, east: 0, west: 0 };
-    const meter = sizeMeter();
+    // Dragging the size bar grows the map evenly on all sides, keeping its shape.
+    const meter = sizeMeter((target) => {
+      const s = world.settings;
+      const a0 = s.widthKm * s.heightKm;
+      const f = Math.max(1, Math.min(Math.sqrt(target / a0), MAX_SIDE_KM / Math.max(s.widthKm, s.heightKm)));
+      const dw = s.widthKm * (f - 1);
+      const dh = s.heightKm * (f - 1);
+      const round = (km: number) => milesToKm(Math.round(kmToMiles(km) / 10) * 10);
+      e.east = e.west = round(dw / 2);
+      e.north = e.south = round(dh / 2);
+      for (const [k, field] of Object.entries(fields)) field.querySelectorAll('input').forEach((i) => ((i as HTMLInputElement).value = String(Math.round(kmToMiles(e[k as keyof Expansion])))));
+      update();
+    });
     const preview = h('p', { class: 'summary' });
     const problem = h('p', { class: 'problems', role: 'alert' });
     const apply = h('button', { type: 'button', class: 'primary' }, 'Expand');
@@ -258,8 +270,9 @@ export function showWorld(app: App, start: World): () => void {
       preview.textContent = `New size ${formatDistance(next.widthKm)} × ${formatDistance(next.heightKm)}, from ${formatLatitude(next.northLatitude)} to ${formatLatitude(southLatitude(next))}.${grew ? ' The map is now bigger than Earth: its planet grows, and each degree covers more ground.' : ''}`;
       meter.update(next, s);
     };
+    const fields: Partial<Record<keyof Expansion, HTMLElement>> = {};
     const side = (k: keyof Expansion, label: string) =>
-      numberField({ label, value: 0, min: 0, max: 60000, step: 10, unit: 'miles', change: (v) => { e[k] = milesToKm(Math.max(0, v)); update(); } });
+      (fields[k] = numberField({ label, value: 0, min: 0, max: 60000, step: 10, unit: 'miles', change: (v) => { e[k] = milesToKm(Math.max(0, v)); update(); } }));
     apply.addEventListener('click', () => {
       world = expandWorld(world, e);
       // Undo steps hold strokes at their old positions, so they no longer apply.
@@ -282,7 +295,7 @@ export function showWorld(app: App, start: World): () => void {
       preview,
       h('h3', {}, 'How big it is'),
       meter.el,
-      h('p', { class: 'muted small' }, 'Hollow dot: the map now. Solid dot: after growing. Red line: its planet’s whole surface (when not Earth-sized).'),
+      h('p', { class: 'muted small' }, 'Drag along the bar to grow the map (evenly on all sides), or click a planet to match its size. Hollow dot: the map now. Solid dot: after growing. Red line: its planet’s whole surface (when not Earth-sized).'),
       problem,
       h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Cancel'), apply),
     );

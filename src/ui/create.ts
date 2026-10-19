@@ -1,4 +1,4 @@
-import { centreLatitude, defaultSettings, MAX_SIDE_KM, placeAtLatitude, SIZE_PRESETS, southLatitude, validateSettings, type SizePresetId } from '../core/settings';
+import { centreLatitude, defaultSettings, MAX_SIDE_KM, MIN_SIDE_KM, placeAtLatitude, SIZE_PRESETS, southLatitude, validateSettings, type SizePresetId } from '../core/settings';
 import { formatDistance, formatLatitude, kmToMiles, milesToKm } from '../core/units';
 import { createWorld } from '../core/world';
 import type { App } from './main';
@@ -41,7 +41,24 @@ export function showCreate(app: App): void {
   const custom = h('div', { class: 'group' });
   const create = h('button', { type: 'submit', class: 'primary' }, 'Create world');
 
-  const meter = sizeMeter();
+  // Dragging the size bar picks a custom size, keeping the map's shape.
+  const meter = sizeMeter((target) => {
+    const r = widthMi / heightMi;
+    let hk = Math.sqrt(target / r);
+    let wk = hk * r;
+    const f = Math.min(1, MAX_SIDE_KM / Math.max(wk, hk));
+    const g = Math.max(1, MIN_SIDE_KM / Math.min(wk * f, hk * f));
+    wk *= f * g;
+    hk *= f * g;
+    widthMi = Math.round(kmToMiles(wk) / 10) * 10 || 35;
+    heightMi = Math.round(kmToMiles(hk) / 10) * 10 || 35;
+    if (preset !== 'custom') {
+      preset = 'custom';
+      sizeChoice.querySelectorAll('[role=radio]').forEach((b) => b.setAttribute('aria-checked', b.textContent === 'Custom…' ? 'true' : 'false'));
+    }
+    renderCustom();
+    update();
+  });
   const setField = (field: HTMLElement, v: number) => field.querySelectorAll('input').forEach((i) => ((i as HTMLInputElement).value = String(Math.round(v * 10) / 10)));
   const locator = worldLocator((lat, lon) => {
     centre = lat;
@@ -122,6 +139,7 @@ export function showCreate(app: App): void {
       summary,
       h('h3', {}, 'How big it is'),
       meter.el,
+      h('p', { class: 'muted small' }, 'Drag along the bar to make the map bigger or smaller (it keeps its shape), or click a planet to match its size.'),
     ),
     h('section', { class: 'card' }, h('h2', {}, 'The planet'), planetFields(s, update)),
     h(

@@ -138,7 +138,9 @@ Built phase by phase (REDESIGN.md, section 10); each phase ends with something t
 - **Where the map sits:** Create world (and World settings) show the whole world as a strip with
   the map on it; drag the map to place it (latitude and longitude), or use the sliders.
 - **Size meter:** Create world and Canvas options compare the map's area with the surfaces of real
-  planets (Moon to Jupiter) and say how many times Earth's surface it is.
+  planets (Moon to Jupiter) and say how many times Earth's surface it is. Drag along the bar (or
+  click a planet) to set the size: in Create world it picks a custom size, in Canvas options it
+  grows the map evenly on all sides, keeping its shape.
 - **Degrees grow with big maps:** the planet is Earth-sized until the map outgrows it (taller than
   pole to pole or wider than Earth is around). Past that the planet grows to fit, and each degree
   covers more ground. Maps can now be up to 120,000 km a side.

@@ -30,8 +30,38 @@ const sqmi = (km2: number) => {
  * Earth's surface it is, and how big its planet is (the planet grows past Earth's size to fit a
  * bigger map, and its degrees grow with it).
  */
-export function sizeMeter(): { el: HTMLElement; update(s: WorldSettings, before?: WorldSettings): void } {
-  const bar = h('div', { class: 'size-bar' });
+export function sizeMeter(onPick?: (areaKm2: number) => void): { el: HTMLElement; update(s: WorldSettings, before?: WorldSettings): void } {
+  const bar = h('div', { class: onPick ? 'size-bar pickable' : 'size-bar' });
+  let current = 0;
+  if (onPick) {
+    // Drag along the bar (or click a planet) to choose the map's size; arrow keys nudge it.
+    bar.setAttribute('role', 'slider');
+    bar.setAttribute('tabindex', '0');
+    bar.setAttribute('aria-label', 'Map size: drag to grow the map');
+    const areaAt = (clientX: number) => {
+      const b = bar.getBoundingClientRect();
+      let p = ((clientX - b.left) / b.width) * 100;
+      // Snap onto a planet's mark when close to it.
+      for (const pl of PLANETS) if (Math.abs(pos(area(pl.r)) - p) < 1.5) p = pos(area(pl.r));
+      return 10 ** (LOG0 + (Math.max(0, Math.min(100, p)) / 100) * (LOG1 - LOG0));
+    };
+    let dragging = false;
+    bar.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      bar.setPointerCapture(e.pointerId);
+      onPick(areaAt(e.clientX));
+    });
+    bar.addEventListener('pointermove', (e) => dragging && onPick(areaAt(e.clientX)));
+    const stop = () => (dragging = false);
+    bar.addEventListener('pointerup', stop);
+    bar.addEventListener('pointercancel', stop);
+    bar.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      e.preventDefault();
+      const p = pos(current) + (e.key === 'ArrowRight' ? 2 : -2);
+      onPick(10 ** (LOG0 + (Math.max(0, Math.min(100, p)) / 100) * (LOG1 - LOG0)));
+    });
+  }
   const text = h('p', { class: 'small size-text' });
   const planet = h('p', { class: 'muted small' });
   const el = h('div', { class: 'size-meter', role: 'group', 'aria-label': 'Map size compared with planets' }, bar, text, planet);
@@ -39,6 +69,8 @@ export function sizeMeter(): { el: HTMLElement; update(s: WorldSettings, before?
     el,
     update(s, before) {
       const mapArea = s.widthKm * s.heightKm;
+      current = mapArea;
+      bar.setAttribute('aria-valuetext', `${times(mapArea / EARTH_AREA)} times Earth's surface`);
       const ticks = PLANETS.map((p) => h('span', { class: 'size-tick', style: `left:${pos(area(p.r))}%`, title: `${p.name}: ${sqmi(area(p.r))}` }, h('i', {}), h('b', {}, p.name)));
       const marks: HTMLElement[] = [];
       if (before) marks.push(h('span', { class: 'size-mark before', style: `left:${pos(before.widthKm * before.heightKm)}%`, title: 'Now' }));
