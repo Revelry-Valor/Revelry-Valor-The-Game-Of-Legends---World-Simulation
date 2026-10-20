@@ -128,7 +128,10 @@ export function createMapView(o: MapViewOptions): MapView {
       g.lineTo(x1, y);
       g.stroke();
       g.fillStyle = 'rgba(255,255,255,0.75)';
-      g.fillText(formatLatitude(lat), Math.max(x0, 0) + 6, y - 7 < y0 + 8 ? y + 9 : y - 7);
+      // Northern labels sit just below their lines and southern ones just above, so the labels at
+      // the poles (the map's edges) never crowd the next ones in.
+      // (The equator has its own label on the right.)
+      if (lat !== 0) g.fillText(formatLatitude(lat), Math.max(x0, 0) + 6, lat > 0 ? y + 9 : y - 7);
     }
     const tilt = s.axialTilt;
     const named: [number, string][] = [[0, 'Equator']];
