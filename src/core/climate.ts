@@ -779,6 +779,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
     let legLat = latAt(y0);
     let travelled = 0;
     let fresh = true;
+    let turns = 0;
     let idx = startIdx;
     const endLeg = (coastal: boolean) => {
       const span = Math.abs(latAt(y) - legLat);
@@ -799,6 +800,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
       }
       let done = false;
       let best = leg.mode === 'coast' ? (latAt(y) - shift) * hemi : 0;
+      const legAl = (latAt(y) - shift) * hemi;
       for (let t = 0; t < 2500 && !done; t++) {
         const al = (latAt(y) - shift) * hemi;
         const dw = samp(dW, x, y);
@@ -813,7 +815,8 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
           const l = Math.hypot(dx, dy);
           dx /= l;
           dy /= l;
-          if (dw < off * 1.15 && dx * nx + dy * ny > 0.15 && (nx || ny)) {
+          // Only a coast across its way (east or west) turns it; one off to the side is skimmed past.
+          if (dw < off * 1.15 && nx * leg.dirX > 0.5) {
             done = true;
             break;
           }
@@ -829,10 +832,14 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
             // No coast to follow: carry on toward the pole or the equator.
             dx = px;
             dy = -leg.pole * hemi;
-          } else if (dw > off * 3) {
-            // Lost the coast (a sharp corner): head back to it.
+          } else if (dw > off * 3 && dw < off * 6) {
+            // Lost the coast at a sharp corner: head back to it.
             dx = nx + px * 0.3;
             dy = ny + py * 0.3;
+          } else if (dw >= off * 6) {
+            // No coast near: carry on across open sea toward where it was going.
+            dx = Math.sign(px) || 1;
+            dy = -leg.pole * hemi * 0.6;
           } else {
             let tx = -ny;
             let ty = nx;
@@ -856,11 +863,22 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
             done = true;
             break;
           }
-          // The coast turned back the wrong way (around a cape): the current leaves it.
+          // A coast that doesn't lead toward the pole (or the equator), such as one running east to
+          // west, is no place for this current: it leaves the coast.
           best = leg.pole > 0 ? Math.max(best, al) : Math.min(best, al);
-          if (leg.pole > 0 ? al < best - 2.5 : al > best + 2.5) {
-            // Past the cape it carries on across open sea toward where it was going.
-            plan = [...plan.slice(0, li + 1), { mode: 'open', dirX: px >= 0 ? 1 : -1, lat0: al, lat1: leg.until, kind: leg.kind }, ...plan.slice(li + 1)];
+          const sideways = travelled > 1500 && (al - legAl) * leg.pole < (travelled / ctx.kpd) * 0.2;
+          const cape = leg.pole > 0 ? al < best - 2.5 : al > best + 2.5;
+          if (sideways || cape) {
+            const prev = plan[li - 1];
+            const early = (al - legAl) * leg.pole < Math.abs(leg.until - legAl) * 0.5;
+            if (early && prev && prev.mode === 'open' && prev.dirX === -1 && turns < 4) {
+              // Only the tip of the land: the current it came in on carries on past it, to turn at the next coast.
+              turns++;
+              plan = [...plan.slice(0, li + 1), { ...prev, lat0: prev.lat1 }, leg, ...plan.slice(li + 1)];
+            } else if (cape) {
+              // Past the cape it carries on across open sea toward where it was going.
+              plan = [...plan.slice(0, li + 1), { mode: 'open', dirX: px >= 0 ? 1 : -1, lat0: al, lat1: leg.until, kind: leg.kind }, ...plan.slice(li + 1)];
+            }
             done = true;
             break;
           }
@@ -983,19 +1001,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
         }
       }
     }
-    // The polar current, east to west, coming back down the far side as a cold current.
-    const lastE = E[E.length - 1];
-    const polarLat = (lastE + 90) / 2 + 2;
-    if (E.length % 2 === 0) {
-      const crossLat = E[E.length - 2] + 0.6 * (lastE - E[E.length - 2]);
-      for (const x of runEnds(polarLat, true)) {
-        walk(x, shiftY(polarLat), [
-          { mode: 'open', dirX: -1, lat0: polarLat, lat1: polarLat, kind: 0 },
-          { mode: 'coast', pole: -1, until: crossLat + 2, kind: -1 },
-          { mode: 'open', dirX: 1, lat0: crossLat, lat1: crossLat, kind: 1 },
-        ], hemi, [-1, 0]);
-      }
-    }
+    // The polar current is the westward side of the subpolar gyre (no separate path).
   }
   // The countercurrent: eastward, neutral, just on the ITCZ's side of the equator.
   let it = 0;
