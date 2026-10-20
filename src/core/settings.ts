@@ -40,6 +40,8 @@ export interface ClimateSliders {
   polarFrontShift: number;
   /** Landmasses closer than this (km) count as one. */
   landJoinKm: number;
+  /** Ocean currents crossing open sea travel this far (km) for each degree they move north or south. */
+  currentSlopeKm: number;
 }
 
 export const CLIMATE_DEFAULTS: ClimateSliders = {
@@ -59,6 +61,7 @@ export const CLIMATE_DEFAULTS: ClimateSliders = {
   thermalLow: 1,
   polarFrontShift: 0,
   landJoinKm: 300,
+  currentSlopeKm: 250,
 };
 
 /** Rainfall follows the world's temperature automatically, or is set by hand (100% = what the temperature would give). */

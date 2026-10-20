@@ -84,6 +84,7 @@ function climateSliders(c: ClimateSliders, changed: () => void): HTMLElement {
       heading('Ocean currents'),
       f('warmCurrentC', 'Warm current strength', 0, 54, 1, '°F', 'Peak warming of coasts by warm currents.', ...dF),
       f('coldCurrentC', 'Cold current strength', -45, 0, 1, '°F', 'Peak cooling of coasts by cold currents.', ...dF),
+      f('currentSlopeKm', 'Current slope in open sea', 30, 600, 5, 'miles per degree', 'How far a current crosses open sea for each degree it moves north or south: smaller turns it toward the pole faster (Earth about 155).', ...mi),
       f('minCurrentTravelDeg', 'Minimum current travel', 5, 60, 1, '° latitude', 'Shorter currents change the climate less.'),
       heading('Coral reefs'),
       f('reefMinC', 'Coldest water reefs live in', 50, 86, 1, '°F', 'Reefs need the sea at least this warm all year (Earth about 64 °F).', ...F),
