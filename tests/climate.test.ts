@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { cellEdges, climateAt, computeClimate, nearestPoint, rainClass, ZONE_INFO, type Climate } from '../src/core/climate';
+import { cellEdges, climateAt, computeClimate, rainClass, ZONE_INFO, type Climate } from '../src/core/climate';
 import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { cToF, defaultSettings, fToC, latitudeAt, southLatitude } from '../src/core/settings';
 import { KM_PER_DEGREE } from '../src/core/units';
@@ -105,9 +105,21 @@ describe('the climate of a test continent', () => {
   });
 
   it('freezes the sea at high latitudes in winter, not in the tropics', () => {
-    const ice = (lat: number) => cl.winter.ice[nearestPoint(cl, 500, yAt(lat))];
-    expect(ice(68)).toBe(1);
-    expect(ice(10)).toBe(0);
+    // Warm currents can keep patches near the pole open (rule 11), so count rather than test one spot.
+    let polar = 0;
+    let polarIce = 0;
+    let tropicIce = 0;
+    for (let k = 0; k < cl.reef.length; k++) {
+      if (cl.land[k]) continue;
+      const la = cl.lat[(k / cl.w) | 0];
+      if (la >= 62) {
+        polar++;
+        polarIce += cl.winter.ice[k];
+      }
+      if (Math.abs(la) < 25) tropicIce += cl.winter.ice[k];
+    }
+    expect(polarIce / polar).toBeGreaterThan(0.1);
+    expect(tropicIce).toBe(0);
   });
 
   it('has warm and cold currents', () => {

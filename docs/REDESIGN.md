@@ -1067,21 +1067,21 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 **Ocean current rules (agreed with the designer; numbered so new rules can be added as maps are tested).** Mirrored for the southern hemisphere. Latitudes are Earth's (24-hour day); they move with the wind-cell edges on other worlds.
 
 - *Around the ITCZ (all neutral, black; at sea only)*
-  1. The countercurrent runs west to east right on the ITCZ line, following its curve in both seasons.
-  2. Two equatorial currents run east to west, 5° north and 5° south of the ITCZ.
+  1. The countercurrent runs west to east exactly on the ITCZ line, following its curve in both seasons. (Where the ITCZ swings far over a continent, the currents' line stays within about 8° of the equator, so they don't cross to the far side.)
+  2. Two equatorial currents run east to west, exactly 5° north and 5° south of the countercurrent.
   3. At an ocean's west end each equatorial current turns poleward as a warm current, and part turns back into the countercurrent; at the east end the countercurrent splits into the two westward currents.
 - *Hitting land*
-  4. A current that hits land splits: warm toward the pole, cold toward the equator, wherever each has room.
+  4. A current that hits land splits: warm toward the pole, cold toward the equator, wherever each has room. A current following a coast leaves it when the land moves away, carrying straight on (it never hugs the land round a corner, and currents never cross).
 - *Warm currents going poleward*
   5. At about 40° they start heading east if there's open sea, arcing slowly up to about 50° if the sea is wide enough.
-  6. A warm current also branches off the westward equatorial current to reach a landmass sitting wholly poleward of it, then runs up that land's east coast to about 40°.
+  6. A warm current also branches off the westward equatorial current to reach a landmass sitting wholly poleward of it (more than about 8° away), curving up out of the westward current and running up that land's east coast to about 40°.
 - *Cold currents going toward the equator*
   7. Coming down a coast to about 40–50°, they meet the warm current coming up and turn east together.
   8. With no warm current to meet, they turn east at about 50°.
   9. Cold currents heading for the equator carry on past the end of the coast, across open sea, until they join the westward equatorial current.
 - *Polar currents*
   10. The polar current runs east to west (neutral) at about 70°.
-  11. A warm current reaching the polar current continues about 5° further poleward and flows west alongside it, still warm.
+  11. A warm current reaching the polar current takes the polar current's place and flows west there, still warm; the polar current moves about 5° further poleward alongside it, so the two never cross.
   12. When that warm current hits land it turns cold and runs toward the equator without splitting, meeting the warm current coming up the coast at about 40–50°, and they turn east.
   13. As the polar current passes a landmass whose poleward end lies between about 50° and 70°, a cold current splits off down that land's east coast, meeting the warm current at about 40–50°.
 - Off the map's edges counts as open ocean, so currents can run off a "lead nowhere" edge.
