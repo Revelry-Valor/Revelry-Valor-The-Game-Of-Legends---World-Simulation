@@ -1087,6 +1087,14 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - *Open sea*
   14. In open sea nothing forces a sharp turn: currents turn in wide arcs (a warm current leaving a coast to join the polar current arcs round into it). Along a coast the land can turn them sharply.
   15. How steeply a current crossing open sea moves toward the pole or equator is a setting (Climate fine-tuning, "Current slope in open sea", Earth about 155 miles per degree).
+- *Learned from hand-drawn teaching maps (maps 1–3)*
+  16. A landmass lying between the 40–50° crossing and the equator (one the crossing passes poleward of) still gets cold water: a cold current branches off the crossing, heads for the land's west coast (or the west edge of its shallow shelf) and runs along it to the westward equatorial current. Nearby lands share one such current, and a land that only just pokes past the equatorial current, which already runs along it, gets none.
+  17. A small neutral current runs west round the end of a landmass, from the warm current on its east side to the cold current on its west side: a mini gyre carrying water from the warm current to the cooler one. It only forms where both currents are there.
+  18. A current following a coast that still runs on eastward stays warm while it's poleward of about 40°; where the coast takes it toward the equator past that it turns cold, then keeps following the coast the way it has settled into.
+  19. A crossing that meets a coast running on roughly east (a land's equator-side coast) follows it instead of splitting; a warm branch still goes poleward up the land's west coast.
+  20. Bays: the crossing dips into a bay along its east side (warm), runs along the far shore, and comes out along the west side as cold water (from rules 4 and 11–12).
+  21. An equatorial current meeting a tropical landmass (a small one, or one whose coast falls away westward) runs round its poleward side along the coast instead of stopping. Where that land reaches on past the current's line and open sea lies poleward, a warm current still leaves there toward the pole. An equatorial current reaching an ocean's west end always turns poleward there (rule 3), even one that began as a cold current.
+  - Arcs from 40° to 50° stay as rule 5: they only reach 50° where the sea is wide enough.
 - Off the map's edges counts as open ocean, so currents can run off a "lead nowhere" edge.
 
 **ITCZ over land (clarified after testing):** land width decides how far the belt tries to go, but in each place it stops about 1.5° beyond the land's furthest reach toward the pole, and the hemisphere-imbalance shift never pushes it past the tilt line (only high plateaus overshoot).

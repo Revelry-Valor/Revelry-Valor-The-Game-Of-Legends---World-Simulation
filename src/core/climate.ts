@@ -674,9 +674,9 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
  * the ITCZ line instead of a fixed latitude: 0 is on the line, 5 is 5° poleward of it.
  */
 type Leg =
-  | { mode: 'open'; dirX: 1 | -1; lat0: number; lat1: number; kind: number; itcz?: number; dodge?: number }
-  | { mode: 'coast'; pole: 1 | -1; until: number; kind: number; itcz?: number; loose?: boolean; meetWarm?: number; east?: boolean }
-  | { mode: 'drift'; pole: 1 | -1; until: number; kind: number; itcz?: number; toCoast?: boolean; curve?: number; turnTo?: 1 | -1; meetWarm?: number }
+  | { mode: 'open'; dirX: 1 | -1; lat0: number; lat1: number; kind: number; itcz?: number; dodge?: number; round?: number; slide?: number; next?: () => Leg[]; branch?: { until: number; plan: () => Leg[] } }
+  | { mode: 'coast'; pole: 1 | -1; until: number; kind: number; itcz?: number; loose?: boolean; meetWarm?: number; east?: boolean; warmTo?: number }
+  | { mode: 'drift'; pole: 1 | -1; until: number; kind: number; itcz?: number; toCoast?: boolean; curve?: number; turnTo?: 1 | -1; meetWarm?: number; aim?: [number, number]; meetAny?: boolean }
   | { mode: 'split'; a: Leg[]; b: Leg[] };
 
 interface MajorPath {
@@ -836,10 +836,26 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
       }
       return false;
     };
+    /** A warm branch only goes up a coast that leads toward the pole (not back the way it came). */
+    function warmBranchOk(x: number, y: number, b: Leg[]): boolean {
+      const first = b[0];
+      if (!first || first.mode !== 'coast' || first.pole < 0 || samp(dW, x, y) >= off * 2) return true;
+      const [nx, ny] = toWall(x, y);
+      if (!nx && !ny) return true;
+      const sg = -nx * hemi >= 0 ? 1 : -1;
+      return -(nx * sg) * hemi >= 0.5 && -ny * sg >= -0.5;
+    }
+    let branchedAt = -9;
     for (let li = 0; li < plan.length; li++) {
       const leg = plan[li];
+      if (leg.mode === 'split' && branchedAt === li - 1 && leg.b.length && leg.b[0].mode === 'open') {
+        // The warm current already left as this current rounded the land: only the countercurrent turns back here.
+        plan = leg.b;
+        li = -1;
+        continue;
+      }
       if (leg.mode === 'split') {
-        walk(x, y, leg.b, hemi, [px, py], id, idx);
+        if (warmBranchOk(x, y, leg.b)) walk(x, y, leg.b, hemi, [px, py], id, idx);
         plan = leg.a;
         li = -1;
         continue;
@@ -852,6 +868,10 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
       let tAvgY = 0;
       let refX: number | null = null;
       let refY: number | null = null;
+      let slid = false;
+      // Rule 18: a current following a coast eastward stays warm while it is poleward of `warmTo`.
+      let coldFrom: number | null = null;
+      let stepKind = leg.kind;
       const legAl = (latAt(y) - shift) * hemi;
       for (let t = 0; t < 2500 && !done; t++) {
         const al = (latAt(y) - shift) * hemi;
@@ -887,11 +907,59 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
           dx /= l;
           dy /= l;
           // Only a coast across its way (east or west) turns it; one off to the side is skimmed past.
+          let around = false;
           if (dw < off * 1.15 && nx * leg.dirX > 0.5) {
-            done = true;
-            break;
+            // A tangent along the coast: (-ny, nx) or its reverse.
+            const sg = -nx * hemi >= 0 ? 1 : -1;
+            const reach = leg.round !== undefined ? reachAhead(x, y, nx, ny, hemi) : Infinity;
+            if (leg.round !== undefined && (reach <= 12 || (reach <= leg.round && -ny * sg <= -0.3))) {
+              // Rule 21: an equatorial current meeting a tropical landmass (a small one, or one whose coast
+              // falls away westward) runs round its poleward side.
+              dx = -ny * sg;
+              dy = nx * sg;
+              around = true;
+              // Where the land reaches on past the line and open sea lies poleward, a warm current still leaves here toward the pole (rule 3).
+              if (!slid && leg.branch && reach > al + 2) {
+                slid = true;
+                let clear = true;
+                for (let yy = y; clear && (latAt(yy) - shift) * hemi < leg.branch.until; yy -= hemi * stepY) {
+                  if (yy < 0 || yy > H) break;
+                  for (const ox of [-1.5, 0, 1.5]) if (wall(cellAt(x + ox * off, yy)) && Math.abs(yy - y) > off * 2) clear = false;
+                }
+                if (clear) {
+                  walk(x, y, leg.branch.plan(), hemi, [0, -hemi], id, idx);
+                  branchedAt = li;
+                }
+              }
+            } else if (leg.slide && leg.dirX > 0) {
+              // Rule 19: a coast running on roughly east (the land's equator-side coast) is followed, not split at;
+              // a warm branch still goes poleward up the land's west coast.
+              let tx = -ny;
+              let ty = nx;
+              if (tx < 0) {
+                tx = -tx;
+                ty = -ty;
+              }
+              const eqc = ty * hemi;
+              if (tx > 0.5 && eqc < 0.85 && eqc > -0.6 && (eqc < 0.3 || al > leg.slide - 1)) {
+                if (!slid) {
+                  slid = true;
+                  const nxt = plan[li + 1];
+                  if (nxt && nxt.mode === 'split' && nxt.b.length && warmBranchOk(x, y, nxt.b)) walk(x, y, nxt.b, hemi, [0, -hemi], id, idx);
+                }
+                dx = tx;
+                dy = ty;
+                around = true;
+              }
+            }
+            if (!around) {
+              // An equatorial current that ends its plan at an ocean's west end still turns poleward there (rule 3).
+              if (leg.next && li === plan.length - 1) plan = [...plan, ...leg.next()];
+              done = true;
+              break;
+            }
           }
-          if (dw < off * 1.15) {
+          if (dw < off * 1.15 && !around) {
             const into = dx * nx + dy * ny;
             if (into > 0) {
               dx -= into * nx;
@@ -911,7 +979,9 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
             }
           }
           if (extendTo !== null && ((latAt(y) - T) * hemi * leg.pole >= 0 || occupiedOther(x, y, off, id, idx))) return finish();
-          if ((latAt(y) - T) * hemi * leg.pole >= 0 || travelled > 5000 || (leg.toCoast && travelled > off && dw < off * 1.3)) {
+          // A branch heading across the sea ends where it meets another current (currents never cross).
+          if (leg.meetAny && travelled > off * 2 && occupiedOther(x, y, off, id, -Infinity)) return finish();
+          if ((latAt(y) - T) * hemi * leg.pole >= 0 || travelled > (leg.aim ? 9000 : 5000) || (leg.toCoast && travelled > off && dw < off * 1.3)) {
             done = true;
             break;
           }
@@ -922,6 +992,14 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
             const f = Math.min(1, travelled / leg.curve);
             dx = -(1 - f) + 0.3 * f;
             dy = -leg.pole * hemi * (0.15 + f);
+          } else if (leg.aim) {
+            // Heading for a landmass's west coast (rule 16).
+            let ax = leg.aim[0] - x;
+            if (wrap) ax -= Math.round(ax / W) * W;
+            const ay = leg.aim[1] - y;
+            const d = Math.hypot(ax, ay);
+            dx = d < off ? 0 : ax / d;
+            dy = d < off ? -leg.pole * hemi : ay / d;
           } else if (leg.turnTo) {
             // Arcing round toward the way it goes next (no land to force a sharp turn).
             const span = Math.max(1, Math.abs((T - shift) * hemi - legAl));
@@ -1019,16 +1097,32 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
           if (refX === null && leg.loose && madeWay) {
             refX = tAvgX / tl;
             refY = tAvgY / tl;
-          } else if (refX === null && !leg.loose) {
+          } else if (refX === null && !leg.loose && leg.warmTo === undefined) {
             // Along a coast, its path is straight toward the pole (or the equator).
             refX = 0;
             refY = -hemi * leg.pole;
           }
           let bad: boolean;
-          if (refX !== null && refY !== null) bad = (tAvgX * refX + tAvgY * refY) / tl < (leg.loose ? 0.82 : 0.9) || lead < 0.2;
+          stepKind = leg.kind;
+          if (leg.warmTo !== undefined) {
+            // Rule 18: running on eastward along the coast it is still the warm current; where the coast
+            // takes it toward the equator past `warmTo` it turns cold, then follows the coast the way it
+            // settles into (as a loose leg does).
+            if (coldFrom === null && al > leg.warmTo - 3 && tAvgX / tl > 0.45 && lead > -0.15) {
+              stepKind = 1;
+              bad = false;
+            } else {
+              if (coldFrom === null) coldFrom = al;
+              if (refX === null && (al - coldFrom) * leg.pole > 6) {
+                refX = tAvgX / tl;
+                refY = tAvgY / tl;
+              }
+              bad = refX !== null && refY !== null ? (tAvgX * refX + tAvgY * refY) / tl < 0.82 || lead < 0.2 : lead < 0.3;
+            }
+          } else if (refX !== null && refY !== null) bad = (tAvgX * refX + tAvgY * refY) / tl < (leg.loose ? 0.82 : 0.9) || lead < 0.2;
           else bad = lead < (leg.loose ? -0.35 : 0.5);
           away = bad ? away + 1 : 0;
-          const sideways = (travelled > off * 0.5 && away >= 3) || (!leg.loose && travelled > 1500 && (al - legAl) * leg.pole < (travelled / ctx.kpd) * 0.2) || (leg.loose && travelled > 2500 && !madeWay);
+          const sideways = (travelled > off * 0.5 && away >= 3) || (!leg.loose && leg.warmTo === undefined && travelled > 1500 && (al - legAl) * leg.pole < (travelled / ctx.kpd) * 0.2) || (leg.loose && travelled > 2500 && !madeWay);
           const cape = leg.pole > 0 ? al < best - 2.5 : al > best + 2.5;
           if (sideways || cape) {
             const prev = plan[li - 1];
@@ -1078,7 +1172,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
         const leaving = leg.mode === 'drift' && leg.curve !== undefined && travelled < leg.curve;
         if (!leaving && joins(x1, y1, id, idx, dx, dy)) {
           path.pts.push(x1, y1);
-          path.kind.push(leg.kind);
+          path.kind.push(stepKind);
           path.str.push(1);
           return finish();
         }
@@ -1088,7 +1182,7 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
         py = dy;
         travelled += step;
         path.pts.push(x, y);
-        path.kind.push(leg.kind);
+        path.kind.push(stepKind);
         path.str.push(1);
         if (!leaving) put(x, y, id, idx, dx, dy);
         if (idx > 6000) return finish();
@@ -1153,6 +1247,42 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
     }
     return -1;
   };
+  /** The first open-sea column west of a land cell, across its shelf (-1 if none close by). */
+  const seaWestOf = (k: number, i: number) => {
+    const reach = Math.max(3, Math.ceil((off * 3) / stepX));
+    for (let d = 1; d <= reach && i - d >= 0; d++) {
+      if (land[k - d]) return -1;
+      if (!wall(k - d)) return i - d;
+    }
+    return -1;
+  };
+  /** How far each landmass reaches toward each hemisphere's pole (degrees, from the season's shifted equator). */
+  const reachN = comps.map((cells) => cells.reduce((m, k) => Math.max(m, ctx.latOf(k) - shift), -Infinity));
+  const reachS = comps.map((cells) => cells.reduce((m, k) => Math.max(m, -(ctx.latOf(k) - shift)), -Infinity));
+  /** The landmass a current is running into (across its shelf), and how far it reaches toward this hemisphere's pole. */
+  function reachAhead(x: number, y: number, nx: number, ny: number, hemi: number): number {
+    const d = samp(dW, x, y) + stepX;
+    const k0 = cellAt(x + nx * d, y + ny * d);
+    const i0 = k0 % w;
+    const j0 = (k0 / w) | 0;
+    for (let r = 0; r <= 6; r++) {
+      for (let dj = -r; dj <= r; dj++) {
+        for (let di = -r; di <= r; di++) {
+          if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+          const jj = j0 + dj;
+          let ii = i0 + di;
+          if (jj < 0 || jj >= h) continue;
+          if (ii < 0 || ii >= w) {
+            if (!wrap) continue;
+            ii = (ii + w) % w;
+          }
+          const c0 = comp[jj * w + ii];
+          if (c0 >= 0) return hemi > 0 ? reachN[c0] : reachS[c0];
+        }
+      }
+    }
+    return Infinity;
+  }
   for (const hemi of [1, -1]) {
     const shiftY = (la: number) => (north - (la * hemi + shift)) * ctx.kpd;
     /** Where each sea run along a latitude ends on its east (or west) side: a current starts there. */
@@ -1188,15 +1318,17 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
       const polarLat = hasLow ? E[g + 1] + ((E[g + 2] ?? 90) - E[g + 1]) / 3 : 0;
       // The westward equatorial current follows the ITCZ, 5° poleward of it (rule 2); gyres
       // further from the equator (fast-spinning worlds) use a fixed latitude.
-      const eqLeg = (kind: number): Leg => (g === 0 ? { mode: 'open', dirX: -1, lat0: 0, lat1: 0, kind, itcz: 5 } : { mode: 'open', dirX: -1, lat0: lo + 0.4 * (hi - lo), lat1: lo + 0.4 * (hi - lo), kind });
+      const eqLeg = (kind: number): Leg => (g === 0 ? { mode: 'open', dirX: -1, lat0: 0, lat1: 0, kind, itcz: 5, round: hi + 1, next: () => [{ mode: 'split', a: warmUp, b: counter }], branch: { until: turnLat + 10, plan: () => [{ mode: 'drift', pole: 1, until: turnLat, kind: 1, meetAny: true }, ...warmUp.slice(1)] } } : { mode: 'open', dirX: -1, lat0: lo + 0.4 * (hi - lo), lat1: lo + 0.4 * (hi - lo), kind });
       const eqTarget = g === 0 ? { until: 0, itcz: 5 } : { until: lo + 0.4 * (hi - lo) + 2 };
       // Rule 9: cold toward the equator until it joins the westward equatorial current.
       const coldToEquator: Leg[] = [{ mode: 'coast', pole: -1, ...eqTarget, kind: -1 }, eqLeg(0)];
+      // Rule 18: where a crossing splits at a coast running on eastward, it stays warm along it to about 40°.
+      const coldFromCross: Leg[] = [{ mode: 'coast', pole: -1, ...eqTarget, kind: -1, warmTo: turnLat }, eqLeg(0)];
       // Rule 4: a current crossing the ocean that hits land splits: warm toward the pole, cold toward
       // the equator. (Built a few levels deep; currents that come round again join themselves.)
       const crossTail = (depth: number): Leg[] => [
-        { mode: 'open', dirX: 1, lat0: crossLat, lat1: crossLat, kind: 1 },
-        { mode: 'split', a: coldToEquator, b: warmPolar(depth) },
+        { mode: 'open', dirX: 1, lat0: crossLat, lat1: crossLat, kind: 1, slide: turnLat },
+        { mode: 'split', a: coldFromCross, b: warmPolar(depth) },
       ];
       // Rules 7–8: cold coming down meets the warm current, or turns east at about 50°.
       const coldDownToCross = (depth: number): Leg[] => [{ mode: 'coast', pole: -1, until: crossLat, kind: -1, meetWarm: turnLat }, ...(depth > 0 ? crossTail(depth - 1) : [{ mode: 'open', dirX: 1, lat0: crossLat, lat1: crossLat, kind: 1 } as Leg])];
@@ -1214,8 +1346,8 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
       // Rules 4–5: up the coast warm, east from 40° arcing to 50°, then split at the far coast.
       const warmUp: Leg[] = [
         { mode: 'coast', pole: 1, until: turnLat, kind: 1, loose: true },
-        { mode: 'open', dirX: 1, lat0: turnLat, lat1: crossLat, kind: 1 },
-        { mode: 'split', a: coldToEquator, b: warmPolar(2) },
+        { mode: 'open', dirX: 1, lat0: turnLat, lat1: crossLat, kind: 1, slide: turnLat },
+        { mode: 'split', a: coldFromCross, b: warmPolar(2) },
       ];
       // Rule 3: at an ocean's west end, the equatorial current turns poleward (warm) and part of it
       // turns back east as the countercurrent on the ITCZ line.
@@ -1284,6 +1416,57 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
           if (!reached) walk(x, y, coldToEquator, hemi, [0, hemi]);
         }
       }
+      // Rule 16: a landmass between the crossing and the equator (one the crossing passes poleward of)
+      // still gets cold water: it branches off the crossing and heads for the land's west coast,
+      // then runs along it to the westward equatorial current.
+      if (g === 0) {
+        const targets: number[] = [];
+        const order = comps.map((_, ci) => ci).sort((a, b) => comps[b].length - comps[a].length);
+        for (const ci of order) {
+          const top = hemi > 0 ? reachN[ci] : reachS[ci];
+          if (top >= turnLat || top < -2) continue;
+          let best = -1;
+          let bestAl = -Infinity;
+          for (const k of comps[ci]) {
+            const al = (ctx.latOf(k) - shift) * hemi;
+            if (al > bestAl && al > top - 8 && seaWestOf(k, k % w) >= 0) {
+              bestAl = al;
+              best = k;
+            }
+          }
+          if (best < 0) continue;
+          const sea = seaWestOf(best, best % w);
+          const eqAl = (itczCol(sea) + 5 * hemi - shift) * hemi;
+          if (bestAl < eqAl - 5) continue;
+          const sx = colX(sea) - off * 1.2;
+          const sy = (north - ctx.latOf(best)) * ctx.kpd;
+          if (sx < 0 && !wrap) continue;
+          if (wall(cellAt(sx, sy)) || occupied(sx, sy - hemi * off * 1.5, off)) continue;
+          // A land lying a little poleward of the equatorial current, which already runs along it, needs no cold current of its own.
+          if (top < hi - 8 && top > eqAl + 6 && occupied(sx, sy, off * 1.2)) continue;
+          // The crossing, poleward of the land.
+          let y0 = -1;
+          for (let a = 2; a <= 60; a++) {
+            const yy = sy - hemi * a * off * 0.5;
+            if (yy < 0 || yy > H || (latAt(yy) - shift) * hemi > crossLat + 8 || wall(cellAt(sx, yy))) break;
+            if (occupied(sx, yy, off * 0.7)) {
+              y0 = yy;
+              break;
+            }
+          }
+          if (y0 < 0) continue;
+          // One cold current serves lands close together.
+          let near = false;
+          for (let q = 0; q < targets.length && !near; q += 2) {
+            let ddx = Math.abs(targets[q] - sx);
+            if (wrap) ddx = Math.min(ddx, W - ddx);
+            near = Math.hypot(ddx, targets[q + 1] - sy) < 2000;
+          }
+          if (near) continue;
+          targets.push(sx, sy);
+          walk(sx, y0, [{ mode: 'drift', pole: -1, ...eqTarget, kind: -1, aim: [sx, sy], toCoast: true }, { mode: 'coast', pole: -1, ...eqTarget, kind: -1, loose: true }, eqLeg(0)], hemi, [0, hemi]);
+        }
+      }
       if (hasLow) {
         // Rule 10: the polar current, east to west; at land it turns cold toward the equator (rule 12).
         for (const x of runEnds(polarLat, true)) {
@@ -1326,6 +1509,93 @@ function currents(ctx: Ctx, s: number, out: SeasonClimate): void {
     const x = colX(i) + off * 1.3;
     const y = (north - itczAt(x)) * ctx.kpd;
     if (x < W && !wall(cellAt(x, y)) && !occupied(x, y, off)) walk(x, y, [{ mode: 'open', dirX: 1, lat0: 0, lat1: 0, kind: 0, itcz: 0 }], itczCol(i) >= 0 ? 1 : -1, [1, 0]);
+  }
+
+  // Rule 17: a small neutral loop runs west round the end of a landmass, from the warm current on
+  // its east side to the cold current on its west side (a mini gyre between the two).
+  {
+    const pts: number[] = [];
+    for (const p of paths) for (let q = 0; q < p.kind.length; q++) if (p.kind[q] !== 0) pts.push(p.pts[q * 2], p.pts[q * 2 + 1], p.kind[q]);
+    const dxw = (a: number, b: number) => (wrap ? a - b - Math.round((a - b) / W) * W : a - b);
+    const turn = edges[0] + ((edges[1] ?? 90) - edges[0]) / 3;
+    for (const hemi of [1, -1]) {
+      for (let ci = 0; ci < comps.length; ci++) {
+        const cells = comps[ci].filter((k) => (ctx.latOf(k) - shift) * hemi > 0);
+        if (cells.length < 4) continue;
+        let lo = Infinity;
+        let hi2 = -Infinity;
+        for (const k of cells) {
+          const al = (ctx.latOf(k) - shift) * hemi;
+          lo = Math.min(lo, al);
+          hi2 = Math.max(hi2, al);
+        }
+        // Its free ends in this hemisphere: the poleward end (if it stops short of the crossing) and
+        // the equator-side end (if it doesn't reach the equator).
+        const ends: [number, number][] = [];
+        if (hi2 < turn - 4 && hi2 > 4) ends.push([hi2, 1]);
+        if (lo > 3 && lo < turn) ends.push([lo, -1]);
+        for (const [endAl, out] of ends) {
+          const near = cells.filter((k) => Math.abs((ctx.latOf(k) - shift) * hemi - endAl) < 5);
+          const ax = colX(near[0] % w);
+          let e0 = Infinity;
+          let e1 = -Infinity;
+          for (const k of near) {
+            const d = dxw(colX(k % w), ax);
+            e0 = Math.min(e0, d);
+            e1 = Math.max(e1, d);
+          }
+          const westX = ax + e0;
+          const eastX = ax + e1;
+          for (let tries = 0; tries < 3; tries++) {
+            const rowAl = endAl + out * (2.5 + tries * 1.5);
+            const rowY = (north - (rowAl * hemi + shift)) * ctx.kpd;
+            if (rowY < 0 || rowY > H) break;
+            // The warm current to the east and the cold current to the west, near this latitude.
+            let wb = -1;
+            let wd = 2600;
+            let cb = -1;
+            let cd = 2600;
+            for (let q = 0; q < pts.length; q += 3) {
+              const al = (latAt(pts[q + 1]) - shift) * hemi;
+              if (Math.abs(al - rowAl) > 5) continue;
+              if (pts[q + 2] > 0) {
+                const d = Math.hypot(dxw(pts[q], eastX), pts[q + 1] - rowY);
+                if (dxw(pts[q], (westX + eastX) / 2) > 0 && d < wd) {
+                  wd = d;
+                  wb = q;
+                }
+              } else {
+                const d = Math.hypot(dxw(pts[q], westX), pts[q + 1] - rowY);
+                if (dxw(pts[q], (westX + eastX) / 2) < 0 && d < cd) {
+                  cd = d;
+                  cb = q;
+                }
+              }
+            }
+            if (wb < 0 || cb < 0) break;
+            const wx0 = pts[wb];
+            const cx0 = wx0 + dxw(pts[cb], wx0);
+            if (wx0 - cx0 < off * 3) break;
+            // From the warm current, along the row past the land's end, to the cold current.
+            const ctrl = [wx0, pts[wb + 1], wx0 - off * 1.5, rowY, cx0 + off * 1.5, rowY, cx0, pts[cb + 1]];
+            const line: number[] = [];
+            for (let q = 0; q < ctrl.length - 2; q += 2) {
+              const n0 = Math.max(1, Math.ceil(Math.hypot(ctrl[q + 2] - ctrl[q], ctrl[q + 3] - ctrl[q + 1]) / step));
+              for (let t = 0; t < n0; t++) line.push(ctrl[q] + ((ctrl[q + 2] - ctrl[q]) * t) / n0, ctrl[q + 1] + ((ctrl[q + 3] - ctrl[q + 1]) * t) / n0);
+            }
+            line.push(ctrl[6], ctrl[7]);
+            for (let pass = 0; pass < 4; pass++) for (let q = 2; q < line.length - 2; q++) line[q] = (line[q - 2] + line[q] * 2 + line[q + 2]) / 4;
+            let ok = true;
+            for (let q = 4; q < line.length - 4 && ok; q += 2) if (wall(cellAt(line[q], line[q + 1]))) ok = false;
+            const mid = Math.floor(line.length / 4) * 2;
+            if (ok && occupied(line[mid], line[mid + 1], off * 0.7)) ok = false;
+            if (!ok) continue;
+            paths.push({ pts: line, kind: new Array(line.length / 2).fill(0), str: new Array(line.length / 2).fill(0.6) });
+            break;
+          }
+        }
+      }
+    }
   }
 
   // Drop scraps: currents need some length to be worth drawing.
