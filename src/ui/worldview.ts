@@ -69,7 +69,17 @@ export function showWorld(app: App, start: World): () => void {
     const b = diffBounds(before, strokes);
     if (b) map.surfaceChanged(b);
     changed();
-    climate.changed();
+    // Current sketches are for teaching only: they never change the climate.
+    const ib = new Set(before), is = new Set(strokes);
+    const touched = [...before.filter((x) => !is.has(x)), ...strokes.filter((x) => !ib.has(x))];
+    if (touched.some((x) => x.brush !== 'current')) climate.changed();
+    updateUndo();
+    tools.refresh();
+  };
+  const snapshot = () => {
+    undoStack.push(world.surface.strokes);
+    if (undoStack.length > 300) undoStack.shift();
+    redoStack.length = 0;
     updateUndo();
   };
   const undo = () => {
@@ -96,7 +106,12 @@ export function showWorld(app: App, start: World): () => void {
     clearTimeout(noticeTimer);
     noticeTimer = window.setTimeout(() => (notice.hidden = true), 4000);
   };
-  const tools = createToolPanel(() => map?.redraw());
+  let showCurrentsView: (() => void) | null = null;
+  const tools = createToolPanel(() => {
+    map?.redraw();
+    // Drawing currents is done on the currents map.
+    if (tools?.state.tool === 'current' && look.view !== 'currents') showCurrentsView?.();
+  }, () => map?.sketch ?? null);
   const map = createMapView({
     world: () => world,
     tool: () => tools.state,
@@ -110,7 +125,7 @@ export function showWorld(app: App, start: World): () => void {
       redoStack.length = 0;
       world = { ...world, surface: { strokes: [...world.surface.strokes, live], nextId: id + 1 } };
       changed();
-      climate.changed();
+      if (stroke.brush !== 'current') climate.changed();
       updateUndo();
       return live;
     },
@@ -121,9 +136,15 @@ export function showWorld(app: App, start: World): () => void {
       strokes[i] = stroke;
       world = { ...world, surface: { ...world.surface, strokes } };
       changed();
-      climate.changed();
+      if (stroke.brush !== 'current') climate.changed();
     },
     cancel: undo,
+    snapshot,
+    remove(id) {
+      snapshot();
+      setStrokes(world.surface.strokes.filter((x) => x.id !== id));
+    },
+    sketchSelected: () => tools.refresh(),
     climate: () => climate.climate,
   });
 
@@ -189,25 +210,27 @@ export function showWorld(app: App, start: World): () => void {
     choice<'off' | 'on'>('Mountain zones', [{ value: 'off', label: 'Hidden' }, { value: 'on', label: 'Shown' }], 'off', (v) => { look.zones = v === 'on'; legend.hidden = !look.zones; map.redraw(); }),
     legend,
   );
+  const mapChoice = choice<MapView>(
+    'Map',
+    [
+      { value: 'land', label: 'Land' },
+      { value: 'zones', label: 'Climate zones' },
+      { value: 'temp', label: 'Temperature' },
+      { value: 'rain', label: 'Rainfall' },
+      { value: 'pressure', label: 'Pressure & winds' },
+      { value: 'currents', label: 'Currents & sea' },
+    ],
+    look.view,
+    (v) => { look.view = v; renderClimateLegend(); map.redraw(); },
+  );
+  showCurrentsView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(6)')?.click();
   const climatePanel = h(
     'section',
     { class: 'view-panel' },
     h('h2', {}, 'Climate maps'),
     h('div', { class: 'climate-run' }, climateBtn, climateStatus),
     h('button', { type: 'button', class: 'ghost small', title: 'Text describing the continents, the ITCZ and the currents, plus a compact copy of this world, to paste into a conversation.', onclick: () => void showReport() }, 'Climate report…'),
-    choice<MapView>(
-      'Map',
-      [
-        { value: 'land', label: 'Land' },
-        { value: 'zones', label: 'Climate zones' },
-        { value: 'temp', label: 'Temperature' },
-        { value: 'rain', label: 'Rainfall' },
-        { value: 'pressure', label: 'Pressure & winds' },
-        { value: 'currents', label: 'Currents & sea' },
-      ],
-      look.view,
-      (v) => { look.view = v; renderClimateLegend(); map.redraw(); },
-    ),
+    mapChoice,
     choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; map.redraw(); }),
     climateLegend,
   );

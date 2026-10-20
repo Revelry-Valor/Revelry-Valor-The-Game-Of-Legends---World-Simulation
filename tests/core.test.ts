@@ -159,3 +159,15 @@ describe('degrees that match the map', () => {
     expect(southLatitude(g.settings)).toBeCloseTo(-90, 6);
   });
 });
+
+describe('current sketches', () => {
+  it('runs a smooth course through every point, the short way across the seam', async () => {
+    const { sketchCourse } = await import('../src/core/paint');
+    const c = sketchCourse([0, 0, 500, 300, 1000, 0]);
+    expect(c.slice(0, 2)).toEqual([0, 0]);
+    expect(c.slice(-2)).toEqual([1000, 0]);
+    expect(c.some((v, i) => i % 2 === 0 && Math.abs(v - 500) < 1e-9 && Math.abs(c[i + 1] - 300) < 1e-9)).toBe(true);
+    const w = sketchCourse([9900, 0, 100, 0], 10000);
+    expect(w[w.length - 2]).toBe(10100);
+  });
+});

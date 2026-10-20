@@ -90,6 +90,21 @@ export async function climateReport(world: World, cl: Climate | null): Promise<s
     }
   }
 
+  // Currents drawn by hand: how the person says the currents should run.
+  const sketches = world.surface.strokes.filter((st) => st.brush === 'current' && st.ctrl && st.ctrl.length >= 4);
+  if (sketches.length) {
+    out.push('');
+    out.push(`Your drawn currents (teaching sketch, ${sketches.length}):`);
+    sketches.forEach((st, i) => {
+      const c = st.ctrl!;
+      const pts: string[] = [];
+      for (let q = 0; q < c.length; q += 2) pts.push(at(c[q], c[q + 1]));
+      let len = 0;
+      for (let q = 2; q < st.pts.length; q += 2) len += Math.hypot(st.pts[q] - st.pts[q - 2], st.pts[q + 1] - st.pts[q - 1]);
+      out.push(`  ${i + 1}. ${st.current ?? 'warm'}: ${pts.join(' → ')} (${Math.round(len).toLocaleString('en-US')} km)`);
+    });
+  }
+
   // The painted world, compact: rounded, with dense paths thinned.
   const strokes = world.surface.strokes.map((st) => compactStroke(st));
   const data = JSON.stringify({ settings: s, surface: { strokes, nextId: world.surface.nextId } });
@@ -138,6 +153,7 @@ function compactStroke(st: Stroke): Stroke {
     keep.push(Math.round(pts[pts.length - 2]), Math.round(pts[pts.length - 1]));
     o.pts = keep;
   } else o.pts = pts.map((v) => Math.round(v * 10) / 10);
+  if (st.ctrl) o.ctrl = st.ctrl.map((v) => Math.round(v));
   return o as unknown as Stroke;
 }
 

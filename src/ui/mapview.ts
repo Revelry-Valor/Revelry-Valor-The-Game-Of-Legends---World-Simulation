@@ -1,5 +1,5 @@
 import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
-import { brushInfo, roundPath, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
+import { brushInfo, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
@@ -16,6 +16,16 @@ export interface ToolState {
   tool: BrushId | 'pan';
   erase: boolean;
   settings: BrushSettings;
+  /** Current sketches: draw new ones, or adjust the ones drawn. */
+  sketchMode?: 'draw' | 'adjust';
+}
+
+/** What can be done to the selected current sketch (for the tool panel). */
+export interface SketchOps {
+  selected(): Stroke | null;
+  setKind(kind: 'warm' | 'cold' | 'neutral'): void;
+  reverse(): void;
+  remove(): void;
 }
 
 export interface MapViewOptions {
@@ -32,6 +42,12 @@ export interface MapViewOptions {
   cancel(): void;
   /** A short message for the person (for example, why a spur did not start). */
   notice(text: string): void;
+  /** Save the strokes as an undo step before editing one in place. */
+  snapshot(): void;
+  /** Delete a stroke (undoable). */
+  remove(id: number): void;
+  /** The selected current sketch changed. */
+  sketchSelected?(): void;
 }
 
 export interface MapView {
@@ -42,10 +58,14 @@ export interface MapView {
   surfaceChanged(bounds: [number, number, number, number] | null): void;
   /** A new climate is ready. */
   climateChanged(): void;
+  /** The selected current sketch and what can be done to it. */
+  sketch: SketchOps;
   /** The map's size or position changed (canvas options). */
   worldReset(): void;
   dispose(): void;
 }
+
+const SKETCH_COLOUR = { warm: '#e0301e', cold: '#1f66e0', neutral: '#0d1014' };
 
 export function createMapView(o: MapViewOptions): MapView {
   const canvas = h('canvas', { class: 'map', 'aria-label': 'World map. Drag to paint with the selected brush.' });
@@ -100,6 +120,7 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     const cl = o.climate();
     if (cl && look.view !== 'land') drawClimate(g, r, cl, look, x0, span, copies);
+    if (look.view === 'currents' || o.tool().tool === 'current') drawSketches(g, r, x0, span, copies);
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
     drawClimateTools(g, r, x0, span, copies);
@@ -202,7 +223,10 @@ export function createMapView(o: MapViewOptions): MapView {
         if (p.major) return c > 0 ? '#d8321f' : c < 0 ? '#1f63d8' : '#101418';
         return c > 0 ? 'rgba(232,110,90,0.9)' : c < 0 ? 'rgba(90,150,240,0.9)' : 'rgba(40,46,54,0.75)';
       };
+      // Fainter while drawing teaching sketches, so the drawn currents stand out.
+      if (o.tool().tool === 'current') g.globalAlpha = 0.35;
       drawPaths(g, r, se.currentPaths, x0, span, copies, colour, (p) => (p.major ? 2.4 : 1.2));
+      g.globalAlpha = 1;
     }
     g.restore();
   }
@@ -276,6 +300,68 @@ export function createMapView(o: MapViewOptions): MapView {
         }
       }
     }
+  }
+
+  /** Current sketches (teaching): bold lines with a white edge and arrows; points shown while adjusting. */
+  function drawSketches(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[]) {
+    const t = o.tool();
+    const adjusting = t.tool === 'current' && (t.sketchMode === 'adjust' || t.erase);
+    const yTop = toScreen(0, 0, r)[1];
+    g.save();
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (const st of sketches()) {
+      const colour = SKETCH_COLOUR[st.current ?? 'warm'];
+      const p = st.pts;
+      for (const c of copies) {
+        const ox = x0 + c * span;
+        const sx = (q: number) => ox + p[q] * view.scale;
+        const sy = (q: number) => yTop + p[q + 1] * view.scale;
+        for (const [w, col] of [[6, 'rgba(255,255,255,0.9)'], [3.2, colour]] as const) {
+          g.lineWidth = st.id === sel && adjusting ? w + 2 : w;
+          g.strokeStyle = col;
+          g.beginPath();
+          for (let q = 0; q < p.length; q += 2) (q ? g.lineTo : g.moveTo).call(g, sx(q), sy(q));
+          g.stroke();
+        }
+        // Arrows every so far along the course.
+        let along = 0;
+        let next = 250;
+        for (let q = 2; q < p.length; q += 2) {
+          const dx = p[q] - p[q - 2];
+          const dy = p[q + 1] - p[q - 1];
+          along += Math.hypot(dx, dy) * view.scale;
+          if (along < next && q < p.length - 2) continue;
+          next = along + 90;
+          const a = Math.atan2(dy, dx);
+          const hx = sx(q);
+          const hy = sy(q);
+          g.fillStyle = colour;
+          g.strokeStyle = 'rgba(255,255,255,0.9)';
+          g.lineWidth = 1.5;
+          g.beginPath();
+          g.moveTo(hx + Math.cos(a) * 8, hy + Math.sin(a) * 8);
+          g.lineTo(hx - Math.cos(a - 0.5) * 9, hy - Math.sin(a - 0.5) * 9);
+          g.lineTo(hx - Math.cos(a + 0.5) * 9, hy - Math.sin(a + 0.5) * 9);
+          g.closePath();
+          g.fill();
+          g.stroke();
+        }
+        if (adjusting) {
+          const k = st.ctrl!;
+          for (let q = 0; q < k.length; q += 2) {
+            g.fillStyle = st.id === sel ? '#ffffff' : colour;
+            g.strokeStyle = '#11161c';
+            g.lineWidth = 1.5;
+            g.beginPath();
+            g.arc(ox + k[q] * view.scale, yTop + k[q + 1] * view.scale, st.id === sel ? 6 : 4.5, 0, Math.PI * 2);
+            g.fill();
+            g.stroke();
+          }
+        }
+      }
+    }
+    g.restore();
   }
 
   /** Crystals are always marked; Rain Shadow Pen lines and gaps show while those tools are in hand. */
@@ -362,7 +448,7 @@ export function createMapView(o: MapViewOptions): MapView {
     g.save();
     g.lineWidth = 2;
     g.setLineDash([6, 5]);
-    g.strokeStyle = routing.brush === 'lava' ? '#ff7a26' : '#bfe6ff';
+    g.strokeStyle = routeColour();
     g.beginPath();
     for (let k = 0; k < pts.length; k += 2) (k ? g.lineTo : g.moveTo).call(g, pts[k], pts[k + 1]);
     if (hover) {
@@ -379,7 +465,7 @@ export function createMapView(o: MapViewOptions): MapView {
       g.arc(pts[k], pts[k + 1], k === 0 ? 6 : 4.5, 0, Math.PI * 2);
       g.fill();
       g.stroke();
-      g.strokeStyle = routing.brush === 'lava' ? '#ff7a26' : '#bfe6ff';
+      g.strokeStyle = routeColour();
     }
     g.restore();
   }
@@ -460,8 +546,8 @@ export function createMapView(o: MapViewOptions): MapView {
   let spaceDown = false;
 
   // Point mode for rivers and lava: the points clicked so far.
-  let routing: { brush: 'river' | 'lava'; ctrl: number[] } | null = null;
-  const pointsMode = (t: ToolState) => (t.tool === 'river' || t.tool === 'lava') && t.settings.route === 'points' && !t.erase;
+  let routing: { brush: 'river' | 'lava' | 'current'; ctrl: number[] } | null = null;
+  const pointsMode = (t: ToolState) => ((t.tool === 'river' || t.tool === 'lava') && t.settings.route === 'points' && !t.erase) || (t.tool === 'current' && !t.erase && t.sketchMode !== 'adjust');
   const opts = () => {
     const s = o.world().settings;
     return { seed: s.seed, wrapKm: s.edges === 'wrap' ? s.widthKm : 0 };
@@ -502,6 +588,16 @@ export function createMapView(o: MapViewOptions): MapView {
       return;
     }
     const t = o.tool();
+    if (brush === 'current') {
+      // A teaching sketch: a smooth course through the points; nothing else changes.
+      const wrapKm = o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0;
+      const live = o.begin({ ...t.settings, brush, erase: undefined, pts: roundPath(sketchCourse(ctrl, wrapKm)), route: 'points', ctrl: roundPath(ctrl) });
+      sel = live.id;
+      o.sketchSelected?.();
+      o.notice('Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
+      schedule();
+      return;
+    }
     o.notice(brush === 'river' ? 'Finding the river’s course…' : 'Finding the lava’s course…');
     schedule();
     // Let the notice show before the work starts.
@@ -511,12 +607,146 @@ export function createMapView(o: MapViewOptions): MapView {
     }, 30);
   };
 
+  const routeColour = () => {
+    if (!routing) return '#bfe6ff';
+    if (routing.brush === 'lava') return '#ff7a26';
+    if (routing.brush === 'current') return SKETCH_COLOUR[o.tool().settings.current ?? 'warm'];
+    return '#bfe6ff';
+  };
+
+  // ---- Current sketches (teaching): adjust points, add points, select, delete ----
+  let sel: number | null = null;
+  let dragging: { id: number; idx: number; pointer: number } | null = null;
+  const wrapKm = () => (o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0);
+  const sketches = () => o.world().surface.strokes.filter((st) => st.brush === 'current' && st.ctrl && st.ctrl.length >= 4);
+  const withCtrl = (st: Stroke, ctrl: number[]): Stroke => ({ ...st, ctrl: roundPath(ctrl), pts: roundPath(sketchCourse(ctrl, wrapKm())) });
+  /** Distance on screen (px) from a point to a segment. */
+  const segDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+    const vx = bx - ax;
+    const vy = by - ay;
+    const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy || 1)));
+    return Math.hypot(ax + vx * t - px, ay + vy * t - py) * view.scale;
+  };
+  const sketchPointer = (e: PointerEvent, x: number, y: number, erase: boolean): boolean => {
+    // A handle (one of the points) first, then the line itself.
+    let best: { id: number; idx: number; d: number } | null = null;
+    for (const st of sketches()) {
+      const c = st.ctrl!;
+      for (let i = 0; i < c.length; i += 2) {
+        const d = Math.hypot(c[i] - x, c[i + 1] - y) * view.scale;
+        if (d < 14 && (!best || d < best.d)) best = { id: st.id, idx: i / 2, d };
+      }
+    }
+    let line: { id: number; seg: number; d: number } | null = null;
+    if (!best) {
+      for (const st of sketches()) {
+        const c = st.ctrl!;
+        const p = st.pts;
+        for (let i = 0; i < p.length - 2; i += 2) {
+          const d = segDist(x, y, p[i], p[i + 1], p[i + 2], p[i + 3]);
+          if (d < 10 && (!line || d < line.d)) {
+            // Which pair of points this part of the curve lies between.
+            let seg = 0;
+            let segBest = Infinity;
+            for (let j = 0; j < c.length - 2; j += 2) {
+              const dj = segDist(p[i], p[i + 1], c[j], c[j + 1], c[j + 2], c[j + 3]);
+              if (dj < segBest) {
+                segBest = dj;
+                seg = j / 2;
+              }
+            }
+            line = { id: st.id, seg, d };
+          }
+        }
+      }
+    }
+    const hit = best?.id ?? line?.id ?? null;
+    if (erase) {
+      if (hit !== null) {
+        o.remove(hit);
+        if (sel === hit) sel = null;
+        o.sketchSelected?.();
+        o.notice('Current deleted (Undo brings it back).');
+      }
+      schedule();
+      return true;
+    }
+    if (best) {
+      sel = best.id;
+      o.snapshot();
+      dragging = { id: best.id, idx: best.idx, pointer: e.pointerId };
+    } else if (line) {
+      // A tap on the line adds a point there, ready to drag.
+      const st = sketches().find((k) => k.id === line!.id)!;
+      const c = st.ctrl!.slice();
+      c.splice((line.seg + 1) * 2, 0, x, y);
+      o.snapshot();
+      o.update(withCtrl(st, c));
+      sel = st.id;
+      dragging = { id: st.id, idx: line.seg + 1, pointer: e.pointerId };
+    } else {
+      // Empty sea: let the map be dragged, and clear the selection.
+      if (sel !== null) {
+        sel = null;
+        o.sketchSelected?.();
+      }
+      schedule();
+      return false;
+    }
+    o.sketchSelected?.();
+    schedule();
+    return true;
+  };
+  const dragSketch = (x: number, y: number) => {
+    if (!dragging) return;
+    const st = sketches().find((k) => k.id === dragging!.id);
+    if (!st) return;
+    const c = st.ctrl!.slice();
+    c[dragging.idx * 2] = x;
+    c[dragging.idx * 2 + 1] = y;
+    o.update(withCtrl(st, c));
+    schedule();
+  };
+  const sketchOps: SketchOps = {
+    selected: () => sketches().find((k) => k.id === sel) ?? null,
+    setKind(kind) {
+      const st = sketchOps.selected();
+      if (!st) return;
+      o.snapshot();
+      o.update({ ...st, current: kind });
+      schedule();
+    },
+    reverse() {
+      const st = sketchOps.selected();
+      if (!st) return;
+      const c: number[] = [];
+      for (let i = st.ctrl!.length - 2; i >= 0; i -= 2) c.push(st.ctrl![i], st.ctrl![i + 1]);
+      o.snapshot();
+      o.update(withCtrl(st, c));
+      schedule();
+    },
+    remove() {
+      if (sel === null) return;
+      o.remove(sel);
+      sel = null;
+      o.sketchSelected?.();
+      schedule();
+    },
+  };
+
   const startStroke = (e: PointerEvent, x: number, y: number) => {
     const t = o.tool();
     if (t.tool === 'pan') return false;
+    if (t.tool === 'current' && (t.erase || t.sketchMode === 'adjust')) return sketchPointer(e, x, y, t.erase);
     if (pointsMode(t)) {
-      const brush = t.tool as 'river' | 'lava';
+      const brush = t.tool as 'river' | 'lava' | 'current';
       if (!routing || routing.brush !== brush) routing = { brush, ctrl: [] };
+      // Tapping the last point again finishes (no Enter key needed on a phone).
+      const c0 = routing.ctrl;
+      if (c0.length >= 4 && Math.hypot(c0[c0.length - 2] - x, c0[c0.length - 1] - y) * view.scale < 16) {
+        finishRoute();
+        return true;
+      }
       // A click close to a river (on screen) lands on it, so tributaries are easy to join.
       let snapped = false;
       if (brush === 'river' && routing.ctrl.length >= 2) {
@@ -537,7 +767,7 @@ export function createMapView(o: MapViewOptions): MapView {
       routing.ctrl.push(x, y);
       // A river ends as soon as a point lands on water (sea, lake or another river).
       if (brush === 'river' && routing.ctrl.length >= 4 && (snapped || onWater(o.world().surface, x, y, opts()))) finishRoute();
-      else o.notice(routing.ctrl.length === 2 ? 'Now click points along the way. Press Enter to finish (a river also finishes on water), Backspace to take back a point, Esc to cancel.' : `${routing.ctrl.length / 2} points.`);
+      else o.notice(routing.ctrl.length === 2 ? `Now click points along the way. Tap the last point again or press Enter to finish${brush === 'river' ? ' (a river also finishes on water)' : ''}; Backspace takes back a point, Esc cancels.` : `${routing.ctrl.length / 2} points.`);
       schedule();
       return true;
     }
@@ -623,6 +853,7 @@ export function createMapView(o: MapViewOptions): MapView {
     pointers.delete(e.pointerId);
     pinch = 0;
     if (drawing && drawing.pointer === e.pointerId) finishStroke();
+    if (dragging?.pointer === e.pointerId) dragging = null;
     if (pointers.size === 0) {
       panning = false;
       canvas.classList.remove('panning');
@@ -663,6 +894,7 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
     hover = { x, y };
+    if (dragging?.pointer === e.pointerId) dragSketch(x, y);
     if (drawing?.pointer === e.pointerId) extendStroke(x, y);
     schedule();
     if (!readoutPending) {
@@ -772,6 +1004,7 @@ export function createMapView(o: MapViewOptions): MapView {
       cache.setSurface(o.world().surface, bounds);
       schedule();
     },
+    sketch: sketchOps,
     climateChanged() {
       cache.setClimate(o.climate());
       schedule();

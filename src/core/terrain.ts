@@ -437,7 +437,8 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
   const px = g.px;
 
   for (const s of surface.strokes) {
-    if (s.brush === 'whirlpool' || s.brush === 'crystal') continue;
+    // Placed features and teaching sketches don't change the ground.
+    if (s.brush === 'whirlpool' || s.brush === 'crystal' || s.brush === 'current') continue;
     if (!offsetsFor(s, g, o).length) continue;
     const seed = strokeSeed(o.seed, s.id);
     const er = !!s.erase;

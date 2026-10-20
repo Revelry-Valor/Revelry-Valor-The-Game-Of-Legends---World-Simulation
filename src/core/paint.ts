@@ -52,6 +52,7 @@ export type BrushId =
   | 'crystal'
   | 'shadowpen'
   | 'gap'
+  | 'current'
   // Mountain zones (by hand)
   | 'zone';
 
@@ -121,6 +122,7 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'reef', name: 'Reef', group: 'Sea', kind: 'area', hint: 'Add coral reefs by hand on shallow sea, or erase the ones the climate made.', sizeMi: 20, strength: 1, softness: 0.4, roughness: 0.6, detailMi: 2 },
   { id: 'crystal', name: 'Climate crystal', group: 'Climate', kind: 'point', hint: 'Click to place a crystal that changes the climate around it: heat (sun crystal), cold, or rain. Its width is how far it reaches; nearby crystals add together.', sizeMi: 150, strength: 0.6, softness: 0.5, roughness: 0, detailMi: 1 },
   { id: 'shadowpen', name: 'Rain Shadow Pen', group: 'Climate', kind: 'line', hint: 'Mountains, plateaus and hills already cast rain shadows. Draw along a crest to add high ground the climate should see, or to change how high it is. Nothing is drawn on the map.', sizeMi: 40, strength: 1, softness: 0.5, roughness: 0, detailMi: 1 },
+  { id: 'current', name: 'Current (sketch)', group: 'Climate', kind: 'line', hint: 'Teaching sketch: draw a current the way it should flow (tap points, then tap the last point again or press Enter). It doesn’t change the climate. Use Adjust to move points, add points, change its type, reverse it or delete it.', sizeMi: 60, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'gap', name: 'Gap (pass)', group: 'Climate', kind: 'area', hint: 'Cut a pass through high ground so moist air slips through.', sizeMi: 30, strength: 1, softness: 0.4, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
@@ -182,6 +184,38 @@ export interface Stroke {
   crystal?: 'heat' | 'cold' | 'rain';
   /** Rain Shadow Pen: the height of the high ground (km) for the climate. */
   penHeight?: number;
+  /** Drawn current (teaching sketch): what kind of water it carries. Its course is `ctrl`. */
+  current?: 'warm' | 'cold' | 'neutral';
+}
+
+/** A drawn current's smooth course through its points (km), for drawing and reports. */
+export function sketchCourse(ctrl: number[], wrapKm = 0): number[] {
+  const n = ctrl.length / 2;
+  if (n < 2) return ctrl.slice();
+  // Unwrap across the east–west seam so the curve takes the short way.
+  const p = ctrl.slice();
+  if (wrapKm) for (let i = 1; i < n; i++) p[i * 2] += Math.round((p[(i - 1) * 2] - p[i * 2]) / wrapKm) * wrapKm;
+  const at = (i: number) => [p[Math.max(0, Math.min(n - 1, i)) * 2], p[Math.max(0, Math.min(n - 1, i)) * 2 + 1]];
+  const out: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = at(i - 1);
+    const [x1, y1] = at(i);
+    const [x2, y2] = at(i + 1);
+    const [x3, y3] = at(i + 2);
+    const steps = Math.max(4, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 60));
+    for (let k = 0; k < steps; k++) {
+      const t = k / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      // Catmull–Rom: passes through every point.
+      out.push(
+        0.5 * (2 * x1 + (-x0 + x2) * t + (2 * x0 - 5 * x1 + 4 * x2 - x3) * t2 + (-x0 + 3 * x1 - 3 * x2 + x3) * t3),
+        0.5 * (2 * y1 + (-y0 + y2) * t + (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 + (-y0 + 3 * y1 - 3 * y2 + y3) * t3),
+      );
+    }
+  }
+  out.push(p[(n - 1) * 2], p[(n - 1) * 2 + 1]);
+  return out;
 }
 
 export interface Surface {
@@ -212,6 +246,7 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
     ...(id === 'crystal' ? { crystal: 'heat' as const } : {}),
     ...(id === 'shadowpen' ? { penHeight: 2.5 } : {}),
+    ...(id === 'current' ? { current: 'warm' as const, route: 'points' as const } : {}),
   };
 }
 

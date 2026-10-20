@@ -1,7 +1,7 @@
 import { BRUSHES, brushDefaults, brushInfo, ZONES, type BrushId, type ZoneId } from '../core/paint';
 import { kmToMiles, milesToKm } from '../core/units';
 import { choice, h, numberField } from './dom';
-import type { BrushSettings, ToolState } from './mapview';
+import type { BrushSettings, SketchOps, ToolState } from './mapview';
 
 /** The brush picker and the selected brush's settings (REDESIGN.md, 6.2). */
 export interface ToolPanel {
@@ -13,9 +13,11 @@ export interface ToolPanel {
   resize(factor: number): void;
   /** Show only the brushes of these groups (a sidebar tab). */
   showGroups(groups: string[]): void;
+  /** Show the settings again (for example, a different current sketch was picked). */
+  refresh(): void;
 }
 
-export function createToolPanel(changed: () => void): ToolPanel {
+export function createToolPanel(changed: () => void, sketch: () => SketchOps | null = () => null): ToolPanel {
   // Each brush remembers its own settings while you switch between them.
   const remembered = new Map<BrushId, BrushSettings>();
   const settingsFor = (id: BrushId) => {
@@ -50,6 +52,10 @@ export function createToolPanel(changed: () => void): ToolPanel {
     }
     const b = brushInfo(state.tool);
     const s = state.settings;
+    if (state.tool === 'current') {
+      settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: current sketch' : b.name), ...currentFields());
+      return;
+    }
     const pct = (label: string, key: 'strength' | 'softness' | 'roughness' | 'variation' | 'sideRidges' | 'erosion', hint: string) =>
       numberField({ label, value: Math.round((s[key] ?? 0) * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint, change: (v) => { s[key] = Math.max(0, Math.min(100, v)) / 100; changed(); } });
     // A river's width comes from the water it carries, so its brush size only matters for erasing.
@@ -128,6 +134,41 @@ export function createToolPanel(changed: () => void): ToolPanel {
     settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...fields.filter(Boolean) as HTMLElement[]);
   };
 
+  type Kind = 'warm' | 'cold' | 'neutral';
+  const KINDS: { value: Kind; label: string }[] = [{ value: 'warm', label: 'Warm' }, { value: 'cold', label: 'Cold' }, { value: 'neutral', label: 'Neutral' }];
+  /** Settings for hand-drawn currents: a teaching sketch that never changes the climate. */
+  const currentFields = (): HTMLElement[] => {
+    const s = state.settings;
+    if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a drawn current to delete it. The automatic currents are not touched.')];
+    const mode = state.sketchMode ?? 'draw';
+    const out: HTMLElement[] = [
+      h('p', { class: 'muted small hint' }, 'A teaching sketch: draw where the currents should go. It does not change the climate; the climate report lists it.'),
+      choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
+    ];
+    if (mode === 'draw') {
+      out.push(
+        choice<Kind>('Current', KINDS, s.current ?? 'warm', (v) => { s.current = v; changed(); }),
+        h('p', { class: 'muted small' }, 'Tap points along the course, then tap the last point again to finish. Esc cancels.'),
+      );
+      return out;
+    }
+    const ops = sketch();
+    const sel = ops?.selected() ?? null;
+    if (!ops || !sel) {
+      out.push(h('p', { class: 'muted small' }, 'Tap a drawn current to pick it. Drag its dots to move them; drag the line to add a bend.'));
+      return out;
+    }
+    out.push(
+      choice<Kind>('This current', KINDS, sel.current ?? 'warm', (v) => { ops.setKind(v); renderSettings(); }),
+      h('p', { class: 'muted small' }, 'Drag its dots to move them; drag the line to add a bend.'),
+      h('div', { class: 'sketch-actions' },
+        h('button', { type: 'button', class: 'ghost small', title: 'Make it flow the other way.', onclick: () => { ops.reverse(); renderSettings(); } }, 'Reverse'),
+        h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete'),
+      ),
+    );
+    return out;
+  };
+
   const select = (tool: BrushId | 'pan') => {
     state.tool = tool;
     if (tool !== 'pan') state.settings = settingsFor(tool);
@@ -163,6 +204,7 @@ export function createToolPanel(changed: () => void): ToolPanel {
       }
       renderPickers();
     },
+    refresh: () => renderSettings(),
     resize(factor) {
       if (state.tool === 'pan') return;
       state.settings.size = Math.max(milesToKm(0.5), Math.min(milesToKm(1500), state.settings.size * factor));
