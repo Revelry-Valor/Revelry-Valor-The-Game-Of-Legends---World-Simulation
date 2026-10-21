@@ -122,11 +122,23 @@ describe('the climate of a test continent', () => {
     expect(tropicIce).toBe(0);
   });
 
-  it('has warm and cold currents', () => {
-    const kinds = new Set(cl.summer.current);
-    expect(kinds.has(1)).toBe(true);
-    expect(kinds.has(-1)).toBe(true);
-  });
+  it('has no currents until they are drawn, then warms and cools the water by them', () => {
+    expect(new Set(cl.summer.current).has(1)).toBe(false);
+    expect(new Set(cl.summer.current).has(-1)).toBe(false);
+    const drawn = computeClimate(
+      world((add) => {
+        add('current', line([[8900, yAt(10)], [8900, yAt(40)]]), { current: 'warm' });
+        add('current', line([[3100, yAt(40)], [3100, yAt(10)]]), { current: 'cold' });
+        add('current', line([[3100, yAt(-30)], [3100, yAt(-10)]]), { current: 'cold', currentSize: 'secondary' });
+      }),
+      settings,
+    );
+    const anom = (x: number, lat: number) => drawn.summer.curAnomaly[(Math.floor(yAt(lat) / drawn.step)) * drawn.w + Math.floor(x / drawn.step)];
+    expect(anom(8950, 25)).toBeGreaterThan(1);
+    expect(anom(3050, 25)).toBeLessThan(-1);
+    // A secondary current reaches less far than a major one.
+    expect(Math.abs(anom(3100 - 450, -20))).toBeLessThan(Math.abs(anom(3100 - 450, 25)));
+  }, 60000);
 
   it('grows reefs only in warm water', () => {
     let tropical = 0;

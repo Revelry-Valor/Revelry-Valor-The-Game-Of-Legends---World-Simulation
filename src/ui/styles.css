@@ -227,3 +227,8 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .size-bar.pickable .size-mark:not(.before) { width: 1.1rem; height: 1.1rem; top: 0.15rem; }
 .report-box { width: 100%; min-height: 14rem; font-family: var(--mono); font-size: 0.72rem; line-height: 1.35; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem; resize: vertical; }
 .sketch-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.current-rules { margin-top: 0.6rem; border-top: 1px solid var(--line); padding-top: 0.5rem; }
+.current-rules summary { cursor: pointer; font-weight: 600; }
+.current-rules h4 { margin: 0.6rem 0 0.2rem; font-size: 0.85rem; }
+.current-rules ul { margin: 0; padding-left: 1.1rem; font-size: 0.82rem; line-height: 1.35; }
+.current-rules li { margin: 0.15rem 0; }

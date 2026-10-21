@@ -69,10 +69,7 @@ export function showWorld(app: App, start: World): () => void {
     const b = diffBounds(before, strokes);
     if (b) map.surfaceChanged(b);
     changed();
-    // Current sketches are for teaching only: they never change the climate.
-    const ib = new Set(before), is = new Set(strokes);
-    const touched = [...before.filter((x) => !is.has(x)), ...strokes.filter((x) => !ib.has(x))];
-    if (touched.some((x) => x.brush !== 'current')) climate.changed();
+    climate.changed();
     updateUndo();
     tools.refresh();
   };
@@ -125,7 +122,7 @@ export function showWorld(app: App, start: World): () => void {
       redoStack.length = 0;
       world = { ...world, surface: { strokes: [...world.surface.strokes, live], nextId: id + 1 } };
       changed();
-      if (stroke.brush !== 'current') climate.changed();
+      climate.changed();
       updateUndo();
       return live;
     },
@@ -136,7 +133,7 @@ export function showWorld(app: App, start: World): () => void {
       strokes[i] = stroke;
       world = { ...world, surface: { ...world.surface, strokes } };
       changed();
-      if (stroke.brush !== 'current') climate.changed();
+      climate.changed();
     },
     cancel: undo,
     snapshot,
@@ -189,7 +186,7 @@ export function showWorld(app: App, start: World): () => void {
         climateLegend.replaceChildren(key('#d67860', 'High pressure (H): dry, settled air'), key('#5c78d6', 'Low pressure (L): rising air, storms'), key('#96969e', 'Grey zone: fronts, where air masses meet'), key('#14181e', 'Arrows: wind direction'), itcz);
         break;
       case 'currents':
-        climateLegend.replaceChildren(key('#d23a2a', 'Warm current'), key('#2a6fd2', 'Cold current'), key('#111418', 'Neutral current'), key('#78dce6', 'Upwelling: cold, rich water (fishing, fog)'), key('#e4ecf1', 'Sea ice'), key('#5fd2c3', 'Coral reef'));
+        climateLegend.replaceChildren(key('#d23a2a', 'Warm current'), key('#2a6fd2', 'Cold current'), key('#111418', 'Neutral current (thin lines: secondary currents)'), key('#78dce6', 'Upwelling: cold, rich water (fishing, fog)'), key('#e4ecf1', 'Sea ice'), key('#5fd2c3', 'Coral reef'));
         break;
       default:
         climateLegend.replaceChildren();

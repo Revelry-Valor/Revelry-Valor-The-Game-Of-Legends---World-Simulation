@@ -1064,7 +1064,9 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 | 12. Other layers | Underdark, canopy and giant tree cities, sky islands, vines, waterfalls between layers | Extends a working surface world |
 | 13. Globe | 3D globe, flat and globe views side by side | Coordinates already support it |
 
-**Ocean current rules (agreed with the designer; numbered so new rules can be added as maps are tested).** Mirrored for the southern hemisphere. Latitudes are Earth's (24-hour day); they move with the wind-cell edges on other worlds.
+**Ocean currents are placed by hand** (the Ocean current brush in the Climate tab): major currents for the ocean-wide gyres, equatorial and polar currents, and thinner secondary currents running in and out of bays and shallow seas to set the water temperature there. Each is warm, cold or neutral; warm and cold ones warm or cool the water and coasts near them (secondary ones reach less far), and the climate follows. Nothing is placed automatically. The brush's panel shows the rules below as a guide to which way currents run at each latitude.
+
+**Ocean current rules (agreed with the designer; the guide shown with the brush).** Mirrored for the southern hemisphere. Latitudes are Earth's (24-hour day); they move with the wind-cell edges on other worlds.
 
 - *Around the ITCZ (all neutral, black; at sea only)*
   1. The countercurrent runs west to east exactly on the ITCZ line, following its curve in both seasons. (Where the ITCZ swings far over a continent, the currents' line stays within about 8° of the equator, so they don't cross to the far side.)

@@ -1,4 +1,4 @@
-import type { Climate, FlowPath } from '../core/climate';
+import type { Climate } from '../core/climate';
 import type { Stroke } from '../core/paint';
 import { centreLatitude, kmPerDegree, latitudeAt, planetRadiusKm, southLatitude } from '../core/settings';
 import { EARTH_RADIUS_KM, formatDistance, formatLatitude } from '../core/units';
@@ -82,26 +82,21 @@ export async function climateReport(world: World, cl: Climate | null): Promise<s
         itcz.push(`${lon(cl.x0 + i * cl.step)} ${formatLatitude(Math.round(se.itcz[i]))}`);
       }
       out.push(`  ITCZ: ${itcz.join(', ')}`);
-      const majors = (se.currentPaths[0] ?? []).filter((p) => p.major);
-      out.push(`  Major currents (${majors.length}):`);
-      majors.forEach((p, i) => out.push(`   ${i + 1}. ${legs(p, at)}`));
-      const minors = (se.currentPaths[0] ?? []).length - majors.length;
-      if (minors) out.push(`  Plus ${minors} small currents in bays and shallows.`);
     }
   }
 
-  // Currents drawn by hand: how the person says the currents should run.
+  // The ocean currents, as placed by hand.
   const sketches = world.surface.strokes.filter((st) => st.brush === 'current' && st.ctrl && st.ctrl.length >= 4);
   if (sketches.length) {
     out.push('');
-    out.push(`Your drawn currents (teaching sketch, ${sketches.length}):`);
+    out.push(`Ocean currents (${sketches.length}, placed by hand):`);
     sketches.forEach((st, i) => {
       const c = st.ctrl!;
       const pts: string[] = [];
       for (let q = 0; q < c.length; q += 2) pts.push(at(c[q], c[q + 1]));
       let len = 0;
       for (let q = 2; q < st.pts.length; q += 2) len += Math.hypot(st.pts[q] - st.pts[q - 2], st.pts[q + 1] - st.pts[q - 1]);
-      out.push(`  ${i + 1}. ${st.current ?? 'warm'}: ${pts.join(' → ')} (${Math.round(len).toLocaleString('en-US')} km)`);
+      out.push(`  ${i + 1}. ${st.current ?? 'warm'}${st.currentSize === 'secondary' ? ' (secondary)' : ''}: ${pts.join(' → ')} (${Math.round(len).toLocaleString('en-US')} km)`);
     });
   }
 
@@ -112,26 +107,6 @@ export async function climateReport(world: World, cl: Climate | null): Promise<s
   out.push('World data (for rebuilding this world):');
   out.push(await pack(data));
   return out.join('\n');
-}
-
-/** A current as legs of one kind: "warm 12°N 40°W → 38°N 60°W (2,900 km)". */
-function legs(p: FlowPath, at: (x: number, y: number) => string): string {
-  const name = (k: number) => (k > 0 ? 'warm' : k < 0 ? 'cold' : 'neutral');
-  const parts: string[] = [];
-  let start = 0;
-  let len = 0;
-  for (let q = 1; q <= p.kind.length; q++) {
-    if (q < p.kind.length) len += Math.hypot(p.pts[q * 2] - p.pts[q * 2 - 2], p.pts[q * 2 + 1] - p.pts[q * 2 - 1]);
-    if (q === p.kind.length || p.kind[q] !== p.kind[start]) {
-      const e = q - 1;
-      const mid = Math.floor((start + e) / 2);
-      const via = len > 2500 && e - start > 4 ? ` via ${at(p.pts[mid * 2], p.pts[mid * 2 + 1])}` : '';
-      parts.push(`${name(p.kind[start])} ${at(p.pts[start * 2], p.pts[start * 2 + 1])} → ${at(p.pts[e * 2], p.pts[e * 2 + 1])}${via} (${Math.round(len).toLocaleString('en-US')} km)`);
-      start = q;
-      len = 0;
-    }
-  }
-  return parts.join('; ');
 }
 
 function compactStroke(st: Stroke): Stroke {

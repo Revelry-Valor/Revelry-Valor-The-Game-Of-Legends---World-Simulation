@@ -24,6 +24,7 @@ export interface ToolState {
 export interface SketchOps {
   selected(): Stroke | null;
   setKind(kind: 'warm' | 'cold' | 'neutral'): void;
+  setSize(size: 'major' | 'secondary'): void;
   reverse(): void;
   remove(): void;
 }
@@ -223,10 +224,7 @@ export function createMapView(o: MapViewOptions): MapView {
         if (p.major) return c > 0 ? '#d8321f' : c < 0 ? '#1f63d8' : '#101418';
         return c > 0 ? 'rgba(232,110,90,0.9)' : c < 0 ? 'rgba(90,150,240,0.9)' : 'rgba(40,46,54,0.75)';
       };
-      // Fainter while drawing teaching sketches, so the drawn currents stand out.
-      if (o.tool().tool === 'current') g.globalAlpha = 0.35;
       drawPaths(g, r, se.currentPaths, x0, span, copies, colour, (p) => (p.major ? 2.4 : 1.2));
-      g.globalAlpha = 1;
     }
     g.restore();
   }
@@ -302,7 +300,7 @@ export function createMapView(o: MapViewOptions): MapView {
     }
   }
 
-  /** Current sketches (teaching): bold lines with a white edge and arrows; points shown while adjusting. */
+  /** Ocean currents as placed: bold lines (thinner for secondary currents) with a white edge and arrows; points shown while adjusting. */
   function drawSketches(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[]) {
     const t = o.tool();
     const adjusting = t.tool === 'current' && (t.sketchMode === 'adjust' || t.erase);
@@ -312,12 +310,13 @@ export function createMapView(o: MapViewOptions): MapView {
     g.lineJoin = 'round';
     for (const st of sketches()) {
       const colour = SKETCH_COLOUR[st.current ?? 'warm'];
+      const minor = st.currentSize === 'secondary';
       const p = st.pts;
       for (const c of copies) {
         const ox = x0 + c * span;
         const sx = (q: number) => ox + p[q] * view.scale;
         const sy = (q: number) => yTop + p[q + 1] * view.scale;
-        for (const [w, col] of [[6, 'rgba(255,255,255,0.9)'], [3.2, colour]] as const) {
+        for (const [w, col] of (minor ? [[3.6, 'rgba(255,255,255,0.85)'], [1.8, colour]] : [[6, 'rgba(255,255,255,0.9)'], [3.2, colour]]) as [number, string][]) {
           g.lineWidth = st.id === sel && adjusting ? w + 2 : w;
           g.strokeStyle = col;
           g.beginPath();
@@ -332,7 +331,7 @@ export function createMapView(o: MapViewOptions): MapView {
           const dy = p[q + 1] - p[q - 1];
           along += Math.hypot(dx, dy) * view.scale;
           if (along < next && q < p.length - 2) continue;
-          next = along + 90;
+          next = along + (minor ? 60 : 90);
           const a = Math.atan2(dy, dx);
           const hx = sx(q);
           const hy = sy(q);
@@ -340,9 +339,10 @@ export function createMapView(o: MapViewOptions): MapView {
           g.strokeStyle = 'rgba(255,255,255,0.9)';
           g.lineWidth = 1.5;
           g.beginPath();
-          g.moveTo(hx + Math.cos(a) * 8, hy + Math.sin(a) * 8);
-          g.lineTo(hx - Math.cos(a - 0.5) * 9, hy - Math.sin(a - 0.5) * 9);
-          g.lineTo(hx - Math.cos(a + 0.5) * 9, hy - Math.sin(a + 0.5) * 9);
+          const hs = minor ? 0.65 : 1;
+          g.moveTo(hx + Math.cos(a) * 8 * hs, hy + Math.sin(a) * 8 * hs);
+          g.lineTo(hx - Math.cos(a - 0.5) * 9 * hs, hy - Math.sin(a - 0.5) * 9 * hs);
+          g.lineTo(hx - Math.cos(a + 0.5) * 9 * hs, hy - Math.sin(a + 0.5) * 9 * hs);
           g.closePath();
           g.fill();
           g.stroke();
@@ -589,7 +589,7 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     const t = o.tool();
     if (brush === 'current') {
-      // A teaching sketch: a smooth course through the points; nothing else changes.
+      // An ocean current: a smooth course through the points.
       const wrapKm = o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0;
       const live = o.begin({ ...t.settings, brush, erase: undefined, pts: roundPath(sketchCourse(ctrl, wrapKm)), route: 'points', ctrl: roundPath(ctrl) });
       sel = live.id;
@@ -614,7 +614,7 @@ export function createMapView(o: MapViewOptions): MapView {
     return '#bfe6ff';
   };
 
-  // ---- Current sketches (teaching): adjust points, add points, select, delete ----
+  // ---- Ocean currents: adjust points, add points, select, delete ----
   let sel: number | null = null;
   let dragging: { id: number; idx: number; pointer: number } | null = null;
   const wrapKm = () => (o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0);
@@ -714,6 +714,13 @@ export function createMapView(o: MapViewOptions): MapView {
       if (!st) return;
       o.snapshot();
       o.update({ ...st, current: kind });
+      schedule();
+    },
+    setSize(size) {
+      const st = sketchOps.selected();
+      if (!st) return;
+      o.snapshot();
+      o.update({ ...st, currentSize: size });
       schedule();
     },
     reverse() {

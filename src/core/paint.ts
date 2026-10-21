@@ -122,7 +122,7 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'reef', name: 'Reef', group: 'Sea', kind: 'area', hint: 'Add coral reefs by hand on shallow sea, or erase the ones the climate made.', sizeMi: 20, strength: 1, softness: 0.4, roughness: 0.6, detailMi: 2 },
   { id: 'crystal', name: 'Climate crystal', group: 'Climate', kind: 'point', hint: 'Click to place a crystal that changes the climate around it: heat (sun crystal), cold, or rain. Its width is how far it reaches; nearby crystals add together.', sizeMi: 150, strength: 0.6, softness: 0.5, roughness: 0, detailMi: 1 },
   { id: 'shadowpen', name: 'Rain Shadow Pen', group: 'Climate', kind: 'line', hint: 'Mountains, plateaus and hills already cast rain shadows. Draw along a crest to add high ground the climate should see, or to change how high it is. Nothing is drawn on the map.', sizeMi: 40, strength: 1, softness: 0.5, roughness: 0, detailMi: 1 },
-  { id: 'current', name: 'Current (sketch)', group: 'Climate', kind: 'line', hint: 'Teaching sketch: draw a current the way it should flow (tap points, then tap the last point again or press Enter). It doesn’t change the climate. Use Adjust to move points, add points, change its type, reverse it or delete it.', sizeMi: 60, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'current', name: 'Ocean current', group: 'Climate', kind: 'line', hint: 'Draw an ocean current the way it flows: tap points, then tap the last point again (or press Enter). Warm currents warm the water near them, cold ones cool it. Use Adjust to move or add points, change its type, reverse it or delete it.', sizeMi: 60, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'gap', name: 'Gap (pass)', group: 'Climate', kind: 'area', hint: 'Cut a pass through high ground so moist air slips through.', sizeMi: 30, strength: 1, softness: 0.4, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
@@ -186,6 +186,8 @@ export interface Stroke {
   penHeight?: number;
   /** Drawn current (teaching sketch): what kind of water it carries. Its course is `ctrl`. */
   current?: 'warm' | 'cold' | 'neutral';
+  /** Ocean currents: a major current (ocean-wide) or a secondary one (bays and shallow seas). */
+  currentSize?: 'major' | 'secondary';
 }
 
 /** A drawn current's smooth course through its points (km), for drawing and reports. */
@@ -246,7 +248,7 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
     ...(id === 'crystal' ? { crystal: 'heat' as const } : {}),
     ...(id === 'shadowpen' ? { penHeight: 2.5 } : {}),
-    ...(id === 'current' ? { current: 'warm' as const, route: 'points' as const } : {}),
+    ...(id === 'current' ? { current: 'warm' as const, currentSize: 'major' as const, route: 'points' as const } : {}),
   };
 }
 

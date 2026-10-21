@@ -136,37 +136,93 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
 
   type Kind = 'warm' | 'cold' | 'neutral';
   const KINDS: { value: Kind; label: string }[] = [{ value: 'warm', label: 'Warm' }, { value: 'cold', label: 'Cold' }, { value: 'neutral', label: 'Neutral' }];
-  /** Settings for hand-drawn currents: a teaching sketch that never changes the climate. */
+  type Size = 'major' | 'secondary';
+  const SIZES: { value: Size; label: string; title: string }[] = [
+    { value: 'major', label: 'Major', title: 'An ocean-wide current: the gyres, the equatorial and polar currents.' },
+    { value: 'secondary', label: 'Secondary', title: 'A smaller current running in and out of a bay or shallow sea, to set the water temperature there.' },
+  ];
+  /** Settings for ocean currents, placed by hand; they warm or cool the water near them. */
   const currentFields = (): HTMLElement[] => {
     const s = state.settings;
-    if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a drawn current to delete it. The automatic currents are not touched.')];
+    if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a current to delete it.'), currentRules()];
     const mode = state.sketchMode ?? 'draw';
     const out: HTMLElement[] = [
-      h('p', { class: 'muted small hint' }, 'A teaching sketch: draw where the currents should go. It does not change the climate; the climate report lists it.'),
+      h('p', { class: 'muted small hint' }, 'Draw the ocean currents yourself. Warm currents warm the water and coasts near them, cold ones cool them; the climate follows. The rules below say which way they run.'),
       choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
     ];
     if (mode === 'draw') {
       out.push(
         choice<Kind>('Current', KINDS, s.current ?? 'warm', (v) => { s.current = v; changed(); }),
+        choice<Size>('Size', SIZES, s.currentSize ?? 'major', (v) => { s.currentSize = v; changed(); }),
         h('p', { class: 'muted small' }, 'Tap points along the course, then tap the last point again to finish. Esc cancels.'),
+        currentRules(),
       );
       return out;
     }
     const ops = sketch();
     const sel = ops?.selected() ?? null;
     if (!ops || !sel) {
-      out.push(h('p', { class: 'muted small' }, 'Tap a drawn current to pick it. Drag its dots to move them; drag the line to add a bend.'));
+      out.push(h('p', { class: 'muted small' }, 'Tap a current to pick it. Drag its dots to move them; drag the line to add a bend.'), currentRules());
       return out;
     }
     out.push(
       choice<Kind>('This current', KINDS, sel.current ?? 'warm', (v) => { ops.setKind(v); renderSettings(); }),
+      choice<Size>('Size', SIZES, sel.currentSize ?? 'major', (v) => { ops.setSize(v); renderSettings(); }),
       h('p', { class: 'muted small' }, 'Drag its dots to move them; drag the line to add a bend.'),
       h('div', { class: 'sketch-actions' },
         h('button', { type: 'button', class: 'ghost small', title: 'Make it flow the other way.', onclick: () => { ops.reverse(); renderSettings(); } }, 'Reverse'),
         h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete'),
       ),
+      currentRules(),
     );
     return out;
+  };
+  let rulesOpen = true;
+  /** How currents run, latitude by latitude (docs/REDESIGN.md, "Ocean current rules"). */
+  const currentRules = (): HTMLElement => {
+    const sec = (title: string, items: string[]) => h('div', { class: 'rules-sec' }, h('h4', {}, title), h('ul', {}, ...items.map((t) => h('li', {}, t))));
+    const d = h(
+      'details',
+      { class: 'current-rules', open: rulesOpen },
+      h('summary', {}, 'How currents run'),
+      h('p', { class: 'muted small' }, 'Degrees are for an Earth-like world; on other worlds the bands move with the wind belts. In the southern hemisphere, mirror everything (north ↔ south).'),
+      sec('Near the equator (neutral, black)', [
+        'Countercurrent: west → east, right on the ITCZ line (the dotted line).',
+        'Two equatorial currents: east → west, 5° north and 5° south of it.',
+        'On an ocean’s west side the equatorial currents turn toward the pole as warm currents; on its east side the countercurrent splits into the two westward ones.',
+        'They run round small tropical islands along the coast.',
+      ]),
+      sec('Warm currents (red): toward the pole', [
+        'Up the east coasts of continents (each ocean’s west side).',
+        'At about 40° they turn east, arcing slowly up to about 50° if the sea is wide enough.',
+        'Along a coast they stay warm while poleward of about 40°.',
+      ]),
+      sec('Cold currents (blue): toward the equator', [
+        'Down the west coasts of continents (each ocean’s east side) to join the westward equatorial current.',
+        'A current that hits land splits: warm toward the pole, cold toward the equator.',
+        'Coming down to a warm current that turns east at 40°, a cold current carries on past 50° and merges into it; with none to meet, it turns east at about 50°.',
+        'Land nearer the equator than the 40–50° current still gets cold water: it branches off that current and runs down the land’s west coast.',
+      ]),
+      sec('Polar currents (about 70°)', [
+        'The polar current runs east → west (neutral) at about 70°.',
+        'A warm current reaching it takes its place and flows west, still warm; the polar current moves about 5° further toward the pole beside it.',
+        'When that warm current hits land it turns cold and runs toward the equator without splitting, meeting the warm current at 40–50°.',
+        'Land whose polar end lies between about 45° and 70° gets a cold current curving off the polar current, down its east coast.',
+      ]),
+      sec('Everywhere', [
+        'A current follows a coast only while it runs roughly its way (within about 25°); otherwise it carries straight on.',
+        'Currents never cross: they join.',
+        'In open sea they turn in wide arcs; coasts can turn them sharply.',
+        'A small neutral loop runs west round the end of a land, from the warm current on one side to the cold current on the other.',
+      ]),
+      sec('Secondary currents (thin)', [
+        'For bays, inlets and shallow seas the major currents don’t reach, to set the water temperature there.',
+        'They take the major current’s water at the mouth: in along one side, out along the other.',
+        'A bay off the 40–50° current: in along its east side (warm), out along its west side (cold).',
+      ]),
+    );
+    d.addEventListener('toggle', () => (rulesOpen = d.open));
+    return d;
   };
 
   const select = (tool: BrushId | 'pan') => {
