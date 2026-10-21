@@ -122,7 +122,7 @@ describe('the climate of a test continent', () => {
     expect(tropicIce).toBe(0);
   });
 
-  it('blows its winds out of the placed highs, spiralling clockwise in the north, with a front where two meet', () => {
+  it('blows its winds round the placed highs, clockwise in the north, with a front where two meet', () => {
     const hc = computeClimate(
       world((add) => {
         add('high', [11000, yAt(30)], { strength: 0.6, size: 2500 });
@@ -135,7 +135,7 @@ describe('the climate of a test continent', () => {
     const n = k(11000, 30 + 1000 / KM_PER_DEGREE);
     expect(hc.summer.windV[n]).toBeGreaterThan(0);
     expect(hc.summer.windU[n]).toBeGreaterThan(0);
-    // Each high sends out six channels.
+    // Each high sends out streams of air round it.
     expect(hc.summer.windPaths[0].length).toBeGreaterThanOrEqual(10);
     // Between the two highs their air meets: a front; well away from both, none.
     expect(hc.summer.front[k(13000, 30)]).toBeGreaterThan(0.3);

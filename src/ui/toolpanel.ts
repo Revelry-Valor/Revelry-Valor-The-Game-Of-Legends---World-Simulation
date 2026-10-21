@@ -152,7 +152,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       choice<Season>('Season', SEASONS, v.highSeason ?? 'both', (x) => set({ highSeason: x })),
     ];
     const out: HTMLElement[] = [
-      h('p', { class: 'muted small hint' }, 'High-pressure zones drive the winds: air spirals out of each in six channels (clockwise in the north, anticlockwise in the south), turned by mountains and by other highs. Where two highs’ winds meet, a front forms, with clouds and rain.'),
+      h('p', { class: 'muted small hint' }, 'High-pressure zones drive the winds. Picture a line through each high, east to west. On its equator side the air curves away to the ITCZ. On its pole side the air circles round the high (clockwise in the north, anticlockwise in the south) from the west end to the east end, each stream outside the last, then on to the ITCZ. The nearer the ITCZ, the further toward the pole the line sits, so more air goes straight to it. Mountains turn the winds; where two highs’ winds meet, a front forms, with clouds and rain.'),
       choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Place' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
     ];
     if (mode === 'draw') {

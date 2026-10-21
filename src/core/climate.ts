@@ -1,4 +1,4 @@
-import { CLIMATE_DEFAULTS, climateRadiusKm, kmPerDegree, type WorldSettings } from './settings';
+import { CLIMATE_DEFAULTS, kmPerDegree, type WorldSettings } from './settings';
 import type { Stroke, Surface } from './paint';
 import { evaluate } from './terrain';
 import { flowAt, riverNetwork, widthForFlow } from './water';
@@ -51,6 +51,9 @@ export interface PressureCentre {
   id?: number;
   strength?: number;
   reach?: number;
+  /** Its hemisphere, and where its dividing line runs (km from the top). */
+  hemi?: number;
+  cutY?: number;
 }
 
 export interface SeasonClimate {
@@ -850,8 +853,8 @@ function maskedBlur(src: Float32Array, mask: Uint8Array, w: number, h: number, w
 }
 
 function flowPaths(cl: Climate, se: SeasonClimate, W: number, H: number): void {
-  // Winds: six channels spiral out of each high, following the wind (turned by mountains and by
-  // the other highs' air), until they meet another high's air at a front, run into the ITCZ, or fade.
+  // Winds: streams round each high and on to the ITCZ, following the wind (turned by mountains and
+  // by the other highs' air), until they meet another high's air at a front, reach the ITCZ, or fade.
   const channels: FlowPath[] = [];
   const highs = se.centres.filter((c) => c.kind === 'high' && c.reach);
   const rowKm = H / cl.h;
@@ -861,10 +864,14 @@ function flowPaths(cl: Climate, se: SeasonClimate, W: number, H: number): void {
   for (const c of highs) {
     const R = c.reach!;
     const step = Math.max(30, Math.min(120, R / 30));
-    for (let a = 0; a < 6; a++) {
-      const ang = (a * Math.PI) / 3;
-      let x = c.x + Math.cos(ang) * R * 0.22;
-      let y = c.y - Math.sin(ang) * R * 0.22;
+    // Seeds along the dividing line on the high's west side: just poleward of it the air circles
+    // round the high, each stream outside the one before; just equatorward it curves off to the ITCZ.
+    const ds = R / 5;
+    const seeds: [number, number][] = [];
+    for (let r = ds; r <= R * 1.05; r += ds) for (const side of [1, -1]) seeds.push([c.x - r, c.cutY! - side * c.hemi! * step * 0.6]);
+    for (const [sx0, sy0] of seeds) {
+      let x = sx0;
+      let y = sy0;
       const pts = [x, y];
       let len = 0;
       for (let t = 0; t < 600; t++) {
@@ -878,7 +885,7 @@ function flowPaths(cl: Climate, se: SeasonClimate, W: number, H: number): void {
         y -= (v / sp) * step;
         len += step;
         pts.push(x, y);
-        if (len > R * 3.5) break;
+        if (len > R * 6) break;
         if (len > R * 0.4) {
           const xw = cl.wrapKm ? ((x % W) + W) % W : x;
           if (xw >= 0 && xw <= W && y >= 0 && y <= H && sampleField(cl, se.front, xw, y) > 0.45) break;
@@ -890,6 +897,10 @@ function flowPaths(cl: Climate, se: SeasonClimate, W: number, H: number): void {
             if (Math.hypot(dx, y - o.y) < o.reach! * (o === c ? 0.15 : 0.3)) near = true;
           }
           if (near) break;
+          // Drifting away poleward, far from its high: it has left the high's circulation.
+          let ox = x - c.x;
+          if (cl.wrapKm) ox -= Math.round(ox / W) * W;
+          if (Math.hypot(ox, y - c.y) > R * 2 && Math.abs(latAt(y) - itczAt(x)) > Math.abs(latAt(c.y) - itczAt(c.x))) break;
         }
       }
       if (pts.length >= 8) channels.push({ pts: Float32Array.from(pts), kind: new Int8Array(pts.length / 2), major: true });
@@ -936,22 +947,33 @@ function pressureField(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate
 // ---------------------------------------------------------------------------------------------
 // Winds: from high to low, turned by rotation; flipped across the equator; steered by ranges.
 
+/** Latitude (degrees) at a distance (km) from the map's top. */
+function latitudeOf(ctx: Ctx, y: number): number {
+  return ctx.s.northLatitude - y / ctx.kpd;
+}
+
 function winds(ctx: Ctx, s0: number, out: SeasonClimate): void {
-  const { w, h, n, stepX, stepY, lat, s, wrap, height, W } = ctx;
-  const dayF = Math.pow(24 / Math.max(4, s.dayLengthHours), 0.3);
-  const sizeF = Math.pow(climateRadiusKm(s) / 6371, 0.3);
-  const thetaMax = Math.min(82, 62 * dayF * sizeF) * RAD;
+  const { w, h, n, stepX, stepY, lat, wrap, height, W } = ctx;
   // The ranges as the wind feels them: broad, so it starts turning before it reaches the slope.
   const hb = blur(height, w, h, wrap, Math.max(1, Math.round(120 / stepX)));
   const highs = out.centres.filter((c) => c.kind === 'high' && c.reach);
+  // Each high's dividing line: air on its equator side curves away to the ITCZ; air on its pole side
+  // circles round the high (clockwise in the north) to the line's far end, then on to the ITCZ. The
+  // nearer the ITCZ, the further poleward the line sits, so more of the air goes straight to it.
+  for (const c of highs) {
+    const hemi = latitudeOf(ctx, c.y) >= 0 ? 1 : -1;
+    const col = Math.max(0, Math.min(w - 1, Math.floor((((c.x % W) + W) % W) / stepX)));
+    const toItcz = (latitudeOf(ctx, c.y) - out.itcz[col]) * hemi * ctx.kpd;
+    const R = c.reach!;
+    const cutOff = Math.max(-0.3, Math.min(0.7, (1.2 * R - toItcz) / (1.2 * R))) * R;
+    c.hemi = hemi;
+    c.cutY = c.y - cutOff * hemi;
+  }
   // Where the air of two highs meets head on: a front.
   const meet = new Float32Array(n);
   for (let j = 0; j < h; j++) {
     const la = lat[j];
     const y = (j + 0.5) * stepY;
-    const theta = thetaMax * smooth(0, 1, Math.abs(Math.sin(la * RAD)) / Math.sin(18 * RAD)) * Math.sign(la);
-    const cs = Math.cos(theta);
-    const sn = Math.sin(theta);
     // Far from any high, a light drift of the wind belts (toward the ITCZ in the tropics).
     const bt = belt(ctx, la, s0);
     for (let i = 0; i < w; i++) {
@@ -961,10 +983,10 @@ function winds(ctx: Ctx, s0: number, out: SeasonClimate): void {
       const ju = j > 0 ? k - w : k;
       const jd = j < h - 1 ? k + w : k;
       const x = (i + 0.5) * stepX;
-      let fx = bt.u * 0.35;
-      let fy = bt.v * 0.35;
-      // Each high: air flowing out of it, turned right in the north and left in the south, so it
-      // spirals out (calm at the centre, strongest part-way out, fading at its reach).
+      let fx = bt.u * 0.18;
+      let fy = bt.v * 0.18;
+      // Each high: air circling round it (calm at the centre, strongest part-way out, fading at its
+      // reach), and on its equator side curving away toward the ITCZ.
       let m1 = 0;
       let m2 = 0;
       let a1x = 0;
@@ -977,13 +999,26 @@ function winds(ctx: Ctx, s0: number, out: SeasonClimate): void {
         const dn = c.y - y;
         const d = Math.hypot(dx, dn);
         const R = c.reach!;
-        if (d > R * 2.2 || d < 1) continue;
-        const f = (1 - Math.exp(-((d / (0.22 * R)) ** 2))) * Math.exp(-((d / R) ** 2));
-        const m = 3 * c.strength! * f;
+        if (d > R * 2.6 || d < 1) continue;
+        const hm = c.hemi!;
         const ox = dx / d;
         const oy = dn / d;
-        const vx = (ox * cs + oy * sn) * m;
-        const vy = (-ox * sn + oy * cs) * m;
+        // Below (equatorward of) the dividing line?
+        const e = (y - c.cutY!) * hm;
+        const b = smooth(-0.03 * R, 0.15 * R, e);
+        const f = (1 - Math.exp(-((d / (0.22 * R)) ** 2))) * Math.exp(-((d / (R * (1.3 + 0.3 * b))) ** 2));
+        const m = 3 * c.strength! * f;
+        // Round the high: clockwise in the north, anticlockwise in the south, drifting a little outward.
+        const tx = hm > 0 ? oy : -oy;
+        const ty = hm > 0 ? -ox : ox;
+        // Toward the ITCZ: equatorward and a little west, still curving the way it turns.
+        const qx = -0.45 + 0.3 * tx;
+        const qy = -0.9 * hm + 0.3 * ty;
+        let vx = (tx + 0.2 * ox) * (1 - b) + qx * b;
+        let vy = (ty + 0.2 * oy) * (1 - b) + qy * b;
+        const vl = Math.hypot(vx, vy) || 1;
+        vx = (vx / vl) * m;
+        vy = (vy / vl) * m;
         fx += vx;
         fy += vy;
         if (m > m1) {
