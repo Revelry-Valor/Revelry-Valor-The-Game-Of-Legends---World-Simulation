@@ -87,6 +87,9 @@ export function createMapView(o: MapViewOptions): MapView {
   const canvas = h('canvas', { class: 'map', 'aria-label': 'World map. Drag to paint with the selected brush.' });
   const readout = h('div', { class: 'readout small', 'aria-live': 'off' }, 'Move over the map to see what is there.');
   const busy = h('div', { class: 'busy small', hidden: true }, 'Drawing…');
+  // While placing points along a course (river, lava, current, wind): finish or cancel it.
+  const finishBtn = h('button', { type: 'button', class: 'primary', hidden: true, title: 'Finish this course (Enter)', onclick: () => finishRoute() }, 'Finish');
+  const cancelBtn = h('button', { type: 'button', class: 'ghost', hidden: true, title: 'Cancel this course (Esc)', onclick: () => { routing = null; o.notice('Cancelled.'); schedule(); } }, 'Cancel');
   const view = { cx: 0, cy: 0, scale: 1 };
   const info = () => {
     const s = o.world().settings;
@@ -146,6 +149,8 @@ export function createMapView(o: MapViewOptions): MapView {
     drawCursor(g, r);
     drawScale(g, r);
     busy.hidden = !cache.busy;
+    finishBtn.hidden = !routing || routing.ctrl.length < 4;
+    cancelBtn.hidden = !routing;
   }
 
   function drawLatitudes(g: CanvasRenderingContext2D, r: DOMRect, x0: number, x1: number, y0: number) {
@@ -958,6 +963,9 @@ export function createMapView(o: MapViewOptions): MapView {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   canvas.addEventListener('pointerdown', (e) => {
+    // Working on the map takes the keyboard away from the panel's fields, so Enter and Esc reach it.
+    const focused = document.activeElement as HTMLElement | null;
+    if (focused && focused !== document.body && focused.closest('input, select, button')) focused.blur();
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
@@ -1089,7 +1097,9 @@ export function createMapView(o: MapViewOptions): MapView {
 
   const keydown = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
-    if (target.closest('input, textarea, select, dialog')) return;
+    // Enter and Esc finish or cancel a course being placed, even from one of the panel's fields.
+    const courseKey = routing && (e.key === 'Enter' || e.key === 'Escape') && !target.closest('textarea, dialog');
+    if (!courseKey && target.closest('input, textarea, select, dialog')) return;
     if (e.code === 'Space') {
       spaceDown = true;
       e.preventDefault();
@@ -1100,7 +1110,7 @@ export function createMapView(o: MapViewOptions): MapView {
         finishRoute();
       } else if (e.key === 'Escape') {
         routing = null;
-        o.notice('River cancelled.');
+        o.notice('Cancelled.');
         schedule();
       } else if (e.key === 'Backspace') {
         e.preventDefault();
@@ -1125,7 +1135,7 @@ export function createMapView(o: MapViewOptions): MapView {
     'div',
     { class: 'stage' },
     canvas,
-    h('div', { class: 'stage-controls' }, busy, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
+    h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
     readout,
   );
   requestAnimationFrame(fit);
