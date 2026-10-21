@@ -104,11 +104,13 @@ export function showWorld(app: App, start: World): () => void {
     noticeTimer = window.setTimeout(() => (notice.hidden = true), 4000);
   };
   let showCurrentsView: (() => void) | null = null;
+  let showPressureView: (() => void) | null = null;
   const tools = createToolPanel(() => {
     map?.redraw();
     // Drawing currents is done on the currents map.
     if (tools?.state.tool === 'current' && look.view !== 'currents') showCurrentsView?.();
-  }, () => map?.sketch ?? null);
+    if (tools?.state.tool === 'high' && look.view !== 'pressure') showPressureView?.();
+  }, () => map?.sketch ?? null, () => map?.high ?? null);
   const map = createMapView({
     world: () => world,
     tool: () => tools.state,
@@ -183,7 +185,7 @@ export function showWorld(app: App, start: World): () => void {
         climateLegend.replaceChildren(ramp(RAIN_LEGEND.map(toHex)), h('div', { class: 'ramp-labels' }, h('span', {}, 'Dry'), h('span', {}, 'Wet'), h('span', {}, 'Very wet')), h('p', { class: 'muted' }, `Rain in the season shown. White speckle on land is winter snow cover.`), itcz);
         break;
       case 'pressure':
-        climateLegend.replaceChildren(key('#d67860', 'High pressure (H): dry, settled air'), key('#5c78d6', 'Low pressure (L): rising air, storms'), key('#96969e', 'Grey zone: fronts, where air masses meet'), key('#14181e', 'Arrows: wind direction'), itcz);
+        climateLegend.replaceChildren(key('#d67860', 'High pressure (H): dry, settled air; place them with the High pressure brush'), key('#96969e', 'Grey zone: fronts, where two highs’ winds meet (clouds, rain)'), key('#14181e', 'Arrows: wind channels spiralling out of each high'), itcz);
         break;
       case 'currents':
         climateLegend.replaceChildren(key('#d23a2a', 'Warm current'), key('#2a6fd2', 'Cold current'), key('#111418', 'Neutral current (thin lines: secondary currents)'), key('#78dce6', 'Upwelling: cold, rich water (fishing, fog)'), key('#e4ecf1', 'Sea ice'), key('#5fd2c3', 'Coral reef'));
@@ -221,6 +223,7 @@ export function showWorld(app: App, start: World): () => void {
     (v) => { look.view = v; renderClimateLegend(); map.redraw(); },
   );
   showCurrentsView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(6)')?.click();
+  showPressureView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(5)')?.click();
   const climatePanel = h(
     'section',
     { class: 'view-panel' },

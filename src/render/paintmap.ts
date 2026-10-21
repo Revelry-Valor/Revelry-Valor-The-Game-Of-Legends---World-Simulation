@@ -492,7 +492,7 @@ function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer']
       let c = p > 0 ? mix(base, [214, 120, 96], Math.min(0.6, p / 12)) : mix(base, [92, 120, 214], Math.min(0.6, -p / 10));
       // Fronts: a soft grey zone where the air masses meet.
       const fr = sampleField(cl, se.front, x, y);
-      c = mix(c, [150, 150, 158], smooth(0.35, 0.7, fr) * 0.55);
+      c = mix(c, [150, 150, 158], smooth(0.25, 0.6, fr) * 0.7);
       return c;
     }
     case 'currents': {

@@ -93,12 +93,6 @@ function climateSliders(c: ClimateSliders, changed: () => void): HTMLElement {
       f('itczLandKm', 'Land width for full reach', 300, 6000, 50, 'miles', 'How wide a landmass must be for the rain belt to reach the tropic line over it.', ...mi),
       f('itczSeaKm', 'Sea width for full reach', 300, 8000, 50, 'miles', 'How wide open sea must be for the rain belt to sink to its lowest over it.', ...mi),
       f('itczRampKm', 'Coastal ramp', 0, 1500, 10, 'miles', 'How far offshore the belt starts bending toward the coast.', ...mi),
-      heading('Pressure'),
-      f('subtropicalHigh', 'Subtropical highs', 0, 2, 0.05, '× Earth', 'Strength of the great ocean highs that make the trade winds and dry west coasts.'),
-      f('thermalLow', 'Summer heat lows', 0, 2, 0.05, '× Earth', 'Strength of the lows over hot land in summer (they pull in monsoon rains).'),
-      f('continentalHighC', 'Winter high threshold', 2, 36, 1, '°F colder', 'How much colder than the sea land must be in winter to build a cold high.', ...dF),
-      f('polarFrontShift', 'Polar front shift', -15, 15, 0.5, '°', 'Moves the stormy polar front: positive is toward the pole.'),
-      f('landJoinKm', 'Land joining gap', 0, 1000, 10, 'miles', 'Landmasses closer than this count as one continent for pressure and rain.', ...mi),
       h('button', { type: 'button', class: 'ghost', onclick: () => { Object.assign(c, CLIMATE_DEFAULTS); changed(); render(); } }, 'Reset to Earth’s values'),
     );
   };

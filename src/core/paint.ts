@@ -50,6 +50,7 @@ export type BrushId =
   | 'reef'
   // Climate
   | 'crystal'
+  | 'high'
   | 'shadowpen'
   | 'gap'
   | 'current'
@@ -120,6 +121,7 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'rockdesert', name: 'Rocky desert', group: 'Ground cover', kind: 'area', hint: 'Bare stony desert and gravel plains.', sizeMi: 80, strength: 0.85, softness: 0.5, roughness: 0.5, detailMi: 6 },
   { id: 'whirlpool', name: 'Whirlpool', group: 'Sea', kind: 'point', hint: 'Click at sea to place one. Choose whether it is dangerous to ships.', sizeMi: 8, strength: 0.8, softness: 0.3, roughness: 0, detailMi: 1 },
   { id: 'reef', name: 'Reef', group: 'Sea', kind: 'area', hint: 'Add coral reefs by hand on shallow sea, or erase the ones the climate made.', sizeMi: 20, strength: 1, softness: 0.4, roughness: 0.6, detailMi: 2 },
+  { id: 'high', name: 'High pressure', group: 'Climate', kind: 'point', hint: 'Click to place a high-pressure zone. Air spirals out of it in six channels (clockwise in the north, anticlockwise in the south), turned by mountains; where its winds meet another high’s, a front forms. Use Adjust to pick one and change its strength.', sizeMi: 1200, strength: 0.5, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'crystal', name: 'Climate crystal', group: 'Climate', kind: 'point', hint: 'Click to place a crystal that changes the climate around it: heat (sun crystal), cold, or rain. Its width is how far it reaches; nearby crystals add together.', sizeMi: 150, strength: 0.6, softness: 0.5, roughness: 0, detailMi: 1 },
   { id: 'shadowpen', name: 'Rain Shadow Pen', group: 'Climate', kind: 'line', hint: 'Mountains, plateaus and hills already cast rain shadows. Draw along a crest to add high ground the climate should see, or to change how high it is. Nothing is drawn on the map.', sizeMi: 40, strength: 1, softness: 0.5, roughness: 0, detailMi: 1 },
   { id: 'current', name: 'Ocean current', group: 'Climate', kind: 'line', hint: 'Draw an ocean current the way it flows: tap points, then tap the last point again (or press Enter). Warm currents warm the water near them, cold ones cool it. Use Adjust to move or add points, change its type, reverse it or delete it.', sizeMi: 60, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
@@ -180,6 +182,8 @@ export interface Stroke {
   falls?: { at: number; to: number }[];
   /** Volcanoes and lava flows: still active (glowing). */
   active?: boolean;
+  /** High-pressure zones: the season they hold in (northern summer, northern winter, or both). */
+  highSeason?: 'both' | 'summer' | 'winter';
   /** Climate crystals: what they do. */
   crystal?: 'heat' | 'cold' | 'rain';
   /** Rain Shadow Pen: the height of the high ground (km) for the climate. */
@@ -247,6 +251,7 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'river' ? { width: milesToKm(0.1), wander: milesToKm(3) } : {}),
     ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
     ...(id === 'crystal' ? { crystal: 'heat' as const } : {}),
+    ...(id === 'high' ? { highSeason: 'both' as const } : {}),
     ...(id === 'shadowpen' ? { penHeight: 2.5 } : {}),
     ...(id === 'current' ? { current: 'warm' as const, currentSize: 'major' as const, route: 'points' as const } : {}),
   };

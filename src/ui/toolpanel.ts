@@ -1,7 +1,7 @@
 import { BRUSHES, brushDefaults, brushInfo, ZONES, type BrushId, type ZoneId } from '../core/paint';
 import { kmToMiles, milesToKm } from '../core/units';
 import { choice, h, numberField } from './dom';
-import type { BrushSettings, SketchOps, ToolState } from './mapview';
+import type { BrushSettings, HighOps, SketchOps, ToolState } from './mapview';
 
 /** The brush picker and the selected brush's settings (REDESIGN.md, 6.2). */
 export interface ToolPanel {
@@ -17,7 +17,7 @@ export interface ToolPanel {
   refresh(): void;
 }
 
-export function createToolPanel(changed: () => void, sketch: () => SketchOps | null = () => null): ToolPanel {
+export function createToolPanel(changed: () => void, sketch: () => SketchOps | null = () => null, highOps: () => HighOps | null = () => null): ToolPanel {
   // Each brush remembers its own settings while you switch between them.
   const remembered = new Map<BrushId, BrushSettings>();
   const settingsFor = (id: BrushId) => {
@@ -52,6 +52,10 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     }
     const b = brushInfo(state.tool);
     const s = state.settings;
+    if (state.tool === 'high') {
+      settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: high pressure' : b.name), ...highFields());
+      return;
+    }
     if (state.tool === 'current') {
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: current sketch' : b.name), ...currentFields());
       return;
@@ -134,6 +138,43 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...fields.filter(Boolean) as HTMLElement[]);
   };
 
+  type Season = 'both' | 'summer' | 'winter';
+  const SEASONS: { value: Season; label: string }[] = [{ value: 'both', label: 'All year' }, { value: 'summer', label: 'Northern summer' }, { value: 'winter', label: 'Northern winter' }];
+  let editedHigh: number | null = null;
+  /** Settings for high-pressure zones: place them, then pick one to change how strong it is. */
+  const highFields = (): HTMLElement[] => {
+    const s = state.settings;
+    if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a high to delete it.')];
+    const mode = state.sketchMode ?? 'draw';
+    const fields = (v: { strength: number; size: number; highSeason?: Season }, set: (patch: Partial<BrushSettings>) => void) => [
+      numberField({ label: 'Strength', value: Math.round(v.strength * 100), min: 5, max: 100, step: 1, unit: '%', slider: true, hint: 'Stronger highs push their air further and win where they meet a weaker one; the air under them is drier.', change: (x) => set({ strength: Math.max(5, Math.min(100, x)) / 100 }) }),
+      numberField({ label: 'Reach', value: Math.round(kmToMiles(v.size)), min: 100, max: 6000, step: 10, unit: 'miles', hint: 'How far out its winds reach (the dashed circle).', change: (x) => { if (x > 0) set({ size: milesToKm(x) }); } }),
+      choice<Season>('Season', SEASONS, v.highSeason ?? 'both', (x) => set({ highSeason: x })),
+    ];
+    const out: HTMLElement[] = [
+      h('p', { class: 'muted small hint' }, 'High-pressure zones drive the winds: air spirals out of each in six channels (clockwise in the north, anticlockwise in the south), turned by mountains and by other highs. Where two highs’ winds meet, a front forms, with clouds and rain.'),
+      choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Place' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
+    ];
+    if (mode === 'draw') {
+      out.push(...fields(s as { strength: number; size: number; highSeason?: Season }, (patch) => { Object.assign(s, patch); changed(); }), h('p', { class: 'muted small' }, 'Click the map to place a high.'));
+      return out;
+    }
+    const ops = highOps();
+    const sel = ops?.selected() ?? null;
+    if (!ops || !sel) {
+      out.push(h('p', { class: 'muted small' }, 'Tap a high to pick it; drag it to move it.'));
+      return out;
+    }
+    out.push(
+      ...fields(sel, (patch) => {
+        // One undo step for each high's run of changes.
+        ops.set(patch, editedHigh !== sel.id);
+        editedHigh = sel.id;
+      }),
+      h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete')),
+    );
+    return out;
+  };
   type Kind = 'warm' | 'cold' | 'neutral';
   const KINDS: { value: Kind; label: string }[] = [{ value: 'warm', label: 'Warm' }, { value: 'cold', label: 'Cold' }, { value: 'neutral', label: 'Neutral' }];
   type Size = 'major' | 'secondary';

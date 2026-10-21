@@ -20,6 +20,14 @@ export interface ToolState {
   sketchMode?: 'draw' | 'adjust';
 }
 
+/** What can be done to the selected high-pressure zone (for the tool panel). */
+export interface HighOps {
+  selected(): Stroke | null;
+  /** Change it (strength, reach, season); `undoStep` saves an undo step first. */
+  set(patch: Partial<Stroke>, undoStep?: boolean): void;
+  remove(): void;
+}
+
 /** What can be done to the selected current sketch (for the tool panel). */
 export interface SketchOps {
   selected(): Stroke | null;
@@ -61,6 +69,8 @@ export interface MapView {
   climateChanged(): void;
   /** The selected current sketch and what can be done to it. */
   sketch: SketchOps;
+  /** The selected high-pressure zone and what can be done to it. */
+  high: HighOps;
   /** The map's size or position changed (canvas options). */
   worldReset(): void;
   dispose(): void;
@@ -122,6 +132,7 @@ export function createMapView(o: MapViewOptions): MapView {
     const cl = o.climate();
     if (cl && look.view !== 'land') drawClimate(g, r, cl, look, x0, span, copies);
     if (look.view === 'currents' || o.tool().tool === 'current') drawSketches(g, r, x0, span, copies);
+    if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
     drawClimateTools(g, r, x0, span, copies);
@@ -201,22 +212,6 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     if (look.view === 'pressure') {
       drawPaths(g, r, se.windPaths, x0, span, copies, () => 'rgba(16,20,26,0.7)', () => 1.4);
-      g.font = `bold 20px ${css('--mono')}`;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      for (const c of se.centres) {
-        if (c.y < 0 || c.y > s.heightKm || c.x < 0 || c.x > s.widthKm) continue;
-        for (const k of copies) {
-          const sx = x0 + k * span + c.x * view.scale;
-          const sy = toScreen(0, c.y, r)[1];
-          if (sx < -20 || sx > r.width + 20) continue;
-          g.lineWidth = 3;
-          g.strokeStyle = 'rgba(255,255,255,0.85)';
-          g.strokeText(c.kind === 'high' ? 'H' : 'L', sx, sy);
-          g.fillStyle = c.kind === 'high' ? '#b8402e' : '#2e56b8';
-          g.fillText(c.kind === 'high' ? 'H' : 'L', sx, sy);
-        }
-      }
     }
     if (look.view === 'currents') {
       const colour = (p: FlowPath, k: number) => {
@@ -298,6 +293,51 @@ export function createMapView(o: MapViewOptions): MapView {
         }
       }
     }
+  }
+
+  /** High-pressure zones as placed: an H with its strength; the selected one shows its reach. */
+  function drawHighs(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[]) {
+    const t = o.tool();
+    const yTop = toScreen(0, 0, r)[1];
+    g.save();
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    for (const st of highs()) {
+      const picked = st.id === highSel && t.tool === 'high';
+      for (const c of copies) {
+        const sx = x0 + c * span + st.pts[0] * view.scale;
+        const sy = yTop + st.pts[1] * view.scale;
+        const rr = st.size * view.scale;
+        if (sx < -rr - 30 || sx > r.width + rr + 30) continue;
+        if (t.tool === 'high') {
+          g.setLineDash([6, 6]);
+          g.lineWidth = picked ? 2 : 1;
+          g.strokeStyle = picked ? 'rgba(184,64,46,0.9)' : 'rgba(184,64,46,0.4)';
+          g.beginPath();
+          g.arc(sx, sy, rr, 0, Math.PI * 2);
+          g.stroke();
+          g.setLineDash([]);
+        }
+        g.fillStyle = picked ? '#ffffff' : 'rgba(255,255,255,0.85)';
+        g.strokeStyle = '#b8402e';
+        g.lineWidth = picked ? 3 : 2;
+        g.beginPath();
+        g.arc(sx, sy, 13, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+        g.fillStyle = '#b8402e';
+        g.font = `bold 15px ${css('--mono')}`;
+        g.fillText('H', sx, sy + 1);
+        g.font = `11px ${css('--mono')}`;
+        g.lineWidth = 3;
+        g.strokeStyle = 'rgba(255,255,255,0.85)';
+        const label = `${Math.round(st.strength * 100)}%`;
+        g.strokeText(label, sx, sy + 23);
+        g.fillStyle = '#5a2016';
+        g.fillText(label, sx, sy + 23);
+      }
+    }
+    g.restore();
   }
 
   /** Ocean currents as placed: bold lines (thinner for secondary currents) with a white edge and arrows; points shown while adjusting. */
@@ -614,6 +654,71 @@ export function createMapView(o: MapViewOptions): MapView {
     return '#bfe6ff';
   };
 
+  // ---- High-pressure zones: select, drag, delete ----
+  let highSel: number | null = null;
+  let highDrag: { id: number; pointer: number } | null = null;
+  const highs = () => o.world().surface.strokes.filter((st) => st.brush === 'high' && st.pts.length >= 2);
+  const highPointer = (e: PointerEvent, x: number, y: number, erase: boolean): boolean => {
+    const W = o.world().settings.widthKm;
+    const wrap = wrapKm();
+    let hit: Stroke | null = null;
+    let bestD = 22;
+    for (const st of highs()) {
+      let dx = st.pts[0] - x;
+      if (wrap) dx -= Math.round(dx / W) * W;
+      const d = Math.hypot(dx, st.pts[1] - y) * view.scale;
+      if (d < bestD) {
+        bestD = d;
+        hit = st;
+      }
+    }
+    if (!hit) {
+      if (highSel !== null) {
+        highSel = null;
+        o.sketchSelected?.();
+      }
+      schedule();
+      return erase;
+    }
+    if (erase) {
+      o.remove(hit.id);
+      if (highSel === hit.id) highSel = null;
+      o.sketchSelected?.();
+      o.notice('High deleted (Undo brings it back).');
+      schedule();
+      return true;
+    }
+    highSel = hit.id;
+    o.snapshot();
+    highDrag = { id: hit.id, pointer: e.pointerId };
+    o.sketchSelected?.();
+    schedule();
+    return true;
+  };
+  const dragHigh = (x: number, y: number) => {
+    const st = highs().find((k) => k.id === highDrag!.id);
+    if (!st) return;
+    o.update({ ...st, pts: [Math.round(x), Math.round(Math.max(0, Math.min(o.world().settings.heightKm, y)))] });
+    schedule();
+  };
+  const highOps: HighOps = {
+    selected: () => highs().find((k) => k.id === highSel) ?? null,
+    set(patch, undoStep = true) {
+      const st = highOps.selected();
+      if (!st) return;
+      if (undoStep) o.snapshot();
+      o.update({ ...st, ...patch });
+      schedule();
+    },
+    remove() {
+      if (highSel === null) return;
+      o.remove(highSel);
+      highSel = null;
+      o.sketchSelected?.();
+      schedule();
+    },
+  };
+
   // ---- Ocean currents: adjust points, add points, select, delete ----
   let sel: number | null = null;
   let dragging: { id: number; idx: number; pointer: number } | null = null;
@@ -745,6 +850,7 @@ export function createMapView(o: MapViewOptions): MapView {
     const t = o.tool();
     if (t.tool === 'pan') return false;
     if (t.tool === 'current' && (t.erase || t.sketchMode === 'adjust')) return sketchPointer(e, x, y, t.erase);
+    if (t.tool === 'high' && (t.erase || t.sketchMode === 'adjust')) return highPointer(e, x, y, t.erase);
     if (pointsMode(t)) {
       const brush = t.tool as 'river' | 'lava' | 'current';
       if (!routing || routing.brush !== brush) routing = { brush, ctrl: [] };
@@ -861,6 +967,7 @@ export function createMapView(o: MapViewOptions): MapView {
     pinch = 0;
     if (drawing && drawing.pointer === e.pointerId) finishStroke();
     if (dragging?.pointer === e.pointerId) dragging = null;
+    if (highDrag?.pointer === e.pointerId) highDrag = null;
     if (pointers.size === 0) {
       panning = false;
       canvas.classList.remove('panning');
@@ -902,6 +1009,7 @@ export function createMapView(o: MapViewOptions): MapView {
     const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
     hover = { x, y };
     if (dragging?.pointer === e.pointerId) dragSketch(x, y);
+    if (highDrag?.pointer === e.pointerId) dragHigh(x, y);
     if (drawing?.pointer === e.pointerId) extendStroke(x, y);
     schedule();
     if (!readoutPending) {
@@ -1012,6 +1120,7 @@ export function createMapView(o: MapViewOptions): MapView {
       schedule();
     },
     sketch: sketchOps,
+    high: highOps,
     climateChanged() {
       cache.setClimate(o.climate());
       schedule();

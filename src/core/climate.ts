@@ -47,6 +47,10 @@ export interface PressureCentre {
   amp: number;
   sx: number;
   sy: number;
+  /** Placed highs: the stroke it came from, its strength (0–1) and reach (km). */
+  id?: number;
+  strength?: number;
+  reach?: number;
 }
 
 export interface SeasonClimate {
@@ -234,7 +238,6 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
   const kpd = kmPerDegree(s);
   const lat = new Float32Array(h);
   for (let j = 0; j < h; j++) lat[j] = s.northLatitude - ((j + 0.5) * stepY) / kpd;
-  compCache = null;
   const latOf = (k: number) => lat[(k / w) | 0];
 
   const distSea = distanceField(w, h, Math.min(stepX, stepY), wrap, (k) => !land[k], true);
@@ -425,13 +428,10 @@ function season(ctx: Ctx, surface: Surface, s: number): SeasonClimate {
   }
 
   // 5. Pressure centres and the pressure field.
-  pressureField(ctx, s, out);
+  pressureField(ctx, surface, s, out);
 
-  // 6. Winds from the pressure field.
-  winds(ctx, out);
-
-  // 7. Fronts.
-  fronts(ctx, s, out);
+  // 6. Winds spiralling out of the highs; 7. fronts where they meet.
+  winds(ctx, s, out);
 
   // 8. Upwelling, fog, and their cooling.
   upwelling(ctx, s, out);
@@ -849,345 +849,86 @@ function maskedBlur(src: Float32Array, mask: Uint8Array, w: number, h: number, w
   return a;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Paths for the map: streamlines traced through the winds and currents, evenly spaced, worked out
-// once with the climate so they stay fixed to the map.
-
-function traceField(
-  cl: Climate,
-  U: Float32Array,
-  V: Float32Array,
-  ok: (x: number, y: number) => boolean,
-  dsep: number,
-  seeds: [number, number][],
-  W: number,
-  H: number,
-  avoid: FlowPath[] = [],
-): number[][] {
-  const wrap = cl.wrapKm > 0;
-  const cell = dsep / 2;
-  const gw = Math.ceil(W / cell) + 1;
-  const gh = Math.ceil(H / cell) + 1;
-  const grid = new Map<number, number[]>();
-  const wx = (x: number) => (wrap ? ((x % W) + W) % W : x);
-  const key = (x: number, y: number) => Math.floor(y / cell) * gw + Math.floor(wx(x) / cell);
-  const near = (x: number, y: number, d: number, line: number, minIdx: number): boolean => {
-    const cx = Math.floor(wx(x) / cell);
-    const cy = Math.floor(y / cell);
-    const r = Math.ceil(d / cell);
-    for (let dy = -r; dy <= r; dy++) {
-      const yy = cy + dy;
-      if (yy < 0 || yy >= gh) continue;
-      for (let dx = -r; dx <= r; dx++) {
-        let xx = cx + dx;
-        if (xx < 0 || xx >= gw) {
-          if (!wrap) continue;
-          xx = (xx + gw) % gw;
-        }
-        const list = grid.get(yy * gw + xx);
-        if (!list) continue;
-        for (let q = 0; q < list.length; q += 4) {
-          if (list[q + 2] === line && list[q + 3] > minIdx) continue;
-          let ddx = Math.abs(list[q] - wx(x));
-          if (wrap) ddx = Math.min(ddx, W - ddx);
-          if (ddx * ddx + (list[q + 1] - y) ** 2 < d * d) return true;
-        }
-      }
-    }
-    return false;
-  };
-  const add = (x: number, y: number, line: number, idx: number) => {
-    const kk = key(x, y);
-    let list = grid.get(kk);
-    if (!list) grid.set(kk, (list = []));
-    list.push(wx(x), y, line, idx);
-  };
-  let vmax = 1e-6;
-  for (let k = 0; k < U.length; k++) vmax = Math.max(vmax, Math.hypot(U[k], V[k]));
-  const dir = (x: number, y: number): [number, number] | null => {
-    const u = sampleField(cl, U, wx(x), y);
-    const v = sampleField(cl, V, wx(x), y);
-    const m = Math.hypot(u, v);
-    if (m < vmax * 0.04) return null;
-    // y grows southward on the map.
-    return [u / m, -v / m];
-  };
-  // Paths already drawn (the major currents) count as other lines: small currents join them.
-  for (const p of avoid) for (let q = 0; q < p.pts.length; q += 2) add(p.pts[q], p.pts[q + 1], -2, 0);
-  const step = dsep / 5;
-  const dtest = dsep * 0.5;
-  const lines: number[][] = [];
-  let id = 0;
-  for (const [sx, sy] of seeds) {
-    if (!ok(sx, sy) || near(sx, sy, dsep * 0.9, -1, 0)) continue;
-    const line = id++;
-    const half = (sign: number, base: number): number[] => {
-      const pts: number[] = [];
-      let x = sx;
-      let y = sy;
-      for (let t = 0; t < 1500; t++) {
-        const d1 = dir(x, y);
-        if (!d1) break;
-        const mx = x + d1[0] * step * 0.5 * sign;
-        const my = y + d1[1] * step * 0.5 * sign;
-        const d2 = dir(mx, my);
-        if (!d2) break;
-        const nx = x + d2[0] * step * sign;
-        const ny = y + d2[1] * step * sign;
-        if (ny < 0 || ny > H || (!wrap && (nx < 0 || nx > W)) || !ok(wx(nx), ny)) break;
-        // Other paths stop it; so does its own, once it has moved on (closing a loop).
-        if (near(nx, ny, dtest, line, t > 12 ? base + t - 12 : -1)) break;
-        x = nx;
-        y = ny;
-        pts.push(x, y);
-        add(x, y, line, base + t);
-      }
-      return pts;
-    };
-    add(sx, sy, line, 0);
-    const fwd = half(1, 1);
-    const back = half(-1, 100000);
-    const pts: number[] = [];
-    for (let q = back.length - 2; q >= 0; q -= 2) pts.push(back[q], back[q + 1]);
-    pts.push(sx, sy, ...fwd);
-    if (pts.length / 2 >= 6) lines.push(pts);
-  }
-  return lines;
-}
-
 function flowPaths(cl: Climate, se: SeasonClimate, W: number, H: number): void {
-  const big = Math.max(W, H);
-  const grid = (d: number): [number, number][] => {
-    const out: [number, number][] = [];
-    for (let y = d / 2; y < H; y += d) for (let x = d / 2; x < W; x += d) out.push([x, y]);
-    return out;
-  };
-  se.windPaths = [];
-  // Currents are drawn by hand and shown as drawn, so there are no traced current paths.
-  se.currentPaths = [];
-  for (const dsep of [big / 24, big / 70]) {
-    // Winds: start from the highs so the paths spiral out of them.
-    const seeds: [number, number][] = [];
-    for (const c of se.centres) {
-      if (c.kind !== 'high' || c.x < 0 || c.x > W || c.y < 0 || c.y > H) continue;
-      for (let a = 0; a < 8; a++) seeds.push([c.x + Math.cos((a * Math.PI) / 4) * dsep * 0.7, c.y + Math.sin((a * Math.PI) / 4) * dsep * 0.7]);
+  // Winds: six channels spiral out of each high, following the wind (turned by mountains and by
+  // the other highs' air), until they meet another high's air at a front, run into the ITCZ, or fade.
+  const channels: FlowPath[] = [];
+  const highs = se.centres.filter((c) => c.kind === 'high' && c.reach);
+  const rowKm = H / cl.h;
+  const kpd = rowKm / Math.max(1e-6, Math.abs(cl.lat[0] - cl.lat[1]));
+  const latAt = (y: number) => cl.lat[0] + (rowKm / 2 - y) / kpd;
+  const itczAt = (x: number) => se.itcz[Math.max(0, Math.min(cl.w - 1, Math.floor((((x % W) + W) % W) / cl.step)))];
+  for (const c of highs) {
+    const R = c.reach!;
+    const step = Math.max(30, Math.min(120, R / 30));
+    for (let a = 0; a < 6; a++) {
+      const ang = (a * Math.PI) / 3;
+      let x = c.x + Math.cos(ang) * R * 0.22;
+      let y = c.y - Math.sin(ang) * R * 0.22;
+      const pts = [x, y];
+      let len = 0;
+      for (let t = 0; t < 600; t++) {
+        const xx = cl.wrapKm ? ((x % W) + W) % W : x;
+        if (y < 0 || y > H || (!cl.wrapKm && (x < 0 || x > W))) break;
+        const u = sampleField(cl, se.windU, xx, y);
+        const v = sampleField(cl, se.windV, xx, y);
+        const sp = Math.hypot(u, v);
+        if (sp < 0.04) break;
+        x += (u / sp) * step;
+        y -= (v / sp) * step;
+        len += step;
+        pts.push(x, y);
+        if (len > R * 3.5) break;
+        if (len > R * 0.4) {
+          const xw = cl.wrapKm ? ((x % W) + W) % W : x;
+          if (xw >= 0 && xw <= W && y >= 0 && y <= H && sampleField(cl, se.front, xw, y) > 0.45) break;
+          if (Math.abs(latAt(y) - itczAt(x)) < 1.5) break;
+          let near = false;
+          for (const o of highs) {
+            let dx = x - o.x;
+            if (cl.wrapKm) dx -= Math.round(dx / W) * W;
+            if (Math.hypot(dx, y - o.y) < o.reach! * (o === c ? 0.15 : 0.3)) near = true;
+          }
+          if (near) break;
+        }
+      }
+      if (pts.length >= 8) channels.push({ pts: Float32Array.from(pts), kind: new Int8Array(pts.length / 2), major: true });
     }
-    seeds.push(...grid(dsep));
-    const inMap = (x: number, y: number) => y >= 0 && y <= H && x >= 0 && x <= W;
-    se.windPaths.push(traceField(cl, se.windU, se.windV, inMap, dsep, seeds, W, H).map((p) => ({ pts: Float32Array.from(p), kind: new Int8Array(p.length / 2), major: true })));
-    se.currentPaths.push([]);
   }
+  se.windPaths = [channels, channels];
+  // Currents are drawn by hand and shown as drawn, so there are no traced current paths.
+  se.currentPaths = [[], []];
 }
 
 // ---------------------------------------------------------------------------------------------
-// Pressure centres (fixed places, seasonal strength and size) and the pressure field.
+// Pressure: the high-pressure zones placed on the map (the High pressure brush), plus the low
+// trough along the ITCZ. Lows aren't placed: air simply flows out of the highs.
 
-function seaRuns(ctx: Ctx, j: number): { a: number; b: number; openA: boolean; openB: boolean }[] {
-  const { w, land, wrap } = ctx;
-  const runs: { a: number; b: number; openA: boolean; openB: boolean }[] = [];
-  const row = (i: number) => land[j * w + ((i + w) % w)];
-  if (wrap) {
-    let start = -1;
-    for (let i = 0; i < w; i++) if (row(i)) start = i;
-    if (start < 0) return [{ a: 0, b: w - 1, openA: true, openB: true }];
-    let i = start + 1;
-    const stop = start + w;
-    while (i < stop) {
-      if (row(i)) {
-        i++;
-        continue;
-      }
-      const a = i;
-      while (i + 1 < stop && !row(i + 1)) i++;
-      runs.push({ a, b: i, openA: false, openB: false });
-      i++;
-    }
-    return runs;
-  }
-  let i = 0;
-  while (i < w) {
-    if (row(i)) {
-      i++;
-      continue;
-    }
-    const a = i;
-    while (i + 1 < w && !row(i + 1)) i++;
-    runs.push({ a, b: i, openA: a === 0, openB: i === w - 1 });
-    i++;
-  }
-  return runs;
+/** The placed highs holding in this season (s: 1 northern summer, −1 northern winter). */
+export function placedHighs(surface: Surface, s: number): Stroke[] {
+  return surface.strokes.filter((st) => st.brush === 'high' && st.pts.length >= 2 && (st.highSeason ?? 'both') !== (s > 0 ? 'winter' : 'summer'));
 }
 
-const rowOfLat = (ctx: Ctx, la: number) => Math.round(((ctx.s.northLatitude - la) * ctx.kpd) / ctx.stepY - 0.5);
-
-function pressureField(ctx: Ctx, s: number, out: SeasonClimate): void {
-  const { w, h, n, land, stepX, stepY, W, c, edges, lat } = ctx;
-  const centres = out.centres;
-  const yOf = (la: number) => (ctx.s.northLatitude - la) * ctx.kpd;
-  const warmShift = 0; // already in the edges
-  void warmShift;
-  for (const hs of [1, -1]) {
-    const summerHere = s === hs;
-    for (let e = 0; e < edges.length; e++) {
-      const high = e % 2 === 0;
-      const edge = edges[e];
-      // Seasonal latitude and size.
-      const latC = hs * (high ? (summerHere ? edge + 2.5 : edge - 4) : (summerHere ? edge + 3 : edge - 4) + c.polarFrontShift);
-      const j = rowOfLat(ctx, latC);
-      let runs: ReturnType<typeof seaRuns>;
-      if (j < 0 || j >= h) runs = [{ a: 0, b: w - 1, openA: true, openB: true }];
-      else runs = seaRuns(ctx, j);
-      for (const r of runs) {
-        const len = (r.b - r.a + 1) * stepX;
-        const open = r.openA || r.openB;
-        if (!open && len < (high ? 3000 : 1500)) continue;
-        if (open && len < 600) continue;
-        let x: number;
-        if (high) x = !r.openB ? (r.b + 1) * stepX - Math.min(1500, len / 3) : ((r.a + r.b + 1) / 2) * stepX;
-        else x = !r.openA ? r.a * stepX + len * 0.35 : ((r.a + r.b + 1) / 2) * stepX;
-        x = ((x % W) + W) % W;
-        const strength = high ? (summerHere ? 1.2 : 0.9) * c.subtropicalHigh : summerHere ? 0.5 : 1;
-        const ring = ctx.wrap && r.openA && r.openB;
-        centres.push({
-          kind: high ? 'high' : 'low',
-          name: high ? 'Subtropical high' : 'Subpolar low',
-          x,
-          y: yOf(latC),
-          amp: (high ? 6 : -6) * strength,
-          sx: ring ? 1e6 : Math.max(900, Math.min(3500, len * 0.35)),
-          sy: (high ? (summerHere ? 7.5 : 6) : 6) * ctx.kpd,
-        });
-      }
-    }
-    // Winter continental highs and summer thermal lows over big land.
-    landCentres(ctx, s, hs, out);
-    // Polar high.
-    let lf = 0;
-    let lx = 0;
-    let cnt = 0;
-    for (let j = 0; j < h; j++) {
-      if (lat[j] * hs < 75) continue;
-      for (let i = 0; i < w; i++) {
-        cnt++;
-        if (land[j * w + i]) {
-          lf++;
-          lx += (i + 0.5) * stepX;
-        }
-      }
-    }
-    const polarLand = cnt ? lf / cnt : 0;
-    centres.push({ kind: 'high', name: 'Polar high', x: lf ? lx / lf : W / 2, y: yOf(hs * 90), amp: 3 + 5 * polarLand, sx: 1e6, sy: 15 * ctx.kpd });
+function pressureField(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate): void {
+  const { w, h, stepX, stepY, W, lat } = ctx;
+  for (const st of placedHighs(surface, s)) {
+    const reach = Math.max(200, st.size);
+    out.centres.push({ kind: 'high', name: 'High pressure', x: st.pts[0], y: st.pts[1], amp: 12 * st.strength, sx: reach * 0.55, sy: reach * 0.55, id: st.id, strength: st.strength, reach });
   }
-  // The field: a weak belt pattern plus every centre.
   for (let j = 0; j < h; j++) {
     const y = (j + 0.5) * stepY;
     const la = lat[j];
     for (let i = 0; i < w; i++) {
-      const k = j * w + i;
       const x = (i + 0.5) * stepX;
-      const l = la - s * 5 * ctx.tiltF;
       let p = -4 * gauss(la - out.itcz[i], 8);
-      for (let e = 0; e < edges.length; e++) p += (e % 2 === 0 ? 3 : -3) * gauss(Math.abs(l) - edges[e], 10);
-      for (const cc of centres) {
+      for (const cc of out.centres) {
         let dx = x - cc.x;
         if (ctx.wrap) dx -= Math.round(dx / W) * W;
         const dy = y - cc.y;
         const q = (dx * dx) / (cc.sx * cc.sx) + (dy * dy) / (cc.sy * cc.sy);
         if (q < 9) p += cc.amp * Math.exp(-q);
       }
-      out.pressure[k] = p;
-    }
-  }
-  void n;
-}
-
-/** Components of land joined across gaps narrower than the joining slider. */
-function landComponents(ctx: Ctx): Int32Array {
-  const { w, h, n, land, distLand, wrap, c } = ctx;
-  const comp = new Int32Array(n).fill(-1);
-  const joined = (k: number) => land[k] === 1 || distLand[k] <= c.landJoinKm / 2;
-  let id = 0;
-  const stack: number[] = [];
-  for (let k0 = 0; k0 < n; k0++) {
-    if (comp[k0] >= 0 || !joined(k0)) continue;
-    comp[k0] = id;
-    stack.push(k0);
-    while (stack.length) {
-      const k = stack.pop()!;
-      const i = k % w;
-      const j = (k / w) | 0;
-      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        let ii = i + di;
-        const jj = j + dj;
-        if (jj < 0 || jj >= h) continue;
-        if (ii < 0 || ii >= w) {
-          if (!wrap) continue;
-          ii = (ii + w) % w;
-        }
-        const kk = jj * w + ii;
-        if (comp[kk] < 0 && joined(kk)) {
-          comp[kk] = id;
-          stack.push(kk);
-        }
-      }
-    }
-    id++;
-  }
-  return comp;
-}
-
-let compCache: { land: Uint8Array; comp: Int32Array } | null = null;
-
-function landCentres(ctx: Ctx, s: number, hs: number, out: SeasonClimate): void {
-  const { w, h, land, lat, stepX, stepY, c, edges } = ctx;
-  if (!compCache || compCache.land !== land) compCache = { land, comp: landComponents(ctx) };
-  const comp = compCache.comp;
-  const summerHere = s === hs;
-  const e0 = edges[0];
-  const e1 = edges[1] ?? Math.min(80, e0 + 30);
-  const band = summerHere ? [Math.max(8, e0 * 0.5), e0 + 10] : [e0 + 10, e1];
-  // Gather each component's points in the band.
-  const groups = new Map<number, number[]>();
-  for (let j = 0; j < h; j++) {
-    const la = lat[j] * hs;
-    if (la < band[0] || la > band[1]) continue;
-    for (let i = 0; i < w; i++) {
-      const k = j * w + i;
-      if (!land[k] || comp[k] < 0) continue;
-      let g = groups.get(comp[k]);
-      if (!g) groups.set(comp[k], (g = []));
-      g.push(k);
-    }
-  }
-  for (const pts of groups.values()) {
-    // Widest east–west stretch of the group's land in the band.
-    const rows = new Map<number, number>();
-    for (const k of pts) rows.set((k / w) | 0, (rows.get((k / w) | 0) ?? 0) + 1);
-    let width = 0;
-    for (const cnt of rows.values()) width = Math.max(width, cnt * stepX);
-    if (summerHere) {
-      if (width < 1500) continue;
-      let best = pts[0];
-      for (const k of pts) if (out.temp[k] + 2 * ctx.height[k] > out.temp[best] + 2 * ctx.height[best]) best = k;
-      out.centres.push({ kind: 'low', name: 'Thermal low', x: ((best % w) + 0.5) * stepX, y: (((best / w) | 0) + 0.5) * stepY, amp: -3.5 * c.thermalLow * Math.min(1.5, width / 3000), sx: width / 3, sy: width / 5 });
-    } else {
-      if (width < 2500) continue;
-      // Is the land cold enough compared with the sea at the same latitudes?
-      let lt = 0;
-      let st = 0;
-      for (const k of pts) {
-        lt += out.temp[k];
-        st += seaBase(ctx, ctx.latOf(k), s);
-      }
-      if (lt / pts.length > st / pts.length - c.continentalHighC) continue;
-      let best = pts[0];
-      let meanH = 0;
-      for (const k of pts) {
-        meanH += ctx.height[k];
-        if (ctx.distSea[k] + 300 * ctx.height[k] > ctx.distSea[best] + 300 * ctx.height[best]) best = k;
-      }
-      meanH /= pts.length;
-      out.centres.push({ kind: 'high', name: 'Winter continental high', x: ((best % w) + 0.5) * stepX, y: (((best / w) | 0) + 0.5) * stepY, amp: 8 * Math.min(1.5, width / 4000) * (1 + 0.2 * meanH), sx: width / 3, sy: width / 4 });
+      out.pressure[j * w + i] = p;
     }
   }
 }
@@ -1195,33 +936,70 @@ function landCentres(ctx: Ctx, s: number, hs: number, out: SeasonClimate): void 
 // ---------------------------------------------------------------------------------------------
 // Winds: from high to low, turned by rotation; flipped across the equator; steered by ranges.
 
-function winds(ctx: Ctx, out: SeasonClimate): void {
-  const { w, h, stepX, stepY, lat, s, wrap, height } = ctx;
-  const P = out.pressure;
+function winds(ctx: Ctx, s0: number, out: SeasonClimate): void {
+  const { w, h, n, stepX, stepY, lat, s, wrap, height, W } = ctx;
   const dayF = Math.pow(24 / Math.max(4, s.dayLengthHours), 0.3);
   const sizeF = Math.pow(climateRadiusKm(s) / 6371, 0.3);
   const thetaMax = Math.min(82, 62 * dayF * sizeF) * RAD;
   // The ranges as the wind feels them: broad, so it starts turning before it reaches the slope.
   const hb = blur(height, w, h, wrap, Math.max(1, Math.round(120 / stepX)));
+  const highs = out.centres.filter((c) => c.kind === 'high' && c.reach);
+  // Where the air of two highs meets head on: a front.
+  const meet = new Float32Array(n);
   for (let j = 0; j < h; j++) {
     const la = lat[j];
+    const y = (j + 0.5) * stepY;
     const theta = thetaMax * smooth(0, 1, Math.abs(Math.sin(la * RAD)) / Math.sin(18 * RAD)) * Math.sign(la);
     const cs = Math.cos(theta);
     const sn = Math.sin(theta);
+    // Far from any high, a light drift of the wind belts (toward the ITCZ in the tropics).
+    const bt = belt(ctx, la, s0);
     for (let i = 0; i < w; i++) {
       const k = j * w + i;
       const il = i > 0 ? k - 1 : wrap ? k + w - 1 : k;
       const ir = i < w - 1 ? k + 1 : wrap ? k - w + 1 : k;
       const ju = j > 0 ? k - w : k;
       const jd = j < h - 1 ? k + w : k;
-      // Toward low pressure (east, north).
-      let fx = -(P[ir] - P[il]) / (2 * stepX);
-      let fy = -(P[ju] - P[jd]) / (2 * stepY);
-      // Rotation turns it right in the north, left in the south.
-      const rx = fx * cs + fy * sn;
-      const ry = -fx * sn + fy * cs;
-      fx = rx * 1000;
-      fy = ry * 1000;
+      const x = (i + 0.5) * stepX;
+      let fx = bt.u * 0.35;
+      let fy = bt.v * 0.35;
+      // Each high: air flowing out of it, turned right in the north and left in the south, so it
+      // spirals out (calm at the centre, strongest part-way out, fading at its reach).
+      let m1 = 0;
+      let m2 = 0;
+      let a1x = 0;
+      let a1y = 0;
+      let a2x = 0;
+      let a2y = 0;
+      for (const c of highs) {
+        let dx = x - c.x;
+        if (wrap) dx -= Math.round(dx / W) * W;
+        const dn = c.y - y;
+        const d = Math.hypot(dx, dn);
+        const R = c.reach!;
+        if (d > R * 2.2 || d < 1) continue;
+        const f = (1 - Math.exp(-((d / (0.22 * R)) ** 2))) * Math.exp(-((d / R) ** 2));
+        const m = 3 * c.strength! * f;
+        const ox = dx / d;
+        const oy = dn / d;
+        const vx = (ox * cs + oy * sn) * m;
+        const vy = (-ox * sn + oy * cs) * m;
+        fx += vx;
+        fy += vy;
+        if (m > m1) {
+          m2 = m1;
+          a2x = a1x;
+          a2y = a1y;
+          m1 = m;
+          a1x = vx / m;
+          a1y = vy / m;
+        } else if (m > m2) {
+          m2 = m;
+          a2x = vx / m;
+          a2y = vy / m;
+        }
+      }
+      if (m2 > 0) meet[k] = (m2 / m1) * Math.max(0, -(a1x * a2x + a1y * a2y)) * Math.min(1, m2 / 0.6);
       // Mountains steer the wind: it turns to run along a range instead of over it, and slows over high ground.
       const hx = (hb[ir] - hb[il]) / (2 * stepX);
       const hy = (hb[ju] - hb[jd]) / (2 * stepY);
@@ -1253,14 +1031,8 @@ function winds(ctx: Ctx, out: SeasonClimate): void {
       out.windV[k] = fy;
     }
   }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Fronts: where winds converge and air masses differ, strongest along the polar front.
-
-function fronts(ctx: Ctx, s: number, out: SeasonClimate): void {
-  const { w, h, n, stepX, stepY, lat, wrap, edges, c } = ctx;
-  const conv = new Float32Array(n);
+  // Fronts: where the air of two highs meets (smoothed), plus a little where air masses differ.
+  const mt = blur(meet, w, h, wrap, 2);
   const grad = new Float32Array(n);
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
@@ -1269,27 +1041,11 @@ function fronts(ctx: Ctx, s: number, out: SeasonClimate): void {
       const ir = i < w - 1 ? k + 1 : wrap ? k - w + 1 : k;
       const ju = j > 0 ? k - w : k;
       const jd = j < h - 1 ? k + w : k;
-      const div = (out.windU[ir] - out.windU[il]) / (2 * stepX) + (out.windV[ju] - out.windV[jd]) / (2 * stepY);
-      conv[k] = -div * 1000;
       grad[k] = Math.hypot((out.temp[ir] - out.temp[il]) / (2 * stepX), (out.temp[ju] - out.temp[jd]) / (2 * stepY)) * 1000;
     }
   }
-  const cv = blur(conv, w, h, wrap, 3);
   const gr = blur(grad, w, h, wrap, 3);
-  let cmax = 1e-6;
-  for (let k = 0; k < n; k++) cmax = Math.max(cmax, cv[k]);
-  const pf = (edges[1] ?? edges[0] + 30) + (s > 0 ? 3 : -7) + c.polarFrontShift;
-  for (let j = 0; j < h; j++) {
-    for (let i = 0; i < w; i++) {
-      const k = j * w + i;
-      const la = lat[j];
-      const summerHere = Math.sign(la) === s;
-      const front = summerHere ? pf + 6 : pf - 4;
-      const belt = gauss(Math.abs(la) - front, 9);
-      const mid = smooth(25, 35, Math.abs(la)) * (1 - smooth(70, 80, Math.abs(la)));
-      out.front[k] = Math.min(1, belt * 0.55 + mid * (Math.max(0, cv[k] / cmax) * 0.6 + Math.min(1, gr[k] / 12) * 0.4));
-    }
-  }
+  for (let k = 0; k < n; k++) out.front[k] = Math.min(1, mt[k] * 1.6 + Math.min(1, gr[k] / 12) * 0.25 * Math.min(1, mt[k] * 4 + 0.3));
 }
 
 // ---------------------------------------------------------------------------------------------

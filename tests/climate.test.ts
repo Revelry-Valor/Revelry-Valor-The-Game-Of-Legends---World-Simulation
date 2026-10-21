@@ -122,6 +122,29 @@ describe('the climate of a test continent', () => {
     expect(tropicIce).toBe(0);
   });
 
+  it('blows its winds out of the placed highs, spiralling clockwise in the north, with a front where two meet', () => {
+    const hc = computeClimate(
+      world((add) => {
+        add('high', [11000, yAt(30)], { strength: 0.6, size: 2500 });
+        add('high', [11000 + 4000, yAt(30)], { strength: 0.6, size: 2500 });
+      }),
+      settings,
+    );
+    const k = (x: number, lat: number) => Math.floor(yAt(lat) / (settings.heightKm / hc.h)) * hc.w + Math.floor(x / hc.step);
+    // 1,000 km north of the first high: blowing outward (north) and turned right (east).
+    const n = k(11000, 30 + 1000 / KM_PER_DEGREE);
+    expect(hc.summer.windV[n]).toBeGreaterThan(0);
+    expect(hc.summer.windU[n]).toBeGreaterThan(0);
+    // Each high sends out six channels.
+    expect(hc.summer.windPaths[0].length).toBeGreaterThanOrEqual(10);
+    // Between the two highs their air meets: a front; well away from both, none.
+    expect(hc.summer.front[k(13000, 30)]).toBeGreaterThan(0.3);
+    expect(hc.summer.front[k(11000, -20)]).toBeLessThan(0.2);
+    // Nothing placed: no highs, no channels.
+    expect(cl.summer.centres.length).toBe(0);
+    expect(cl.summer.windPaths[0].length).toBe(0);
+  }, 60000);
+
   it('has no currents until they are drawn, then warms and cools the water by them', () => {
     expect(new Set(cl.summer.current).has(1)).toBe(false);
     expect(new Set(cl.summer.current).has(-1)).toBe(false);
