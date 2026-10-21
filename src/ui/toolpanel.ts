@@ -56,6 +56,10 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: high pressure' : b.name), ...highFields());
       return;
     }
+    if (state.tool === 'wind') {
+      settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: wind' : b.name), ...windFields());
+      return;
+    }
     if (state.tool === 'current') {
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: current sketch' : b.name), ...currentFields());
       return;
@@ -138,6 +142,37 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...fields.filter(Boolean) as HTMLElement[]);
   };
 
+  let editedWind: number | null = null;
+  /** Settings for winds, drawn by hand like ocean currents. */
+  const windFields = (): HTMLElement[] => {
+    const s = state.settings;
+    if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a wind to delete it.')];
+    const mode = state.sketchMode ?? 'draw';
+    const strength = (v: number, set: (x: number) => void) =>
+      numberField({ label: 'Strength', value: Math.round(v * 100), min: 5, max: 100, step: 1, unit: '%', slider: true, hint: 'Light breezes (thin lines) to strong, steady winds. Stronger winds carry moisture and warmth further.', change: (x) => set(Math.max(5, Math.min(100, x)) / 100) });
+    const out: HTMLElement[] = [
+      h('p', { class: 'muted small hint' }, 'Draw the winds yourself. They carry moisture and warmth inland, mountains wring rain out of them, and where two winds run into each other a front forms, with clouds and rain.'),
+      choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
+    ];
+    if (mode === 'draw') {
+      out.push(strength(s.strength, (x) => { s.strength = x; changed(); }), h('p', { class: 'muted small' }, 'Tap points along the way it blows, then tap the last point again to finish. Esc cancels.'));
+      return out;
+    }
+    const ops = sketch();
+    const sel = ops?.selected() ?? null;
+    if (!ops || !sel) {
+      out.push(h('p', { class: 'muted small' }, 'Tap a wind to pick it. Drag its dots to move them; drag the line to add a bend.'));
+      return out;
+    }
+    out.push(
+      strength(sel.strength, (x) => { ops.set({ strength: x }, editedWind !== sel.id); editedWind = sel.id; }),
+      h('div', { class: 'sketch-actions' },
+        h('button', { type: 'button', class: 'ghost small', title: 'Make it blow the other way.', onclick: () => { ops.reverse(); renderSettings(); } }, 'Reverse'),
+        h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete'),
+      ),
+    );
+    return out;
+  };
   type Season = 'both' | 'summer' | 'winter';
   const SEASONS: { value: Season; label: string }[] = [{ value: 'both', label: 'All year' }, { value: 'summer', label: 'Northern summer' }, { value: 'winter', label: 'Northern winter' }];
   let editedHigh: number | null = null;
@@ -147,12 +182,12 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a high to delete it.')];
     const mode = state.sketchMode ?? 'draw';
     const fields = (v: { strength: number; size: number; highSeason?: Season }, set: (patch: Partial<BrushSettings>) => void) => [
-      numberField({ label: 'Strength', value: Math.round(v.strength * 100), min: 5, max: 100, step: 1, unit: '%', slider: true, hint: 'Stronger highs push their air further and win where they meet a weaker one; the air under them is drier.', change: (x) => set({ strength: Math.max(5, Math.min(100, x)) / 100 }) }),
-      numberField({ label: 'Reach', value: Math.round(kmToMiles(v.size)), min: 100, max: 6000, step: 10, unit: 'miles', hint: 'How far out its winds reach (the dashed circle).', change: (x) => { if (x > 0) set({ size: milesToKm(x) }); } }),
+      numberField({ label: 'Strength', value: Math.round(v.strength * 100), min: 5, max: 100, step: 1, unit: '%', slider: true, hint: 'Stronger highs are drier under them.', change: (x) => set({ strength: Math.max(5, Math.min(100, x)) / 100 }) }),
+      numberField({ label: 'Reach', value: Math.round(kmToMiles(v.size)), min: 100, max: 6000, step: 10, unit: 'miles', hint: 'How far it reaches (the dashed circle).', change: (x) => { if (x > 0) set({ size: milesToKm(x) }); } }),
       choice<Season>('Season', SEASONS, v.highSeason ?? 'both', (x) => set({ highSeason: x })),
     ];
     const out: HTMLElement[] = [
-      h('p', { class: 'muted small hint' }, 'High-pressure zones drive the winds. Picture a line through each high, east to west. On its equator side the air curves away to the ITCZ. On its pole side the air circles round the high (clockwise in the north, anticlockwise in the south) from the west end to the east end, each stream outside the last, then on to the ITCZ. The nearer the ITCZ, the further toward the pole the line sits, so more air goes straight to it. Mountains turn the winds; where two highs’ winds meet, a front forms, with clouds and rain.'),
+      h('p', { class: 'muted small hint' }, 'High-pressure zones: sinking air, clear skies and little rain under them; stronger highs are drier. Draw the winds round them with the Wind brush (clockwise round a high in the north, anticlockwise in the south).'),
       choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Place' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
     ];
     if (mode === 'draw') {

@@ -33,6 +33,8 @@ export interface SketchOps {
   selected(): Stroke | null;
   setKind(kind: 'warm' | 'cold' | 'neutral'): void;
   setSize(size: 'major' | 'secondary'): void;
+  /** Change it; `undoStep` saves an undo step first. */
+  set(patch: Partial<Stroke>, undoStep?: boolean): void;
   reverse(): void;
   remove(): void;
 }
@@ -77,6 +79,9 @@ export interface MapView {
 }
 
 const SKETCH_COLOUR = { warm: '#e0301e', cold: '#1f66e0', neutral: '#0d1014' };
+/** Brushes drawn as a course through points and adjusted afterwards: ocean currents and winds. */
+type SketchBrush = 'current' | 'wind';
+const isSketch = (t: string): t is SketchBrush => t === 'current' || t === 'wind';
 
 export function createMapView(o: MapViewOptions): MapView {
   const canvas = h('canvas', { class: 'map', 'aria-label': 'World map. Drag to paint with the selected brush.' });
@@ -131,7 +136,8 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     const cl = o.climate();
     if (cl && look.view !== 'land') drawClimate(g, r, cl, look, x0, span, copies);
-    if (look.view === 'currents' || o.tool().tool === 'current') drawSketches(g, r, x0, span, copies);
+    if (look.view === 'currents' || o.tool().tool === 'current') drawSketches(g, r, x0, span, copies, 'current');
+    if (look.view === 'pressure' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
     if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
@@ -340,17 +346,21 @@ export function createMapView(o: MapViewOptions): MapView {
     g.restore();
   }
 
-  /** Ocean currents as placed: bold lines (thinner for secondary currents) with a white edge and arrows; points shown while adjusting. */
-  function drawSketches(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[]) {
+  /**
+   * Ocean currents and winds as drawn: bold lines (thinner for secondary currents and light winds)
+   * with an edge and arrows; points shown while adjusting.
+   */
+  function drawSketches(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[], brush: SketchBrush) {
     const t = o.tool();
-    const adjusting = t.tool === 'current' && (t.sketchMode === 'adjust' || t.erase);
+    const adjusting = t.tool === brush && (t.sketchMode === 'adjust' || t.erase);
     const yTop = toScreen(0, 0, r)[1];
     g.save();
     g.lineCap = 'round';
     g.lineJoin = 'round';
-    for (const st of sketches()) {
-      const colour = SKETCH_COLOUR[st.current ?? 'warm'];
-      const minor = st.currentSize === 'secondary';
+    for (const st of sketches(brush)) {
+      const wind = brush === 'wind';
+      const colour = wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
+      const minor = wind ? st.strength < 0.45 : st.currentSize === 'secondary';
       const p = st.pts;
       for (const c of copies) {
         const ox = x0 + c * span;
@@ -586,8 +596,8 @@ export function createMapView(o: MapViewOptions): MapView {
   let spaceDown = false;
 
   // Point mode for rivers and lava: the points clicked so far.
-  let routing: { brush: 'river' | 'lava' | 'current'; ctrl: number[] } | null = null;
-  const pointsMode = (t: ToolState) => ((t.tool === 'river' || t.tool === 'lava') && t.settings.route === 'points' && !t.erase) || (t.tool === 'current' && !t.erase && t.sketchMode !== 'adjust');
+  let routing: { brush: 'river' | 'lava' | SketchBrush; ctrl: number[] } | null = null;
+  const pointsMode = (t: ToolState) => ((t.tool === 'river' || t.tool === 'lava') && t.settings.route === 'points' && !t.erase) || (isSketch(t.tool) && !t.erase && t.sketchMode !== 'adjust');
   const opts = () => {
     const s = o.world().settings;
     return { seed: s.seed, wrapKm: s.edges === 'wrap' ? s.widthKm : 0 };
@@ -628,13 +638,13 @@ export function createMapView(o: MapViewOptions): MapView {
       return;
     }
     const t = o.tool();
-    if (brush === 'current') {
-      // An ocean current: a smooth course through the points.
+    if (brush === 'current' || brush === 'wind') {
+      // An ocean current or a wind: a smooth course through the points.
       const wrapKm = o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0;
       const live = o.begin({ ...t.settings, brush, erase: undefined, pts: roundPath(sketchCourse(ctrl, wrapKm)), route: 'points', ctrl: roundPath(ctrl) });
       sel = live.id;
       o.sketchSelected?.();
-      o.notice('Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
+      o.notice(brush === 'wind' ? 'Wind drawn. Use Adjust to move or add points, change its strength, reverse it or delete it.' : 'Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
       schedule();
       return;
     }
@@ -651,6 +661,7 @@ export function createMapView(o: MapViewOptions): MapView {
     if (!routing) return '#bfe6ff';
     if (routing.brush === 'lava') return '#ff7a26';
     if (routing.brush === 'current') return SKETCH_COLOUR[o.tool().settings.current ?? 'warm'];
+    if (routing.brush === 'wind') return '#1b2027';
     return '#bfe6ff';
   };
 
@@ -723,7 +734,8 @@ export function createMapView(o: MapViewOptions): MapView {
   let sel: number | null = null;
   let dragging: { id: number; idx: number; pointer: number } | null = null;
   const wrapKm = () => (o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0);
-  const sketches = () => o.world().surface.strokes.filter((st) => st.brush === 'current' && st.ctrl && st.ctrl.length >= 4);
+  /** The drawn currents or winds (by default, those of the tool in hand). */
+  const sketches = (b: SketchBrush = isSketch(o.tool().tool) ? (o.tool().tool as SketchBrush) : 'current') => o.world().surface.strokes.filter((st) => st.brush === b && st.ctrl && st.ctrl.length >= 4);
   const withCtrl = (st: Stroke, ctrl: number[]): Stroke => ({ ...st, ctrl: roundPath(ctrl), pts: roundPath(sketchCourse(ctrl, wrapKm())) });
   /** Distance on screen (px) from a point to a segment. */
   const segDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
@@ -771,7 +783,7 @@ export function createMapView(o: MapViewOptions): MapView {
         o.remove(hit);
         if (sel === hit) sel = null;
         o.sketchSelected?.();
-        o.notice('Current deleted (Undo brings it back).');
+        o.notice(`${o.tool().tool === 'wind' ? 'Wind' : 'Current'} deleted (Undo brings it back).`);
       }
       schedule();
       return true;
@@ -821,6 +833,13 @@ export function createMapView(o: MapViewOptions): MapView {
       o.update({ ...st, current: kind });
       schedule();
     },
+    set(patch, undoStep = true) {
+      const st = sketchOps.selected();
+      if (!st) return;
+      if (undoStep) o.snapshot();
+      o.update({ ...st, ...patch });
+      schedule();
+    },
     setSize(size) {
       const st = sketchOps.selected();
       if (!st) return;
@@ -849,10 +868,10 @@ export function createMapView(o: MapViewOptions): MapView {
   const startStroke = (e: PointerEvent, x: number, y: number) => {
     const t = o.tool();
     if (t.tool === 'pan') return false;
-    if (t.tool === 'current' && (t.erase || t.sketchMode === 'adjust')) return sketchPointer(e, x, y, t.erase);
+    if (isSketch(t.tool) && (t.erase || t.sketchMode === 'adjust')) return sketchPointer(e, x, y, t.erase);
     if (t.tool === 'high' && (t.erase || t.sketchMode === 'adjust')) return highPointer(e, x, y, t.erase);
     if (pointsMode(t)) {
-      const brush = t.tool as 'river' | 'lava' | 'current';
+      const brush = t.tool as 'river' | 'lava' | SketchBrush;
       if (!routing || routing.brush !== brush) routing = { brush, ctrl: [] };
       // Tapping the last point again finishes (no Enter key needed on a phone).
       const c0 = routing.ctrl;

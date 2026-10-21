@@ -122,25 +122,25 @@ describe('the climate of a test continent', () => {
     expect(tropicIce).toBe(0);
   });
 
-  it('blows its winds round the placed highs, clockwise in the north, with a front where two meet', () => {
+  it('blows the winds as drawn, with a front where two run into each other', () => {
     const hc = computeClimate(
       world((add) => {
-        add('high', [11000, yAt(30)], { strength: 0.6, size: 2500 });
-        add('high', [11000 + 4000, yAt(30)], { strength: 0.6, size: 2500 });
+        add('wind', line([[9000, yAt(30)], [12800, yAt(30)]]), { strength: 0.8 });
+        add('wind', line([[17000, yAt(30)], [13400, yAt(30)]]), { strength: 0.8 });
+        add('high', [11000, yAt(35)], { strength: 0.6, size: 2000 });
       }),
       settings,
     );
     const k = (x: number, lat: number) => Math.floor(yAt(lat) / (settings.heightKm / hc.h)) * hc.w + Math.floor(x / hc.step);
-    // 1,000 km north of the first high: blowing outward (north) and turned right (east).
-    const n = k(11000, 30 + 1000 / KM_PER_DEGREE);
-    expect(hc.summer.windV[n]).toBeGreaterThan(0);
-    expect(hc.summer.windU[n]).toBeGreaterThan(0);
-    // Each high sends out streams of air round it.
-    expect(hc.summer.windPaths[0].length).toBeGreaterThanOrEqual(10);
-    // Between the two highs their air meets: a front; well away from both, none.
-    expect(hc.summer.front[k(13000, 30)]).toBeGreaterThan(0.3);
+    // Along the first wind it blows east, along the second west.
+    expect(hc.summer.windU[k(10500, 30)]).toBeGreaterThan(1);
+    expect(hc.summer.windU[k(15500, 30)]).toBeLessThan(-1);
+    // Where they run into each other: a front; well away from both, none.
+    expect(hc.summer.front[k(13100, 30)]).toBeGreaterThan(0.3);
     expect(hc.summer.front[k(11000, -20)]).toBeLessThan(0.2);
-    // Nothing placed: no highs, no channels.
+    // A placed high raises the pressure under it.
+    expect(hc.summer.pressure[k(11000, 35)]).toBeGreaterThan(4);
+    // Nothing drawn: no traced winds, no highs.
     expect(cl.summer.centres.length).toBe(0);
     expect(cl.summer.windPaths[0].length).toBe(0);
   }, 60000);

@@ -109,7 +109,7 @@ export function showWorld(app: App, start: World): () => void {
     map?.redraw();
     // Drawing currents is done on the currents map.
     if (tools?.state.tool === 'current' && look.view !== 'currents') showCurrentsView?.();
-    if (tools?.state.tool === 'high' && look.view !== 'pressure') showPressureView?.();
+    if ((tools?.state.tool === 'high' || tools?.state.tool === 'wind') && look.view !== 'pressure') showPressureView?.();
   }, () => map?.sketch ?? null, () => map?.high ?? null);
   const map = createMapView({
     world: () => world,
@@ -185,7 +185,7 @@ export function showWorld(app: App, start: World): () => void {
         climateLegend.replaceChildren(ramp(RAIN_LEGEND.map(toHex)), h('div', { class: 'ramp-labels' }, h('span', {}, 'Dry'), h('span', {}, 'Wet'), h('span', {}, 'Very wet')), h('p', { class: 'muted' }, `Rain in the season shown. White speckle on land is winter snow cover.`), itcz);
         break;
       case 'pressure':
-        climateLegend.replaceChildren(key('#d67860', 'High pressure (H): dry, settled air; place them with the High pressure brush'), key('#96969e', 'Grey zone: fronts, where two highs’ winds meet (clouds, rain)'), key('#14181e', 'Arrows: winds circling each high and on to the ITCZ'), itcz);
+        climateLegend.replaceChildren(key('#d67860', 'High pressure (H): dry, settled air; place them with the High pressure brush'), key('#14181e', 'Winds, as drawn with the Wind brush'), key('#96969e', 'Grey zone: fronts, where winds run into each other (clouds, rain)'), itcz);
         break;
       case 'currents':
         climateLegend.replaceChildren(key('#d23a2a', 'Warm current'), key('#2a6fd2', 'Cold current'), key('#111418', 'Neutral current (thin lines: secondary currents)'), key('#78dce6', 'Upwelling: cold, rich water (fishing, fog)'), key('#e4ecf1', 'Sea ice'), key('#5fd2c3', 'Coral reef'));
