@@ -86,6 +86,8 @@ export interface BrushInfo {
   roughness: number;
   /** Size of individual peaks, bumps or patches, in miles. */
   detailMi: number;
+  /** Kept for older worlds but not offered as a tool of its own. */
+  hidden?: boolean;
 }
 
 export const BRUSHES: BrushInfo[] = [
@@ -127,9 +129,9 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'itcz', name: 'ITCZ', group: 'Climate', kind: 'line', hint: 'Draw the ITCZ, the belt of tropical rain, across the map: tap points from west to east, then tap the last point again (or press Enter). Where you draw it, it replaces the automatic path; past its ends the belt eases back to the automatic one.', sizeMi: 60, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'high', name: 'High pressure', group: 'Climate', kind: 'point', hint: 'Click to place a high-pressure zone: sinking air, clear skies, little rain under it. Draw the winds round it with the Wind brush. Use Adjust to pick one and change its strength.', sizeMi: 1200, strength: 0.5, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'crystal', name: 'Climate crystal', group: 'Climate', kind: 'point', hint: 'Click to place a crystal that changes the climate around it: heat (sun crystal), cold, or rain. Its width is how far it reaches; nearby crystals add together.', sizeMi: 150, strength: 0.6, softness: 0.5, roughness: 0, detailMi: 1 },
-  { id: 'shadowpen', name: 'Rain Shadow Pen', group: 'Climate', kind: 'line', hint: 'Mountains, plateaus and hills already cast rain shadows. Draw along a crest to add high ground the climate should see, or to change how high it is. Nothing is drawn on the map.', sizeMi: 40, strength: 1, softness: 0.5, roughness: 0, detailMi: 1 },
+  { id: 'shadowpen', name: 'Rain Shadow Pen', group: 'Climate', kind: 'line', hint: 'Mountains, plateaus and hills already cast rain shadows. Draw along a crest to add high ground the climate should see (or change how high it is), cut a gap (a pass) so moist air slips through, or erase either. Whatever is drawn last wins in a spot. Nothing is drawn on the map.', sizeMi: 40, strength: 1, softness: 0.5, roughness: 0, detailMi: 1 },
   { id: 'current', name: 'Ocean current', group: 'Climate', kind: 'line', hint: 'Draw an ocean current the way it flows: tap points, then tap the last point again (or press Enter). Warm currents warm the water near them, cold ones cool it. Use Adjust to move or add points, change its type, reverse it or delete it.', sizeMi: 60, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
-  { id: 'gap', name: 'Gap (pass)', group: 'Climate', kind: 'area', hint: 'Cut a pass through high ground so moist air slips through.', sizeMi: 30, strength: 1, softness: 0.4, roughness: 0, detailMi: 1 },
+  { id: 'gap', name: 'Gap (pass)', group: 'Climate', kind: 'area', hint: 'Cut a pass through high ground so moist air slips through.', sizeMi: 30, strength: 1, softness: 0.4, roughness: 0, detailMi: 1, hidden: true },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
 
@@ -197,6 +199,8 @@ export interface Stroke {
   crystal?: 'heat' | 'cold' | 'rain';
   /** Rain Shadow Pen: the height of the high ground (km) for the climate. */
   penHeight?: number;
+  /** Rain Shadow Pen: high ground (the default) or a gap (pass) that lets moist air through. */
+  penMode?: 'raise' | 'gap';
   /** Drawn current (teaching sketch): what kind of water it carries. Its course is `ctrl`. */
   current?: 'warm' | 'cold' | 'neutral';
   /** Ocean currents: a major current (ocean-wide) or a secondary one (bays and shallow seas). */

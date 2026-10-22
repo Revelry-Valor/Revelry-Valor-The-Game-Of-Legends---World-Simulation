@@ -176,3 +176,24 @@ describe('brushes paint like a paint program', () => {
     expect(accessPoints(ramped)).toEqual([{ id: 3, from: { x: 200, y: 30 }, to: { x: 200, y: 0 }, width: 16 }]);
   });
 });
+
+describe('the Rain Shadow Pen: high ground, gaps and erasing in one tool', () => {
+  const land: [BrushId, number[], Partial<Stroke>?] = ['land', [0, 0, 1000, 0], { size: 800 }];
+  const raise: [BrushId, number[], Partial<Stroke>?] = ['shadowpen', [200, 0, 800, 0], { size: 80, penHeight: 3 }];
+  const gap: [BrushId, number[], Partial<Stroke>?] = ['shadowpen', [500, -100, 500, 100], { size: 60, penMode: 'gap' }];
+  const erase: [BrushId, number[], Partial<Stroke>?] = ['shadowpen', [500, -100, 500, 100], { size: 60, erase: true }];
+  const hAt = (s: Surface, x: number) => surfaceAt(s, x, 0, o).climateHeight;
+  it('whatever is drawn last wins in a spot', () => {
+    expect(hAt(paint(land, raise), 500)).toBeCloseTo(3, 1);
+    // A gap over high ground cuts it; high ground over a gap fills it again.
+    expect(hAt(paint(land, raise, gap), 500)).toBeLessThan(0.5);
+    expect(hAt(paint(land, gap, raise), 500)).toBeCloseTo(3, 1);
+    // Elsewhere on the line the high ground stays.
+    expect(hAt(paint(land, raise, gap), 300)).toBeCloseTo(3, 1);
+  });
+  it('erases high ground and gaps alike', () => {
+    expect(hAt(paint(land, raise, erase), 500)).toBeLessThan(0.5);
+    expect(hAt(paint(land, raise, gap, erase), 300)).toBeCloseTo(3, 1);
+    expect(hAt(paint(land, raise, erase), 300)).toBeCloseTo(3, 1);
+  });
+});

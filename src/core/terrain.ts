@@ -759,23 +759,45 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
         break;
       }
       case 'shadowpen': {
-        // High ground for the climate only: full height on the line, sloping away over the brush width.
+        // One tool, three things, and the latest wins in each spot: high ground for the climate
+        // only (full height on the line, sloping away over the brush width), a gap (pass) that
+        // lets moist air through, or erasing both.
         penH ??= new Float32Array(n).fill(-1);
+        gapMask ??= new Float32Array(n);
         const H = s.penHeight ?? 2.5;
         const r = s.size / 2;
+        const gapMode = s.penMode === 'gap';
         lineStroke(s, g, o, (i, _x, _y, d) => {
           if (d > r) return;
-          const v = H * (1 - smooth(0, r, d));
-          if (er) penH![i] = d < r * 0.7 ? -1 : penH![i];
-          else if (v > penH![i]) penH![i] = v;
+          const c = 1 - smooth(r * (1 - Math.max(0.05, s.softness)), r, d);
+          if (er) {
+            if (d < r * 0.85) penH![i] = -1;
+            gapMask![i] *= 1 - c;
+          } else if (gapMode) {
+            gapMask![i] = Math.max(gapMask![i], c);
+            if (c > 0.5) penH![i] = -1;
+          } else {
+            const v = H * (1 - smooth(0, r, d));
+            if (v > penH![i]) penH![i] = v;
+            gapMask![i] *= 1 - c;
+          }
         });
         break;
       }
       case 'gap':
+        // Older worlds' gaps (now a mode of the Rain Shadow Pen).
+        penH ??= new Float32Array(n).fill(-1);
         gapMask ??= new Float32Array(n);
         unionStroke(s, g, o, seed, (i, x, y, e, r) => {
           const c = edge(s, x, y, e, r, px, seed);
-          if (c > 0) gapMask![i] = er ? gapMask![i] * (1 - c) : Math.max(gapMask![i], c * str);
+          if (c <= 0) return;
+          if (er) {
+            gapMask![i] *= 1 - c;
+            if (c > 0.5) penH![i] = -1;
+          } else {
+            gapMask![i] = Math.max(gapMask![i], c * str);
+            if (c > 0.5) penH![i] = -1;
+          }
         });
         break;
       case 'reef':

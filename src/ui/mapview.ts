@@ -628,6 +628,7 @@ export function createMapView(o: MapViewOptions): MapView {
     g.restore();
   }
 
+  const penLayer = document.createElement('canvas');
   /** Crystals are always marked; Rain Shadow Pen lines and gaps show while those tools are in hand. */
   function drawClimateTools(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[]) {
     const strokes = o.world().surface.strokes;
@@ -635,24 +636,34 @@ export function createMapView(o: MapViewOptions): MapView {
     const at = (x: number, y: number, c: number): [number, number] => [x0 + c * span + x * view.scale, toScreen(0, y, r)[1]];
     g.save();
     if (t === 'shadowpen' || t === 'gap') {
+      // Drawn in order on a layer of its own, each stroke clearing what was under it first, so
+      // the map shows what is left: the latest high ground or gap in each spot, erased spots empty.
+      penLayer.width = Math.max(1, Math.round(r.width));
+      penLayer.height = Math.max(1, Math.round(r.height));
+      const pg = penLayer.getContext('2d')!;
+      pg.lineCap = 'round';
+      pg.lineJoin = 'round';
       for (const st of strokes) {
         if (st.brush !== 'shadowpen' && st.brush !== 'gap') continue;
-        g.strokeStyle = st.erase ? 'rgba(255,140,120,0.7)' : st.brush === 'gap' ? 'rgba(140,220,255,0.8)' : 'rgba(255,230,150,0.85)';
-        g.lineWidth = Math.max(1.5, Math.min(st.size * view.scale, 30));
-        g.globalAlpha = 0.45;
-        g.lineCap = 'round';
-        g.lineJoin = 'round';
-        for (const c of copies) {
-          g.beginPath();
-          for (let k = 0; k < st.pts.length; k += 2) {
-            const [sx, sy] = at(st.pts[k], st.pts[k + 1], c);
-            if (k) g.lineTo(sx, sy);
-            else g.moveTo(sx, sy);
+        const gap = st.brush === 'gap' || st.penMode === 'gap';
+        pg.lineWidth = Math.max(1.5, st.size * view.scale);
+        for (const pass of st.erase ? ['clear'] : ['clear', 'paint']) {
+          pg.globalCompositeOperation = pass === 'clear' ? 'destination-out' : 'source-over';
+          pg.strokeStyle = pass === 'clear' ? '#000' : gap ? 'rgb(120,205,255)' : 'rgb(255,222,130)';
+          for (const c of copies) {
+            pg.beginPath();
+            for (let k = 0; k < st.pts.length; k += 2) {
+              const [sx, sy] = at(st.pts[k], st.pts[k + 1], c);
+              if (k) pg.lineTo(sx, sy);
+              else pg.moveTo(sx, sy);
+            }
+            if (st.pts.length === 2) pg.lineTo(at(st.pts[0], st.pts[1], c)[0] + 0.1, at(st.pts[0], st.pts[1], c)[1]);
+            pg.stroke();
           }
-          if (st.pts.length === 2) g.lineTo(at(st.pts[0], st.pts[1], c)[0] + 0.1, at(st.pts[0], st.pts[1], c)[1]);
-          g.stroke();
         }
       }
+      g.globalAlpha = 0.5;
+      g.drawImage(penLayer, 0, 0, r.width, r.height);
       g.globalAlpha = 1;
     }
     const colours = { heat: '#ffb12e', cold: '#7fd4ff', rain: '#4f7dff' };

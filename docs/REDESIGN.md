@@ -172,7 +172,7 @@ Every mountain area has altitude zones, like the bands on a real mountain. They 
 **Ground cover** (forest, jungle, swamp, dunes, grassland, tundra, ice): either worked out from the climate automatically, or painted by hand. Painted cover overrides the climate in that spot.
 
 ### 6.3 Rain Shadow Pen
-**Decided (Phase 3 discussion):** painted mountains, plateaus, cliffs, hills and volcanoes cast rain shadows and cool the land by themselves, using hidden climate heights (see 7.7). The Pen is kept for adjusting that: drawing lines where extra high ground should block moisture, overriding a feature's height, and the Gap tool for passes.
+**Decided (Phase 3 discussion):** painted mountains, plateaus, cliffs, hills and volcanoes cast rain shadows and cool the land by themselves, using hidden climate heights (see 7.7). The Pen is kept for adjusting that: drawing lines where extra high ground should block moisture, overriding a feature's height, and cutting gaps (passes). **Built as one tool** with three modes, High ground, Gap (pass) and Erase; whatever is drawn last wins in a spot, so a gap cuts high ground, high ground fills a gap, and Erase clears both.
 
 A separate tool. You draw lines along crests and edges by hand (never suggested automatically). They tell the climate where high ground is. Nothing is drawn on the map from them.
 

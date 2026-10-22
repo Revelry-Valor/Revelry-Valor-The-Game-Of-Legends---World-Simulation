@@ -35,7 +35,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
   const renderPickers = () => {
     const groups = new Map<string, HTMLElement[]>();
     for (const b of BRUSHES) {
-      if (shown && !shown.includes(b.group)) continue;
+      if (b.hidden || (shown && !shown.includes(b.group))) continue;
       const btn = h('button', { type: 'button', class: 'brush', 'aria-pressed': state.tool === b.id ? 'true' : 'false', title: b.hint, onclick: () => select(b.id) }, b.name);
       groups.set(b.group, [...(groups.get(b.group) ?? []), btn]);
     }
@@ -73,7 +73,15 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     // A river's width comes from the water it carries, so its brush size only matters for erasing.
     const sized = !(state.tool === 'river' && !state.erase);
     const fields: (HTMLElement | null)[] = [
-      h('p', { class: 'muted small hint' }, state.erase ? `Erasing ${b.name.toLowerCase()} only. Other layers are left alone.` : b.hint),
+      h('p', { class: 'muted small hint' }, state.erase ? (state.tool === 'shadowpen' ? 'Erasing: paint over high ground or gaps to take them away (the climate goes back to the land’s own heights there).' : `Erasing ${b.name.toLowerCase()} only. Other layers are left alone.`) : b.hint),
+      state.tool === 'shadowpen'
+        ? choice<'raise' | 'gap' | 'erase'>('Mode', [{ value: 'raise', label: 'High ground' }, { value: 'gap', label: 'Gap (pass)' }, { value: 'erase', label: 'Erase' }], state.erase ? 'erase' : s.penMode === 'gap' ? 'gap' : 'raise', (v) => {
+            if (v === 'erase') return setErase(true);
+            s.penMode = v;
+            if (state.erase) setErase(false);
+            else { renderSettings(); changed(); }
+          })
+        : null,
       !sized ? null : numberField({
         label: state.tool === 'crystal' ? 'Reach' : b.kind === 'point' ? 'Width' : 'Brush size',
         value: Math.round(kmToMiles(s.size) * 10) / 10,
@@ -115,7 +123,10 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       if (state.tool === 'crystal') {
         fields.push(choice<'heat' | 'cold' | 'rain'>('Crystal', [{ value: 'heat', label: 'Heat (sun)' }, { value: 'cold', label: 'Cold' }, { value: 'rain', label: 'Rain' }], s.crystal ?? 'heat', (v) => { s.crystal = v; changed(); }));
       }
-      if (state.tool === 'shadowpen') {
+      if (state.tool === 'shadowpen' && s.penMode === 'gap') {
+        fields.push(pct('Softness', 'softness', 'How gently the gap fades out at its edges.'));
+      }
+      if (state.tool === 'shadowpen' && s.penMode !== 'gap') {
         const presets: [string, number][] = [['Coastal cliff', 0.6], ['Low hills', 0.5], ['High hills', 1], ['Escarpment', 1.5], ['Mountains', 2.5], ['High mountains', 4]];
         const ft = (km: number) => `${Math.round((km * 3280.84) / 100) * 100} ft`;
         fields.push(
