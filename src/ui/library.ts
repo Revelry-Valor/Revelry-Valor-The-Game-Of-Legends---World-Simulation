@@ -30,6 +30,22 @@ import {
   STAT_NAMES,
   statTotal,
   TERRAINS,
+  BEHAVIOUR_CATEGORIES,
+  CULTURE_LIFESTYLES,
+  ETHOS,
+  MARTIAL,
+  newBehaviour,
+  newCulture,
+  newTech,
+  newTradition,
+  PLACES,
+  TECH_FIELDS,
+  techTiers,
+  TRADITION_CATEGORIES,
+  type Behaviour,
+  type Culture,
+  type Tech,
+  type Tradition,
   type Beast,
   type Library,
   type Profile,
@@ -74,7 +90,7 @@ export function showLibrary(app: App, world: World | null): () => void {
     renderListSoon();
   };
 
-  type Tab = 'species' | 'beasts' | 'traits' | 'resources';
+  type Tab = 'species' | 'beasts' | 'traits' | 'resources' | 'techs' | 'behaviours' | 'traditions' | 'cultures';
   let tab: Tab = 'species';
   let selected: string | null = null;
   let raceSel = 0;
@@ -185,6 +201,41 @@ export function showLibrary(app: App, world: World | null): () => void {
     render();
     return h('div', { class: 'field wide' }, h('span', { class: 'label' }, label), box, h('small', {}, hint));
   };
+  /** Picked items from a long list: chips to remove, and a list to add from. */
+  type Opt = { id: string; name: string; group?: string };
+  const refs = (label: string, options: () => Opt[], get: () => string[], set: (v: string[]) => void, hint?: string) => {
+    const chips = h('div', { class: 'chips' });
+    const add = h('select', { 'aria-label': `Add to ${label}` }) as HTMLSelectElement;
+    const render = () => {
+      const opts = options();
+      const now = get();
+      const nameOf = (id: string) => opts.find((o) => o.id === id)?.name ?? id;
+      chips.replaceChildren(
+        ...now.map((id) => h('button', { type: 'button', class: 'chip', 'aria-pressed': 'true', title: 'Remove', onclick: () => { set(get().filter((x) => x !== id)); changed(); render(); } }, nameOf(id), ' ×')),
+        ...(now.length ? [] : [h('span', { class: 'muted small' }, 'None')]),
+      );
+      const free = opts.filter((o) => !now.includes(o.id));
+      const groups = new Map<string, Opt[]>();
+      for (const o of free) groups.set(o.group ?? '', [...(groups.get(o.group ?? '') ?? []), o]);
+      add.replaceChildren(
+        h('option', { value: '' }, '+ Add…'),
+        ...[...groups].map(([g, list]) => (g ? h('optgroup', { label: g }, ...list.map((o) => h('option', { value: o.id }, o.name))) : list.map((o) => h('option', { value: o.id }, o.name)))).flat(),
+      );
+    };
+    add.addEventListener('change', () => {
+      if (!add.value) return;
+      set([...get(), add.value]);
+      changed();
+      render();
+    });
+    render();
+    return h('div', { class: 'field wide' }, h('span', { class: 'label' }, label), h('div', { class: 'refs' }, chips, add), hint ? h('small', {}, hint) : null);
+  };
+  const techOpts = (except?: string): Opt[] => lib.techs.filter((t) => t.id !== except).map((t) => ({ id: t.id, name: t.name, group: t.field || 'Other' }));
+  const behaviourOpts = (except?: string): Opt[] => lib.behaviours.filter((b) => b.id !== except).map((b) => ({ id: b.id, name: b.name, group: b.category || 'Other' }));
+  const resourceOpts = (): Opt[] => lib.resources.map((r) => ({ id: r.id, name: r.name, group: r.category || 'Other' }));
+  const nameIn = <T extends { id: string; name: string }>(list: T[], ids: string[]) => ids.map((id) => list.find((x) => x.id === id)?.name ?? id);
+
   const statsGrid = (stats: Stats, onChange: () => void) => {
     const total = h('strong', {});
     const showTotal = () => (total.textContent = statTotal(stats)?.toString() ?? '— (some stats missing)');
@@ -441,6 +492,177 @@ export function showLibrary(app: App, world: World | null): () => void {
     ];
   };
 
+  const techEditor = (t: Tech) => {
+    const tier = techTiers(lib.techs).get(t.id) ?? 0;
+    const neededBy = lib.techs.filter((x) => x.requires.includes(t.id)).map((x) => x.name);
+    return [
+      section(
+        'Technology',
+        text('Name', () => t.name, (v) => (t.name = v)),
+        select('Field', TECH_FIELDS, () => t.field, (v) => (t.field = v)),
+        check('Known from the start', () => t.start, (v) => (t.start = v), 'Every people begins with it.'),
+        scale('Difficulty', () => t.difficulty, (v) => (t.difficulty = v), ['1 easy', '2', '3', '4', '5 very hard']),
+        text('Description', () => t.description, (v) => (t.description = v), { long: true }),
+        refs('Needs first', () => techOpts(t.id), () => t.requires, (v) => (t.requires = v), `Level ${tier + 1} in its tree: one more than the deepest technology it needs.`),
+        refs('Needs resources', resourceOpts, () => t.resources, (v) => (t.resources = v), 'Bronze needs copper and tin.'),
+        multi('Needs places', PLACES, PLACES, () => t.places, (v) => (t.places = v), 'Sailing needs water.'),
+        text('Practice that leads to it', () => t.practice, (v) => (t.practice = v), { hint: 'What people do that brings it about (discovery is by practice, need and contact).' }),
+        text('Need that pushes it', () => t.need, (v) => (t.need = v)),
+        text('What it makes possible', () => t.unlocks, (v) => (t.unlocks = v), { long: true }),
+        h('p', { class: 'muted small wide' }, neededBy.length ? `Needed by: ${neededBy.join(', ')}.` : 'Nothing needs it yet.'),
+      ),
+    ];
+  };
+  const behaviourEditor = (b: Behaviour) => {
+    const known = lib.cultures.filter((c) => c.behaviours.includes(b.id)).map((c) => c.name);
+    return [
+      section(
+        'Learned behaviour',
+        text('Name', () => b.name, (v) => (b.name = v)),
+        select('Category', BEHAVIOUR_CATEGORIES, () => b.category, (v) => (b.category = v)),
+        text('Description', () => b.description, (v) => (b.description = v), { long: true }),
+        refs('Needs first', () => behaviourOpts(b.id), () => b.requires, (v) => (b.requires = v)),
+        refs('Needs technology', () => techOpts(), () => b.needsTech, (v) => (b.needsTech = v)),
+        refs('Pushes technology forward', () => techOpts(), () => b.pushesTech, (v) => (b.pushesTech = v)),
+        text('What it unlocks', () => b.unlocks, (v) => (b.unlocks = v), { long: true, hint: 'Ways of living, government parts, buildings.' }),
+        h('p', { class: 'muted small wide' }, 'Spreads by practice, need and contact (contact much faster).', known.length ? ` Known from the start by: ${known.join(', ')}.` : ''),
+      ),
+    ];
+  };
+  const traditionEditor = (t: Tradition) => {
+    const levels = h('div', { class: 'pairs' });
+    const renderLevels = () => {
+      levels.replaceChildren(
+        ...t.levels.map((l, i) => {
+          const name = h('input', { type: 'text', value: l.name, placeholder: 'Degree', 'aria-label': 'Degree name' }) as HTMLInputElement;
+          name.addEventListener('input', () => { l.name = name.value; changed(); });
+          const desc = h('input', { type: 'text', value: l.description, placeholder: 'What it means at this degree', class: 'grow', 'aria-label': 'What it means' }) as HTMLInputElement;
+          desc.addEventListener('input', () => { l.description = desc.value; changed(); });
+          return h('div', { class: 'pair-row' }, h('span', { class: 'muted small' }, `${i + 1}.`), name, desc, t.levels.length > 1 ? h('button', { type: 'button', class: 'ghost small', 'aria-label': 'Remove', onclick: () => { t.levels.splice(i, 1); changed(); renderLevels(); } }, '×') : null);
+        }),
+        h('button', { type: 'button', class: 'ghost small', onclick: () => { t.levels.push({ name: '', description: '' }); changed(); renderLevels(); } }, '+ Degree'),
+      );
+    };
+    renderLevels();
+    const held = lib.cultures.filter((c) => c.traditions.some((x) => x.id === t.id)).map((c) => c.name);
+    return [
+      section(
+        'Tradition',
+        text('Name', () => t.name, (v) => (t.name = v)),
+        select('Category', TRADITION_CATEGORIES, () => t.category, (v) => (t.category = v)),
+        text('Description', () => t.description, (v) => (t.description = v), { long: true }),
+        h('div', { class: 'field wide' }, h('span', { class: 'label' }, 'Degrees of severity (mildest first)'), levels, h('small', {}, 'Severity rises or falls over generations as the people lives that life more or less.')),
+        text('How it is earned', () => t.conditions, (v) => (t.conditions = v), { long: true, hint: 'Living that life long enough earns it; leaving it fades it.' }),
+        multi('Needs places', PLACES, PLACES, () => t.places, (v) => (t.places = v)),
+        refs('Needs beasts', () => lib.beasts.map((x) => ({ id: x.id, name: x.name, group: x.kind || 'Other' })), () => t.beasts, (v) => (t.beasts = v), 'Horse Lords need horses (or another mount).'),
+        text('Effects', () => t.effects, (v) => (t.effects = v), { long: true }),
+        h('p', { class: 'muted small wide' }, held.length ? `Held by: ${held.join(', ')}.` : 'No culture holds it yet.'),
+      ),
+    ];
+  };
+  const cultureEditor = (c: Culture) => {
+    const raceOpts = (): Opt[] => lib.species.flatMap((sp) => sp.races.map((r) => ({ id: r.id, name: r.name, group: sp.name })));
+    // Traditions: about six, each at a degree, locked or encouraged for story cultures.
+    const trBox = h('div', { class: 'pairs' });
+    const count = h('small', {});
+    const renderTr = () => {
+      count.textContent = `${c.traditions.length} of about 6.${c.traditions.length > 6 ? ' More than six: a culture usually holds about six (specialties don’t count).' : ''}`;
+      trBox.replaceChildren(
+        ...c.traditions.map((ct, i) => {
+          const def = lib.traditions.find((t) => t.id === ct.id);
+          const pick = h('select', { 'aria-label': 'Tradition' }, ...TRADITION_CATEGORIES.map((cat) => h('optgroup', { label: cat }, ...lib.traditions.filter((t) => t.category === cat).map((t) => h('option', { value: t.id }, t.name)))), h('optgroup', { label: 'Other' }, ...lib.traditions.filter((t) => !(TRADITION_CATEGORIES as readonly string[]).includes(t.category)).map((t) => h('option', { value: t.id }, t.name)))) as HTMLSelectElement;
+          pick.value = ct.id;
+          pick.addEventListener('change', () => { ct.id = pick.value; ct.level = 0; changed(); renderTr(); });
+          const lvl = h('select', { 'aria-label': 'Degree' }, ...(def?.levels ?? []).map((l, j) => h('option', { value: String(j) }, l.name || `Degree ${j + 1}`))) as HTMLSelectElement;
+          lvl.value = String(Math.min(ct.level, Math.max(0, (def?.levels.length ?? 1) - 1)));
+          lvl.addEventListener('change', () => { ct.level = Number(lvl.value); changed(); renderTr(); });
+          const hold = h('select', { 'aria-label': 'Locked or encouraged' }, h('option', { value: '' }, 'Free'), h('option', { value: 'Encouraged' }, 'Heavily encouraged'), h('option', { value: 'Locked' }, 'Locked')) as HTMLSelectElement;
+          hold.value = ct.hold;
+          hold.addEventListener('change', () => { ct.hold = hold.value; changed(); });
+          const desc = def?.levels[Math.min(ct.level, def.levels.length - 1)]?.description;
+          return h('div', { class: 'tradition-row' }, h('div', { class: 'pair-row' }, pick, lvl, hold, h('button', { type: 'button', class: 'ghost small', 'aria-label': 'Remove', onclick: () => { c.traditions.splice(i, 1); changed(); renderTr(); } }, '×')), desc ? h('small', { class: 'muted' }, desc) : null);
+        }),
+        ...(lib.traditions.length ? [h('button', { type: 'button', class: 'ghost small', onclick: () => { const free = lib.traditions.find((t) => !c.traditions.some((x) => x.id === t.id)); if (free) { c.traditions.push({ id: free.id, level: 0, hold: '' }); changed(); renderTr(); } } }, '+ Tradition')] : []),
+      );
+    };
+    renderTr();
+    const spBox = h('div', { class: 'pairs' });
+    const renderSp = () => {
+      spBox.replaceChildren(
+        ...c.specialties.map((sp, i) => {
+          const name = h('input', { type: 'text', value: sp.name, placeholder: 'Name (e.g. Rift tide fear)', 'aria-label': 'Specialty name' }) as HTMLInputElement;
+          name.addEventListener('input', () => { sp.name = name.value; changed(); });
+          const desc = h('input', { type: 'text', value: sp.description, placeholder: 'What they remember, and what they do because of it', class: 'grow', 'aria-label': 'Specialty' }) as HTMLInputElement;
+          desc.addEventListener('input', () => { sp.description = desc.value; changed(); });
+          return h('div', { class: 'pair-row' }, name, desc, h('button', { type: 'button', class: 'ghost small', 'aria-label': 'Remove', onclick: () => { c.specialties.splice(i, 1); changed(); renderSp(); } }, '×'));
+        }),
+        h('button', { type: 'button', class: 'ghost small', onclick: () => { c.specialties.push({ name: '', description: '' }); changed(); renderSp(); } }, '+ Specialty'),
+      );
+    };
+    renderSp();
+    // Behaviours known at the start, and any they need that are missing.
+    const missing = () => {
+      const have = new Set(c.behaviours);
+      const need = new Set<string>();
+      for (const id of c.behaviours) for (const r of lib.behaviours.find((b) => b.id === id)?.requires ?? []) if (!have.has(r)) need.add(r);
+      return nameIn(lib.behaviours, [...need]);
+    };
+    const missingNote = h('small', {});
+    const showMissing = () => {
+      const m = missing();
+      missingNote.textContent = m.length ? `Also needs: ${m.join(', ')}.` : 'Learned behaviours spread later by practice, need and contact.';
+    };
+    showMissing();
+    return [
+      section(
+        'Pillars',
+        text('Name', () => c.name, (v) => (c.name = v)),
+        refs('Heritage: species', () => lib.species.map((sp) => ({ id: sp.id, name: sp.name, group: sp.kind || 'Other' })), () => c.species, (v) => (c.species = v), 'A culture can span races and species; shared heritage eases acceptance.'),
+        refs('Heritage: races', raceOpts, () => c.races, (v) => (c.races = v)),
+        text('Ancestral group', () => c.ancestry, (v) => (c.ancestry = v), { hint: 'The people it descends from.' }),
+        text('Language', () => c.language, (v) => (c.language = v), { hint: 'Shared language eases acceptance.' }),
+        text('Language sounds', () => c.sounds, (v) => (c.sounds = v), { long: true, hint: 'Word parts and example names, for naming places later (e.g. “-dor, -heim, ka-, Valdor, Kahheim”).' }),
+        select('Ethos', ETHOS, () => c.ethos, (v) => (c.ethos = v), { hint: 'Its core outlook.' }),
+        select('Martial custom', MARTIAL, () => c.martial, (v) => (c.martial = v), { hint: 'Who fights.' }),
+        multi('Lifestyle', CULTURE_LIFESTYLES, CULTURE_LIFESTYLES, () => c.lifestyles, (v) => (c.lifestyles = v), 'From the environment; can blend.'),
+      ),
+      h('details', { class: 'lib-section', open: true }, h('summary', {}, 'Traditions'), h('p', { class: 'muted small' }, 'About six, earned from how the people survives where it lives. Story cultures can lock a tradition or heavily encourage it.'), trBox, count),
+      h('details', { class: 'lib-section', open: true }, h('summary', {}, 'Specialties'), h('p', { class: 'muted small' }, 'Shared memories and their customs, on top of the six (they never take a tradition’s place). Mostly flavour.'), spBox),
+      section(
+        'Learned behaviours',
+        refs('Known from the start', () => behaviourOpts(), () => c.behaviours, (v) => { c.behaviours = v; showMissing(); }),
+        h('div', { class: 'wide' }, missingNote),
+      ),
+      section(
+        'Government',
+        text('Preferred government', () => c.government, (v) => (c.government = v), { list: ['Clan', 'Horde', 'Chiefdom', 'Petty kingdom', 'City-state', 'Theocracy', 'Magocracy', 'Feudal kingdom', 'Empire', 'Republic', 'Merchant republic', 'Elective monarchy', 'Gerontocracy'], hint: 'Built-in types for now; the government creator (next step) builds your own.' }),
+        select('How firmly', ['Strong pull', 'Locked'], () => c.governmentHold, (v) => (c.governmentHold = v), { blank: 'Free to change', hint: 'Locked: always keeps it (only the details change). Strong pull: can change under pressure but tends to return.' }),
+      ),
+      section('Notes', text('Notes', () => c.notes, (v) => (c.notes = v), { long: true })),
+    ];
+  };
+  /** The technology tree at a glance: a column per field, each line by level. */
+  const techTree = () => {
+    const tiers = techTiers(lib.techs);
+    const fields = [...TECH_FIELDS, ...new Set(lib.techs.map((t) => t.field).filter((f) => f && !(TECH_FIELDS as readonly string[]).includes(f)))];
+    return h(
+      'div',
+      { class: 'tech-tree' },
+      ...fields.map((f) => {
+        const list = lib.techs.filter((t) => (t.field || '') === f).sort((a, b) => (tiers.get(a.id) ?? 0) - (tiers.get(b.id) ?? 0) || a.name.localeCompare(b.name));
+        if (!list.length) return null;
+        return h(
+          'div',
+          { class: 'tech-col' },
+          h('h3', {}, f),
+          ...list.map((t) =>
+            h('button', { type: 'button', class: `tech-chip${t.start ? ' start' : ''}`, onclick: () => { selected = t.id; renderList(); renderEditor(); }, title: t.requires.length ? `Needs ${nameIn(lib.techs, t.requires).join(', ')}` : 'Needs nothing' }, h('span', { class: 'tier' }, String((tiers.get(t.id) ?? 0) + 1)), t.name, t.requires.length ? h('small', {}, nameIn(lib.techs, t.requires).join(', ')) : null),
+          ),
+        );
+      }),
+    );
+  };
+
   // ---------------------------------------------------------------------------------------------
   // The list on the left
 
@@ -456,6 +678,13 @@ export function showLibrary(app: App, world: World | null): () => void {
         });
     if (tab === 'beasts') return lib.beasts.filter((b) => match(b.name)).map((b) => ({ id: b.id, name: b.name, group: b.kind || 'Other' }));
     if (tab === 'traits') return lib.traits.filter((t) => match(t.name)).map((t) => ({ id: t.id, name: t.name, group: t.for.length === 2 ? 'Peoples and beasts' : t.for[0] === 'beast' ? 'Beasts' : 'Peoples' }));
+    if (tab === 'techs') {
+      const tiers = techTiers(lib.techs);
+      return lib.techs.filter((t) => match(t.name)).sort((a, b) => (tiers.get(a.id) ?? 0) - (tiers.get(b.id) ?? 0)).map((t) => ({ id: t.id, name: t.name, group: t.field || 'Other' }));
+    }
+    if (tab === 'behaviours') return lib.behaviours.filter((b) => match(b.name)).map((b) => ({ id: b.id, name: b.name, group: b.category || 'Other' }));
+    if (tab === 'traditions') return lib.traditions.filter((t) => match(t.name)).map((t) => ({ id: t.id, name: t.name, group: t.category || 'Other' }));
+    if (tab === 'cultures') return lib.cultures.filter((c) => match(c.name)).map((c) => ({ id: c.id, name: c.name, group: 'Cultures' }));
     return lib.resources.filter((r) => match(r.name)).map((r) => ({ id: r.id, name: r.name, group: r.category || 'Other' }));
   };
   let listTimer = 0;
@@ -483,12 +712,21 @@ export function showLibrary(app: App, world: World | null): () => void {
       again?.focus();
       if (again && pos !== null) again.setSelectionRange(pos, pos);
     });
-    const label = { species: 'species', beasts: 'beast', traits: 'trait', resources: 'resource' }[tab];
+    const label = { species: 'species', beasts: 'beast', traits: 'trait', resources: 'resource', techs: 'technology', behaviours: 'behaviour', traditions: 'tradition', cultures: 'culture' }[tab];
     listEl.replaceChildren(h('div', { class: 'lib-list-head' }, searchBox, h('button', { type: 'button', class: 'primary small', onclick: addNew }, `+ New ${label}`)), items.length ? ul : h('p', { class: 'muted small' }, 'Nothing here.'));
   };
   const addNew = () => {
-    const name = { species: 'New species', beasts: 'New beast', traits: 'New trait', resources: 'New resource' }[tab];
-    if (tab === 'species') {
+    const name = { species: 'New species', beasts: 'New beast', traits: 'New trait', resources: 'New resource', techs: 'New technology', behaviours: 'New behaviour', traditions: 'New tradition', cultures: 'New culture' }[tab];
+    const addTo = <T extends { id: string }>(list: T[], make: (id: string) => T) => {
+      const id = makeId(name, new Set(list.map((s) => s.id)));
+      list.push(make(id));
+      selected = id;
+    };
+    if (tab === 'techs') addTo(lib.techs, (id) => newTech(id, name));
+    else if (tab === 'behaviours') addTo(lib.behaviours, (id) => newBehaviour(id, name));
+    else if (tab === 'traditions') addTo(lib.traditions, (id) => newTradition(id, name));
+    else if (tab === 'cultures') addTo(lib.cultures, (id) => newCulture(id, name));
+    else if (tab === 'species') {
       const id = makeId(name, new Set(lib.species.map((s) => s.id)));
       lib.species.push(newSpecies(id, name));
       selected = id;
@@ -530,7 +768,27 @@ export function showLibrary(app: App, world: World | null): () => void {
     if (tab === 'resources') {
       lib.resources = lib.resources.filter((s) => s.id !== id);
       for (const b of lib.beasts) b.resources = b.resources.filter((x) => x !== id);
+      for (const t of lib.techs) t.resources = t.resources.filter((x) => x !== id);
     }
+    if (tab === 'techs') {
+      lib.techs = lib.techs.filter((s) => s.id !== id);
+      for (const t of lib.techs) t.requires = t.requires.filter((x) => x !== id);
+      for (const b of lib.behaviours) {
+        b.needsTech = b.needsTech.filter((x) => x !== id);
+        b.pushesTech = b.pushesTech.filter((x) => x !== id);
+      }
+    }
+    if (tab === 'behaviours') {
+      lib.behaviours = lib.behaviours.filter((s) => s.id !== id);
+      for (const b of lib.behaviours) b.requires = b.requires.filter((x) => x !== id);
+      for (const c of lib.cultures) c.behaviours = c.behaviours.filter((x) => x !== id);
+    }
+    if (tab === 'traditions') {
+      lib.traditions = lib.traditions.filter((s) => s.id !== id);
+      for (const c of lib.cultures) c.traditions = c.traditions.filter((x) => x.id !== id);
+    }
+    if (tab === 'cultures') lib.cultures = lib.cultures.filter((s) => s.id !== id);
+    if (tab === 'species') for (const c of lib.cultures) c.species = c.species.filter((x) => x !== id);
     selected = null;
     changed();
     renderList();
@@ -552,6 +810,10 @@ export function showLibrary(app: App, world: World | null): () => void {
     if (tab === 'beasts') lib.beasts = copy(lib.beasts);
     if (tab === 'traits') lib.traits = copy(lib.traits);
     if (tab === 'resources') lib.resources = copy(lib.resources);
+    if (tab === 'techs') lib.techs = copy(lib.techs);
+    if (tab === 'behaviours') lib.behaviours = copy(lib.behaviours);
+    if (tab === 'traditions') lib.traditions = copy(lib.traditions);
+    if (tab === 'cultures') lib.cultures = copy(lib.cultures);
     changed();
     renderList();
     renderEditor();
@@ -571,13 +833,33 @@ export function showLibrary(app: App, world: World | null): () => void {
       } else if (tab === 'traits') {
         const t = lib.traits.find((s) => s.id === selected);
         if (t) [title, body] = [t.name, traitEditor(t)];
+      } else if (tab === 'techs') {
+        const t = lib.techs.find((s) => s.id === selected);
+        if (t) [title, body] = [t.name, techEditor(t)];
+      } else if (tab === 'behaviours') {
+        const b = lib.behaviours.find((s) => s.id === selected);
+        if (b) [title, body] = [b.name, behaviourEditor(b)];
+      } else if (tab === 'traditions') {
+        const t = lib.traditions.find((s) => s.id === selected);
+        if (t) [title, body] = [t.name, traditionEditor(t)];
+      } else if (tab === 'cultures') {
+        const c = lib.cultures.find((s) => s.id === selected);
+        if (c) [title, body] = [c.name, cultureEditor(c)];
       } else {
         const r = lib.resources.find((s) => s.id === selected);
         if (r) [title, body] = [r.name, resourceEditor(r)];
       }
     }
+    if (!body.length && tab === 'techs') {
+      editor.replaceChildren(h('div', { class: 'lib-editor-head' }, h('h2', {}, 'Technology tree')), h('p', { class: 'muted' }, 'Fields of levelled lines, not eras. The number is a technology’s level: one more than the deepest one it needs. Highlighted ones are known from the start. Pick one to change it.'), techTree());
+      return;
+    }
+    if (!body.length && tab === 'cultures' && !lib.cultures.length) {
+      editor.replaceChildren(h('div', { class: 'lib-empty' }, h('h2', {}, 'Cultures'), h('p', {}, 'No cultures yet. A culture belongs to a group of people, not to biology: one race can have several cultures, and a culture can span races.'), h('p', { class: 'muted' }, 'Each has pillars (heritage, language, ethos, martial custom, lifestyle), about six traditions with their severity, specialties, the learned behaviours it starts with, and the government it prefers. Use “+ New culture” to make one.')));
+      return;
+    }
     if (!body.length) {
-      const counts = `${lib.species.length} species (${lib.species.reduce((n, s) => n + s.races.length, 0)} races), ${lib.beasts.length} beasts, ${lib.traits.length} traits, ${lib.resources.length} resources.`;
+      const counts = `${lib.species.length} species (${lib.species.reduce((n, s) => n + s.races.length, 0)} races), ${lib.beasts.length} beasts, ${lib.traits.length} traits, ${lib.resources.length} resources, ${lib.techs.length} technologies, ${lib.behaviours.length} learned behaviours, ${lib.traditions.length} traditions, ${lib.cultures.length} cultures.`;
       const needing = lib.species.flatMap((s) => s.races.filter((r) => raceMissing(r).length).map((r) => (s.races.length > 1 ? `${s.name}: ${r.name}` : s.name)));
       editor.replaceChildren(
         h('div', { class: 'lib-empty' },
@@ -599,7 +881,7 @@ export function showLibrary(app: App, world: World | null): () => void {
     editor.querySelector('.lib-editor-head')?.after(bar);
   };
 
-  const TABS: [Tab, string][] = [['species', 'Peoples'], ['beasts', 'Beasts'], ['traits', 'Traits'], ['resources', 'Resources']];
+  const TABS: [Tab, string][] = [['species', 'Peoples'], ['beasts', 'Beasts'], ['traits', 'Traits'], ['resources', 'Resources'], ['techs', 'Technology'], ['behaviours', 'Behaviours'], ['traditions', 'Traditions'], ['cultures', 'Cultures']];
   const renderTabs = () =>
     tabsEl.replaceChildren(
       ...TABS.map(([id, name]) => h('button', { type: 'button', role: 'tab', class: 'tab', 'aria-selected': tab === id ? 'true' : 'false', onclick: () => { tab = id; selected = null; search = ''; renderTabs(); renderList(); renderEditor(); } }, name)),

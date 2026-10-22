@@ -1,7 +1,7 @@
 import { CLIMATE_DEFAULTS, defaultSettings, validateSettings } from './settings';
 import { newWorldId, WORLD_FORMAT, type ReferenceImage, type World } from './world';
 import { BRUSHES, emptySurface, type Surface } from './paint';
-import { readLibrary } from './library';
+import { upgradeLibrary } from './libstore';
 
 /** Where saved worlds live: the browser's local storage, or anything shaped like it (tests). */
 export interface KeyValueStore {
@@ -80,7 +80,7 @@ export function parseWorld(text: string): World {
     layers: { underdark: false, surface: true, canopy: false, sky1: false, sky2: false, sky3: false, ...(w.layers ?? {}) },
     surface: readSurface(w.surface),
     ...(reference ? { reference } : {}),
-    ...(w.library ? { library: readLibrary(w.library) } : {}),
+    ...(w.library ? { library: upgradeLibrary(w.library) } : {}),
     createdAt: typeof w.createdAt === 'number' ? w.createdAt : now,
     updatedAt: typeof w.updatedAt === 'number' ? w.updatedAt : now,
   };

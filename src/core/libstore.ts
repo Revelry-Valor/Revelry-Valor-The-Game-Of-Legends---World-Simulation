@@ -1,6 +1,8 @@
 import { cloneLibrary, emptyProfile, emptyStats, LIBRARY_FORMAT, readLibrary, STAT_KEYS, type Library, type Size, type Species } from './library';
 import { ROSTER } from '../data/roster';
 import { START_BEASTS, START_RESOURCES, START_TRAITS } from '../data/startlists';
+import { START_TECHS } from '../data/techs';
+import { START_BEHAVIOURS, START_TRADITIONS } from '../data/culture';
 import type { KeyValueStore } from './storage';
 
 /** The starting library: the author's roster of peoples and the starting traits, resources and beasts. */
@@ -35,7 +37,21 @@ export function defaultLibrary(): Library {
       }),
     };
   });
-  return cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS });
+  return cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS, techs: START_TECHS, behaviours: START_BEHAVIOURS, traditions: START_TRADITIONS, cultures: [] });
+}
+
+/**
+ * A saved library, brought up to date: parts it was saved without (an older library has no
+ * technology or traditions yet) come from the starting library; parts it has are kept as they are.
+ */
+export function upgradeLibrary(raw: unknown): Library {
+  const lib = readLibrary(raw);
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const start = defaultLibrary();
+  for (const key of ['traits', 'resources', 'species', 'beasts', 'techs', 'behaviours', 'traditions', 'cultures'] as const) {
+    if (!Array.isArray(o[key])) (lib[key] as unknown[]) = start[key] as unknown[];
+  }
+  return lib;
 }
 
 const KEY = 'rv.library';
@@ -44,7 +60,7 @@ const KEY = 'rv.library';
 export function loadSharedLibrary(store: KeyValueStore): Library {
   try {
     const raw = store.getItem(KEY);
-    if (raw) return readLibrary(JSON.parse(raw));
+    if (raw) return upgradeLibrary(JSON.parse(raw));
   } catch {
     // Damaged: fall back to the starting library.
   }
@@ -69,7 +85,7 @@ export function parseLibraryFile(text: string): Library {
   }
   const o = data as Record<string, unknown>;
   const inner = o && typeof o === 'object' && o.library ? o.library : o;
-  const lib = readLibrary(inner);
+  const lib = upgradeLibrary(inner);
   if (!lib.species.length && !lib.beasts.length && !lib.traits.length && !lib.resources.length) throw new Error('This file has no library in it.');
   return lib;
 }

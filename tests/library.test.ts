@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { defaultLibrary, libraryFile, parseLibraryFile } from '../src/core/libstore';
-import { raceMissing, statTotal } from '../src/core/library';
+import { defaultLibrary, libraryFile, parseLibraryFile, upgradeLibrary } from '../src/core/libstore';
+import { raceMissing, statTotal, techTiers } from '../src/core/library';
 
 describe('the library', () => {
   const lib = defaultLibrary();
@@ -28,5 +28,41 @@ describe('the library', () => {
     for (const b of lib.beasts) for (const r of b.resources) expect(lib.resources.some((x) => x.id === r)).toBe(true);
     for (const s of lib.species) for (const t of s.traits) expect(lib.traits.some((x) => x.id === t)).toBe(true);
     expect(parseLibraryFile(libraryFile(lib))).toEqual(lib);
+  });
+});
+
+describe('technology and culture in the library', () => {
+  const lib = defaultLibrary();
+  const has = <T extends { id: string }>(list: T[], id: string) => list.some((x) => x.id === id);
+  it('the tech tree only refers to things that exist, with no loops, up to steam and mana tech', () => {
+    for (const t of lib.techs) {
+      for (const r of t.requires) expect(has(lib.techs, r)).toBe(true);
+      for (const r of t.resources) expect(has(lib.resources, r)).toBe(true);
+    }
+    const tiers = techTiers(lib.techs);
+    for (const t of lib.techs) for (const r of t.requires) expect(tiers.get(t.id)!).toBeGreaterThan(tiers.get(r)!);
+    expect(lib.techs.some((t) => t.field === 'Steam' && t.name.includes('train'))).toBe(true);
+    expect(lib.techs.some((t) => t.field === 'Mana tech')).toBe(true);
+    expect(lib.techs.some((t) => t.id === 'gunpowder')).toBe(true);
+    expect(lib.techs.filter((t) => t.start).length).toBeGreaterThan(5);
+  });
+  it('behaviours and traditions refer to real technologies, behaviours and beasts', () => {
+    for (const b of lib.behaviours) {
+      for (const r of b.requires) expect(has(lib.behaviours, r)).toBe(true);
+      for (const r of [...b.needsTech, ...b.pushesTech]) expect(has(lib.techs, r)).toBe(true);
+    }
+    for (const t of lib.traditions) {
+      expect(t.levels.length).toBeGreaterThan(0);
+      for (const b of t.beasts) expect(has(lib.beasts, b)).toBe(true);
+    }
+    expect(lib.cultures).toEqual([]);
+  });
+  it('an older library gets the new lists, keeping what it had', () => {
+    const old = { format: 1, traits: [], resources: [], species: lib.species.slice(0, 2), beasts: [] };
+    const up = upgradeLibrary(old);
+    expect(up.species.length).toBe(2);
+    expect(up.traits).toEqual([]);
+    expect(up.techs.length).toBe(lib.techs.length);
+    expect(up.traditions.length).toBe(lib.traditions.length);
   });
 });
