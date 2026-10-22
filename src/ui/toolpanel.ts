@@ -178,36 +178,28 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     );
     return out;
   };
-  /** Settings for the ITCZ: drawn (or traced from the automatic path) and adjusted by hand. */
+  /** Settings for the ITCZ: dragged where it should be (the default), or drawn as a new line. */
   const itczFields = (): HTMLElement[] => {
     const s = state.settings;
     if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap an ITCZ line to delete it; the belt goes back to the automatic path there.')];
-    const mode = state.sketchMode ?? 'draw';
+    const drawing = !!state.itczDraw;
     const out: HTMLElement[] = [
-      h('p', { class: 'muted small hint' }, 'The ITCZ is the belt of tropical rain where the trade winds meet. The climate works out a path for it each season (the dashed white line on the climate maps); draw your own to set it by hand. Where your line runs it replaces the automatic path; past its ends the belt eases back to the automatic one over about 900 miles. It follows the sun: further toward the summer pole over big, hot land, staying near the equator over cold seas.'),
-      choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
+      h('p', { class: 'muted small hint' }, 'The ITCZ is the belt of tropical rain where the trade winds meet. The yellow line is where it sits in the season shown: drag its dots to move it where it should be, and tap the line to add a bend. Rain follows it. Switch the season in the View panel to set the other one.'),
+      choice<'drag' | 'draw'>('Mode', [{ value: 'drag', label: 'Drag' }, { value: 'draw', label: 'Draw new line' }], drawing ? 'draw' : 'drag', (v) => { state.itczDraw = v === 'draw'; renderSettings(); changed(); }),
     ];
-    const trace = h('button', { type: 'button', class: 'ghost small', title: 'Turn the automatic path for the season shown into a line you can move', onclick: () => {
-      const ops = sketch();
-      if (ops?.traceItcz()) {
-        state.sketchMode = 'adjust';
-        renderSettings();
-        changed();
-      } else trace.textContent = 'Wait for the climate, then try again';
-    } }, 'Start from the automatic path');
-    if (mode === 'draw') {
-      out.push(trace, seasonDraw(s), h('p', { class: 'muted small' }, 'Summer and winter each have their own ITCZ: the map shows the line of the season picked in the View panel. Tap points from west to east, then tap the last point again to finish. Esc cancels.'));
+    if (drawing) {
+      out.push(seasonDraw(s), h('p', { class: 'muted small' }, 'Tap points from west to east, then tap the last point again to finish. Where a line runs it replaces the automatic path; past its ends the belt eases back to the automatic one over about 900 miles. Esc cancels.'));
       return out;
     }
     const ops = sketch();
     const sel = ops?.selected() ?? null;
     if (!ops || !sel) {
-      out.push(h('p', { class: 'muted small' }, 'Tap an ITCZ line to pick it. Drag its dots to move them; tap the line to add a bend.'), trace);
+      out.push(h('p', { class: 'muted small' }, 'Grab any dot on the yellow line and drag it. (If the line isn’t showing yet, the climate is still being worked out.)'));
       return out;
     }
     out.push(
       ...seasonAdjust(sel, (patch) => ops.set(patch), () => ops.copyToOtherSeason()),
-      h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete')),
+      h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', title: 'Back to the automatic path', onclick: () => { ops.remove(); renderSettings(); } }, 'Reset to automatic')),
     );
     return out;
   };

@@ -19,7 +19,12 @@ export interface ToolState {
   settings: BrushSettings;
   /** Current sketches: draw new ones, or adjust the ones drawn. */
   sketchMode?: 'draw' | 'adjust';
+  /** ITCZ: draw a new line instead of dragging the belt (dragging is the default). */
+  itczDraw?: boolean;
 }
+
+/** Whether a sketch tool is picking and dragging (rather than drawing a new line). */
+const adjustMode = (t: ToolState) => (t.tool === 'itcz' ? !t.itczDraw : t.sketchMode === 'adjust');
 
 /** What can be done to the selected high-pressure zone (for the tool panel). */
 export interface HighOps {
@@ -156,7 +161,10 @@ export function createMapView(o: MapViewOptions): MapView {
     if (cl && o.tool().tool === 'wind') drawWindSway(g, r, cl, look.season, x0, span, copies);
     if (look.view === 'pressure' || look.view === 'air' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
     if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
-    if (o.tool().tool === 'itcz') drawSketches(g, r, x0, span, copies, 'itcz');
+    if (o.tool().tool === 'itcz') {
+      drawSketches(g, r, x0, span, copies, 'itcz');
+      drawItczGhost(g, r);
+    }
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
     drawClimateTools(g, r, x0, span, copies);
@@ -484,9 +492,61 @@ export function createMapView(o: MapViewOptions): MapView {
     schedule();
   };
 
+  /**
+   * The ITCZ the climate worked out, ready to grab: shown with handles while dragging, until a
+   * line of its own exists for the season shown.
+   */
+  function autoItczCtrl(): number[] | null {
+    const cl = o.climate();
+    if (!cl) return null;
+    const se = o.look().season === 1 ? cl.summer : cl.winter;
+    const s = o.world().settings;
+    const kpd = kmPerDegree(s);
+    const n = Math.max(4, Math.min(16, Math.round(s.widthKm / 600)));
+    const ctrl: number[] = [];
+    for (let q = 0; q <= n; q++) {
+      const x = Math.min(s.widthKm - 1, Math.max(1, (q / n) * s.widthKm));
+      const i = Math.max(0, Math.min(cl.w - 1, Math.floor(x / cl.step)));
+      ctrl.push(x, Math.max(0, Math.min(s.heightKm, (s.northLatitude - se.itcz[i]) * kpd)));
+    }
+    return ctrl;
+  }
+  function drawItczGhost(g: CanvasRenderingContext2D, r: DOMRect) {
+    const t = o.tool();
+    if (t.erase || !adjustMode(t) || sketches('itcz').length) return;
+    const c = autoItczCtrl();
+    if (!c) return;
+    const p = sketchCourse(c, 0);
+    g.save();
+    g.lineCap = 'round';
+    for (const [w, col, dash] of [[6, 'rgba(255,255,255,0.85)', []], [3, '#f2b705', [10, 6]]] as [number, string, number[]][]) {
+      g.setLineDash(dash);
+      g.lineWidth = w;
+      g.strokeStyle = col;
+      g.beginPath();
+      for (let q = 0; q < p.length; q += 2) {
+        const [sx, sy] = toScreen(p[q], p[q + 1], r);
+        (q ? g.lineTo : g.moveTo).call(g, sx, sy);
+      }
+      g.stroke();
+    }
+    g.setLineDash([]);
+    for (let q = 0; q < c.length; q += 2) {
+      const [sx, sy] = toScreen(c[q], c[q + 1], r);
+      g.fillStyle = '#f2b705';
+      g.strokeStyle = '#11161c';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(sx, sy, 5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+    }
+    g.restore();
+  }
+
   function drawSketches(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[], brush: SketchBrush) {
     const t = o.tool();
-    const adjusting = t.tool === brush && (t.sketchMode === 'adjust' || t.erase);
+    const adjusting = t.tool === brush && (adjustMode(t) || t.erase);
     const yTop = toScreen(0, 0, r)[1];
     g.save();
     g.lineCap = 'round';
@@ -751,7 +811,7 @@ export function createMapView(o: MapViewOptions): MapView {
 
   // Point mode for rivers and lava: the points clicked so far.
   let routing: { brush: 'river' | 'lava' | SketchBrush; ctrl: number[] } | null = null;
-  const pointsMode = (t: ToolState) => ((t.tool === 'river' || t.tool === 'lava') && t.settings.route === 'points' && !t.erase) || (isSketch(t.tool) && !t.erase && t.sketchMode !== 'adjust');
+  const pointsMode = (t: ToolState) => ((t.tool === 'river' || t.tool === 'lava') && t.settings.route === 'points' && !t.erase) || (isSketch(t.tool) && !t.erase && !adjustMode(t));
   const opts = () => {
     const s = o.world().settings;
     return { seed: s.seed, wrapKm: s.edges === 'wrap' ? s.widthKm : 0 };
@@ -918,6 +978,41 @@ export function createMapView(o: MapViewOptions): MapView {
     return Math.hypot(ax + vx * t - px, ay + vy * t - py) * view.scale;
   };
   const sketchPointer = (e: PointerEvent, x: number, y: number, erase: boolean): boolean => {
+    // The ITCZ with no line of its own yet: grabbing the worked-out path turns it into one.
+    if (!erase && o.tool().tool === 'itcz' && !sketches().length) {
+      const c = autoItczCtrl();
+      if (!c) {
+        o.notice('Wait a moment for the climate to be worked out, then drag the ITCZ.');
+        return true;
+      }
+      let idx = -1;
+      let bestD = 14;
+      for (let i = 0; i < c.length; i += 2) {
+        const d = Math.hypot(c[i] - x, c[i + 1] - y) * view.scale;
+        if (d < bestD) {
+          bestD = d;
+          idx = i / 2;
+        }
+      }
+      if (idx < 0) {
+        // On the line between two handles: a new point there.
+        const p = sketchCourse(c, 0);
+        let near = false;
+        for (let i = 0; i < p.length - 2 && !near; i += 2) near = segDist(x, y, p[i], p[i + 1], p[i + 2], p[i + 3]) < 10;
+        if (!near) return false;
+        let seg = 0;
+        while (seg * 2 + 2 < c.length - 2 && c[seg * 2 + 2] < x) seg++;
+        c.splice((seg + 1) * 2, 0, x, y);
+        idx = seg + 1;
+      }
+      const live = o.begin({ ...o.tool().settings, brush: 'itcz', erase: undefined, pts: roundPath(sketchCourse(c, 0)), route: 'points', ctrl: roundPath(c), season: 'shown' });
+      sel = live.id;
+      dragging = { id: live.id, idx, pointer: e.pointerId };
+      o.sketchSelected?.();
+      o.notice('Drag it where the belt should be. Tap the line to add a bend.');
+      schedule();
+      return true;
+    }
     // A handle (one of the points) first, then the line itself.
     let best: { id: number; idx: number; d: number } | null = null;
     for (const st of sketches()) {
@@ -1041,19 +1136,8 @@ export function createMapView(o: MapViewOptions): MapView {
       schedule();
     },
     traceItcz() {
-      const cl = o.climate();
-      if (!cl) return false;
-      const se = o.look().season === 1 ? cl.summer : cl.winter;
-      const s = o.world().settings;
-      const kpd = kmPerDegree(s);
-      // About a dozen points across the map, at the latitude the climate gives each.
-      const n = Math.max(4, Math.min(16, Math.round(s.widthKm / 600)));
-      const ctrl: number[] = [];
-      for (let q = 0; q <= n; q++) {
-        const x = Math.min(s.widthKm - 1, Math.max(1, (q / n) * s.widthKm));
-        const i = Math.max(0, Math.min(cl.w - 1, Math.floor(x / cl.step)));
-        ctrl.push(x, Math.max(0, Math.min(s.heightKm, (s.northLatitude - se.itcz[i]) * kpd)));
-      }
+      const ctrl = autoItczCtrl();
+      if (!ctrl) return false;
       const live = o.begin({ ...o.tool().settings, brush: 'itcz', erase: undefined, pts: roundPath(sketchCourse(ctrl, 0)), route: 'points', ctrl: roundPath(ctrl), season: 'shown' });
       sel = live.id;
       o.sketchSelected?.();
@@ -1067,7 +1151,7 @@ export function createMapView(o: MapViewOptions): MapView {
     const t = o.tool();
     if (o.referenceEditing?.()) return refPointer(e, x, y);
     if (t.tool === 'pan') return false;
-    if (isSketch(t.tool) && (t.erase || t.sketchMode === 'adjust')) return sketchPointer(e, x, y, t.erase);
+    if (isSketch(t.tool) && (t.erase || adjustMode(t))) return sketchPointer(e, x, y, t.erase);
     if (t.tool === 'high' && (t.erase || t.sketchMode === 'adjust')) return highPointer(e, x, y, t.erase);
     if (pointsMode(t)) {
       const brush = t.tool as 'river' | 'lava' | SketchBrush;
