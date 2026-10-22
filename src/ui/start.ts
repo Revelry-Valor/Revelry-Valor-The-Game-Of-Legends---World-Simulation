@@ -65,6 +65,7 @@ export function showStart(app: App): void {
         { class: 'start-choices' },
         h('section', { class: 'card' }, h('h2', {}, 'Create world'), h('p', { class: 'muted' }, 'Start a new world: choose its size, its place on the globe, and its planet.'), h('button', { type: 'button', class: 'primary', onclick: () => app.create() }, 'Create world')),
         h('section', { class: 'card' }, h('h2', {}, 'Continue sim'), list, h('label', { class: 'button ghost', for: 'import-file' }, 'Import a world file…'), file),
+        h('section', { class: 'card' }, h('h2', {}, 'Library'), h('p', { class: 'muted' }, 'Peoples, beasts, traits and resources: the shared library each new world starts with.'), h('button', { type: 'button', class: 'ghost', onclick: () => app.library() }, 'Open the library')),
       ),
     ),
   );

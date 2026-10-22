@@ -1,5 +1,6 @@
 import { centreLatitude, kmPerDegree, southLatitude, validateSettings, type WorldSettings } from './settings';
 import { emptySurface, shiftSurface, type Surface } from './paint';
+import type { Library } from './library';
 
 /** The world's layers, bottom to top (REDESIGN.md, section 5). Only the surface is always on. */
 export const LAYERS = [
@@ -53,6 +54,8 @@ export interface World {
   surface: Surface;
   /** A picture to paint from, if one has been imported. */
   reference?: ReferenceImage | null;
+  /** This world's copy of the library (peoples, beasts, traits, resources); the shared one until it has its own. */
+  library?: Library;
   createdAt: number;
   updatedAt: number;
 }

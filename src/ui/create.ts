@@ -1,6 +1,7 @@
 import { centreLatitude, defaultSettings, MAX_SIDE_KM, MIN_SIDE_KM, placeAtLatitude, SIZE_PRESETS, southLatitude, validateSettings, type SizePresetId } from '../core/settings';
 import { formatDistance, formatLatitude, kmToMiles, milesToKm } from '../core/units';
 import { createWorld } from '../core/world';
+import { loadSharedLibrary } from '../core/libstore';
 import type { App } from './main';
 import { choice, h, numberField } from './dom';
 import { planetFields } from './settingsform';
@@ -156,7 +157,8 @@ export function showCreate(app: App): void {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     if (validateSettings(s).length) return update();
-    const world = createWorld(s);
+    // A new world starts with its own copy of the shared library.
+    const world = { ...createWorld(s), library: loadSharedLibrary(app.store) };
     if (app.save(world)) app.open(world);
   });
 

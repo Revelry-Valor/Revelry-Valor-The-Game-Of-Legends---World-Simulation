@@ -783,6 +783,7 @@ export function showWorld(app: App, start: World): () => void {
           h('button', { type: 'button', class: 'primary', onclick: save }, 'Save'),
           h('button', { type: 'button', class: 'ghost', onclick: canvasOptions }, 'Canvas options'),
           h('button', { type: 'button', class: 'ghost', onclick: worldSettings }, 'World settings'),
+          h('button', { type: 'button', class: 'ghost', title: 'This world’s peoples, beasts, traits and resources', onclick: () => { save(); app.library(world); } }, 'Library'),
           h('button', { type: 'button', class: 'ghost', onclick: leave }, 'Main menu'),
         ),
       ),

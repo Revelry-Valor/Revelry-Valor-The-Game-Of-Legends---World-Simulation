@@ -4,6 +4,7 @@ import type { World } from '../core/world';
 import { showCreate } from './create';
 import { showStart } from './start';
 import { showWorld } from './worldview';
+import { showLibrary } from './library';
 import { toast } from './dom';
 
 /**
@@ -19,6 +20,8 @@ export interface App {
   start(): void;
   create(): void;
   open(world: World): void;
+  /** The Library: the shared one, or a world's own copy. */
+  library(world?: World): void;
   /** Save a world, reporting failure to the person rather than losing it silently. */
   save(world: World): boolean;
 }
@@ -38,6 +41,7 @@ const app: App = {
   start: () => swap(() => showStart(app)),
   create: () => swap(() => showCreate(app)),
   open: (world) => swap(() => showWorld(app, world)),
+  library: (world) => swap(() => showLibrary(app, world ?? null)),
   save(world) {
     try {
       saveWorld(store, world);
