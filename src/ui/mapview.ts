@@ -1,5 +1,5 @@
 import { autoCoverName, climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
-import { brushInfo, inSeason, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
+import { brushInfo, inSeason, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
@@ -649,7 +649,7 @@ export function createMapView(o: MapViewOptions): MapView {
         pg.lineWidth = Math.max(1.5, st.size * view.scale);
         for (const pass of st.erase ? ['clear'] : ['clear', 'paint']) {
           pg.globalCompositeOperation = pass === 'clear' ? 'destination-out' : 'source-over';
-          pg.strokeStyle = pass === 'clear' ? '#000' : gap ? 'rgb(120,205,255)' : 'rgb(255,222,130)';
+          pg.strokeStyle = pass === 'clear' ? '#000' : gap ? 'rgb(90,170,255)' : penColour(st.penHeight ?? 2.5);
           for (const c of copies) {
             pg.beginPath();
             for (let k = 0; k < st.pts.length; k += 2) {
@@ -662,7 +662,7 @@ export function createMapView(o: MapViewOptions): MapView {
           }
         }
       }
-      g.globalAlpha = 0.5;
+      g.globalAlpha = 0.6;
       g.drawImage(penLayer, 0, 0, r.width, r.height);
       g.globalAlpha = 1;
     }

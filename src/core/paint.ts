@@ -366,3 +366,28 @@ export function shiftSurface(surface: Surface, dx: number, dy: number): Surface 
     strokes: surface.strokes.map((s) => ({ ...s, pts: roundPath(s.pts.map((v, i) => v + (i % 2 ? dy : dx))) })),
   };
 }
+
+/** Rain Shadow Pen heights (km) and their colours on the map: low green through yellow and orange to red and purple. */
+export const PEN_COLOURS: [number, [number, number, number]][] = [
+  [0.01, [170, 170, 170]],
+  [0.5, [120, 210, 110]],
+  [1, [235, 220, 90]],
+  [1.5, [245, 160, 60]],
+  [2.5, [225, 75, 55]],
+  [4, [170, 70, 210]],
+  [6, [235, 225, 255]],
+];
+/** The colour a Rain Shadow Pen line of this height (km) is shown in; grey at 0 (flattened). */
+export function penColour(km: number): string {
+  const c = PEN_COLOURS;
+  if (km <= c[0][0]) return `rgb(${c[0][1].join(',')})`;
+  for (let i = 1; i < c.length; i++) {
+    if (km <= c[i][0]) {
+      const t = (km - c[i - 1][0]) / (c[i][0] - c[i - 1][0]);
+      const a = c[i - 1][1];
+      const b = c[i][1];
+      return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * t)).join(',')})`;
+    }
+  }
+  return `rgb(${c[c.length - 1][1].join(',')})`;
+}

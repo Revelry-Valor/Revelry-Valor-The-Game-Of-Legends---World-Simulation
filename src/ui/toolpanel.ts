@@ -1,4 +1,4 @@
-import { BRUSHES, brushDefaults, brushInfo, strokeSeason, ZONES, type BrushId, type Stroke, type ZoneId } from '../core/paint';
+import { BRUSHES, brushDefaults, brushInfo, penColour, strokeSeason, ZONES, type BrushId, type Stroke, type ZoneId } from '../core/paint';
 import { kmToMiles, milesToKm } from '../core/units';
 import { choice, h, numberField } from './dom';
 import type { BrushSettings, HighOps, SketchOps, ToolState } from './mapview';
@@ -132,6 +132,11 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
         fields.push(
           choice<string>('Height', presets.map(([label, km]) => ({ value: String(km), label: `${label} · ${ft(km)}` })), String(s.penHeight ?? 2.5), (v) => { s.penHeight = Number(v); renderSettings(); changed(); }),
           numberField({ label: 'Exact height', value: Math.round((s.penHeight ?? 2.5) * 3280.84), min: 0, max: 30000, step: 100, unit: 'ft', hint: 'Overrides the height the climate sees along the line. 0 flattens it for the climate only.', change: (v) => { s.penHeight = Math.max(0, v) / 3280.84; changed(); } }),
+          h('div', { class: 'climate-legend small' },
+            h('span', { class: 'label' }, 'Colours on the map'),
+            ...[...presets.map(([label, km]) => [label, km] as [string, number]), ['Flattened', 0] as [string, number]].sort((p, q) => q[1] - p[1]).map(([label, km]) => h('div', { class: 'key' }, h('span', { class: 'swatch', style: `background: ${penColour(km)}` }), `${label} · ${ft(km)}`)),
+            h('div', { class: 'key' }, h('span', { class: 'swatch', style: 'background: rgb(90,170,255)' }), 'Gap (pass)'),
+          ),
         );
       }
       if (state.tool === 'whirlpool') {
