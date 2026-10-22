@@ -293,3 +293,27 @@ describe('the ITCZ drawn by hand and the life balance', () => {
     expect(desert(-80)).toBeGreaterThan(base);
   }, 120000);
 });
+
+describe('lakes and the climate', () => {
+  it('a big lake moistens the air round it and softens its shores’ seasons', () => {
+    const lakeAt: [number, number] = [6200, yAt(28)];
+    const c2 = computeClimate(world((add) => add('lake', [...lakeAt], { size: 600 })), settings);
+    const ring = (c: Climate) => {
+      let sum = 0;
+      let cnt = 0;
+      for (let k = 0; k < c.zone.length; k++) {
+        const x = ((k % c.w) + 0.5) * c.step;
+        const y = (((k / c.w) | 0) + 0.5) * c.step;
+        const d = Math.hypot(x - lakeAt[0], y - lakeAt[1]);
+        if (!c.land[k] || d < 350 || d > 900) continue;
+        sum += c.summer.rain[k] + c.winter.rain[k];
+        cnt++;
+      }
+      return sum / cnt;
+    };
+    expect(ring(c2)).toBeGreaterThan(ring(cl) * 1.05);
+    const k = nearestPoint(c2, lakeAt[0] + 340, lakeAt[1]);
+    const range = (c: Climate) => Math.abs(c.summer.temp[k] - c.winter.temp[k]);
+    expect(range(c2)).toBeLessThan(range(cl));
+  }, 60000);
+});

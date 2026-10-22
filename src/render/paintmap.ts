@@ -211,8 +211,10 @@ export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | nu
           if (f.face[k] > 0) c = mix(c, strataColour(f.strata[k], false), f.face[k]);
           if (f.ravine[k] > 0) c = mix(c, SAT.crack, smooth(0.2, 0.8, f.ravine[k]) * 0.9);
           if (f.ramp[k] > 0) c = mix(c, SAT.path, f.ramp[k] * 0.2 + f.track[k] * 0.45);
-          // River banks and waterfall oases: lush green, even in desert.
+          // Waterfall oases: lush green, even in desert.
           if (f.wet[k] > 0) c = mix(c, SAT.lush, f.wet[k] * 0.55 * (1 - f.face[k]));
+          // River banks, floodplains, deltas and lake shores, as the climate makes them.
+          c = waterside(c, f, k, ck >= 0 ? cl!.zone[ck] : -1, steep, x, y, px, seed, false);
           // Volcanoes: dark basalt with paler ash streaks; lava flows black and ropy.
           if (f.volcano[k] > 0) c = mix(c, mix(SAT.basalt, SAT.ash, 0.5 + 0.5 * fbm(x, y, 2, px, seed + 57, 4)), f.volcano[k] * 0.85);
           if (f.lava[k] > 0) c = mix(c, mix(SAT.lava, SAT.basalt, 0.4 * (fbm(x, y, 0.8, px, seed + 58, 4) + 1)), f.lava[k]);
@@ -222,7 +224,9 @@ export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | nu
           // Fresh water lies flat: rivers and lakes are not shaded by the slopes.
           const wa = f.water[k];
           if (wa > 0) {
-            const wc = f.waterKind[k] === 2 ? mix(SAT.lakeShallow, SAT.lakeDeep, smooth(0, 0.8, f.waterDepth[k])) : SAT.river;
+            let wc = f.waterKind[k] === 2 ? mix(SAT.lakeShallow, SAT.lakeDeep, smooth(0, 0.8, f.waterDepth[k])) : SAT.river;
+            // A closed lake in dry country is salty: pale, milky turquoise.
+            if (f.waterKind[k] === 2 && f.lakeClosed[k] && ck >= 0 && DRY_ZONES.has(cl!.zone[ck])) wc = mix(wc, [150, 205, 200], 0.55 * (1 - 0.5 * smooth(0, 0.8, f.waterDepth[k])));
             c = mix(c, wc, wa);
           }
           if (f.foam[k] > 0) c = mix(c, [236, 244, 246], f.foam[k] * (0.6 + 0.4 * (fbm(x, y, 0.15, px, seed + 59, 3) > 0 ? 1 : 0.5)));
@@ -266,6 +270,7 @@ export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | nu
           // Ramps: a dashed track.
           if (f.track[k] > 0.3 && Math.sin((x + y) / Math.max(px * 3, 0.3)) > 0) c = mix(c, PAPER.ink, f.track[k] * 0.6);
           if (f.wet[k] > 0) c = mix(c, COVER_PAPER.forest, f.wet[k] * 0.3);
+          c = waterside(c, f, k, ck >= 0 ? cl!.zone[ck] : -1, 0, x, y, px, seed, true);
           if (f.volcano[k] > 0) c = mix(c, PAPER.shade, f.volcano[k] * 0.35);
           if (f.lava[k] > 0) c = mix(c, PAPER.ink, f.lava[k] * (fbm(x, y, 0.6, px, seed + 58, 3) > 0 ? 0.75 : 0.5));
           if (f.lavaGlow[k] > 0) c = mix(c, [200, 70, 30], f.lavaGlow[k] * 0.6);
@@ -387,6 +392,48 @@ function coverTint(key: CoverBrush, x: number, y: number, px: number, seed: numb
       tint = mix(tint, [0, 0, 0], 0.06 * tex);
   }
   return tint;
+}
+
+/** Zones where water makes the land green: deserts, steppes, savanna and dry-summer lands. */
+const DRY_ZONES = new Set([3, 4, 5, 6]);
+/** How strongly a river greens its banks in each zone (deserts most, rainforest hardly at all). */
+const RIPARIAN = [0.05, 0.08, 0.6, 1, 1, 0.9, 0.85, 0.7, 0.2, 0.12, 0.22, 0.3, 0.8, 0];
+/** How readily a big river's floodplain turns to marsh in each zone (the Sudd, the Okavango, the Pantanal). */
+const FLOOD_MARSH = [0.55, 0.6, 0.75, 0, 0, 0.45, 0.2, 0.15, 0.4, 0.25, 0.3, 0.45, 0.55, 0];
+
+/**
+ * What grows by fresh water, by the climate: green strips along rivers in dry land (fingers of
+ * taiga and willow out into the tundra), marsh on warm low floodplains and at big river mouths,
+ * reeds round lakes, and a ring of salt round a lake no river drains in dry country.
+ */
+function waterside(c: RGB, f: ReturnType<typeof evaluate>, k: number, zone: number, steep: number, x: number, y: number, px: number, seed: number, paper: boolean): RGB {
+  const bank = f.bank[k];
+  const shore = f.shore[k];
+  if (bank <= 0.01 && shore <= 0.01 && f.delta[k] <= 0.01) return c;
+  if (zone === 13) return c;
+  const z = zone < 0 ? 8 : zone;
+  // Valleys and gorges keep the green to a thin strip; flat ground lets it spread.
+  const flat = 1 - smooth(0.25, 1, steep) - 0.6 * f.face[k];
+  if (flat <= 0) return c;
+  const rip = RIPARIAN[z];
+  const patchy = 0.75 + 0.25 * fbm(x, y, 4, px, seed + 230, 3);
+  const cold = z === 11 || z === 12;
+  if (bank > 0.01 && rip > 0) {
+    const green = cold ? coverTint('taiga', x, y, px, seed, paper) : paper ? COVER_PAPER.forest : DRY_ZONES.has(z) ? SAT.lush : mix(SAT.lush, COVER_SAT.forest, 0.4);
+    // A strip with a fairly sharp edge (farmland and trees end where the water can't reach).
+    const strip = smooth(0.12, 0.55, bank + 0.08 * fbm(x, y, 1.5, px, seed + 231, 3));
+    c = mix(c, green, Math.min(0.85, strip * rip * flat * patchy * (paper ? 0.5 : 0.85)));
+  }
+  // Marsh on big rivers' floodplains in warm, wet-season lands, and in deltas (green farmland
+  // in a desert delta, like the Nile's).
+  const fm = Math.max(f.flood[k] * f.flood[k] * FLOOD_MARSH[z], DRY_ZONES.has(z) || z === 7 ? 0 : f.delta[k] * 0.8) * flat;
+  if (fm > 0.02) c = mix(c, coverTint('marsh', x, y, px, seed, paper), Math.min(0.8, fm * patchy));
+  if (DRY_ZONES.has(z) && f.delta[k] > 0.02) c = mix(c, paper ? COVER_PAPER.forest : SAT.lush, Math.min(0.8, f.delta[k] * flat * 0.8));
+  if (shore > 0.01) {
+    if (f.lakeClosed[k] && DRY_ZONES.has(z)) c = mix(c, coverTint('saltflats', x, y, px, seed, paper), Math.min(0.9, shore * 0.9));
+    else c = mix(c, coverTint('marsh', x, y, px, seed, paper), Math.min(0.7, shore * (0.25 + 0.5 * rip + (cold ? 0.2 : 0)) * patchy));
+  }
+  return c;
 }
 
 /** The ground cover the climate gives a point: its main cover, with the second in patches by its share. */

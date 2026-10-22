@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { brushDefaults, emptySurface, snapSpur, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { defaultSettings } from '../src/core/settings';
-import { accessPoints, evaluate, surfaceAt, whirlpools } from '../src/core/terrain';
+import { accessPoints, evaluate, lakeIsClosed, surfaceAt, whirlpools } from '../src/core/terrain';
 import { createWorld, expandWorld } from '../src/core/world';
 import { parseWorld } from '../src/core/storage';
 import { renderPicture } from '../src/render/paintmap';
@@ -195,5 +195,26 @@ describe('the Rain Shadow Pen: high ground, gaps and erasing in one tool', () =>
     expect(hAt(paint(land, raise, erase), 500)).toBeLessThan(0.5);
     expect(hAt(paint(land, raise, gap, erase), 300)).toBeCloseTo(3, 1);
     expect(hAt(paint(land, raise, erase), 300)).toBeCloseTo(3, 1);
+  });
+});
+
+describe('by fresh water: banks, deltas, lake shores', () => {
+  it('rivers green a strip along them, wider for bigger rivers', () => {
+    const s = paint(['land', [0, 0, 1200, 0], { size: 900 }], ['river', [100, 0, 1100, 0], { size: 12, strength: 1 }]);
+    const f = evaluate(s, { x0: 600, y0: 0, px: 1, w: 1, h: 40 }, o);
+    expect(f.bank[2]).toBeGreaterThan(0.5);
+    expect(f.bank[39]).toBeLessThan(f.bank[2]);
+  });
+  it('a lake no river drains is closed; one with a river flowing out is not', () => {
+    const lake: [BrushId, number[], Partial<Stroke>?] = ['lake', [500, 0], { size: 100 }];
+    const land: [BrushId, number[], Partial<Stroke>?] = ['land', [0, 0, 1200, 0], { size: 900 }];
+    const closed = paint(land, lake);
+    expect(lakeIsClosed(closed, closed.strokes[1])).toBe(true);
+    const open = paint(land, lake, ['river', [520, 0, 1100, 0], { size: 12 }]);
+    expect(lakeIsClosed(open, open.strokes[1])).toBe(false);
+    // Its shore gets a fringe just outside the water.
+    const f = evaluate(closed, { x0: 500, y0: 52, px: 0.5, w: 1, h: 1 }, o);
+    expect(f.shore[0]).toBeGreaterThan(0);
+    expect(f.lakeClosed[0]).toBe(1);
   });
 });

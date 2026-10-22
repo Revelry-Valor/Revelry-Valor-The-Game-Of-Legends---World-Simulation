@@ -75,8 +75,19 @@ export interface Fields {
   riverWidth: Float32Array;
   /** White water at waterfalls, 0–1. */
   foam: Float32Array;
-  /** Wetter, greener, more fertile ground: river banks, and around waterfalls (oases), 0–1. */
+  /** Wetter, greener, more fertile ground around waterfalls (oases), 0–1. */
   wet: Float32Array;
+  /** Nearness to a river, out across its floodplain (wider for bigger rivers), 0–1. How green it
+   * shows depends on the climate: strong in dry lands, hardly at all where it is wet anyway. */
+  bank: Float32Array;
+  /** Floodplain of a big river (marsh on warm, flat, low ground), 0–1. */
+  flood: Float32Array;
+  /** The mouth of a big river: a delta, 0–1. */
+  delta: Float32Array;
+  /** A lake's shoreline fringe (reeds, marsh; salt round a closed lake in dry country), 0–1. */
+  shore: Float32Array;
+  /** 1 on and round a lake no river flows out of (salty in a dry climate). */
+  lakeClosed: Uint8Array;
   /** Volcanic cone, 0–1. */
   volcano: Float32Array;
   /** Lava flows, 0–1, and the glow of active ones, 0–1. */
@@ -233,6 +244,37 @@ function unionStroke(s: Stroke, g: Grid, o: Options, seed: number, visit: (i: nu
       if (e < reach) visit(idx, g.x0 + i * g.px, y, e, R);
     }
   }
+}
+
+/**
+ * Whether a lake has no river flowing out of it (so in a dry climate it turns salty, like the Dead
+ * Sea). Lake strokes that touch count as one lake; a river whose source lies in it drains it.
+ */
+const closedCache = new WeakMap<Stroke[], Map<number, boolean>>();
+export function lakeIsClosed(surface: Surface, lake: Stroke): boolean {
+  let cache = closedCache.get(surface.strokes);
+  if (!cache) {
+    cache = new Map();
+    closedCache.set(surface.strokes, cache);
+    const lakes = surface.strokes.filter((k) => k.brush === 'lake' && !k.erase);
+    const parent = lakes.map((_, i) => i);
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    const near = (a: Stroke, b: Stroke, gap: number) => {
+      for (let p = 0; p < a.pts.length; p += 2) for (let q = 0; q < b.pts.length; q += 2) if (Math.hypot(a.pts[p] - b.pts[q], a.pts[p + 1] - b.pts[q + 1]) < gap) return true;
+      return false;
+    };
+    for (let i = 0; i < lakes.length; i++) for (let j = i + 1; j < lakes.length; j++) if (near(lakes[i], lakes[j], (lakes[i].size + lakes[j].size) / 2)) parent[find(i)] = find(j);
+    const drained = new Set<number>();
+    for (const r of surface.strokes) {
+      if (r.brush !== 'river' || r.erase || r.pts.length < 2) continue;
+      const [sx, sy] = r.pts;
+      lakes.forEach((l, i) => {
+        for (let p = 0; p < l.pts.length; p += 2) if (Math.hypot(l.pts[p] - sx, l.pts[p + 1] - sy) < l.size / 2 + 2) drained.add(find(i));
+      });
+    }
+    lakes.forEach((l, i) => cache!.set(l.id, !drained.has(find(i))));
+  }
+  return cache.get(lake.id) ?? false;
 }
 
 /** Brush coverage 0–1 from how far inside the stroke a point is, with a soft and ragged edge. */
@@ -403,6 +445,11 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
     riverWidth: new Float32Array(n),
     foam: new Float32Array(n),
     wet: new Float32Array(n),
+    bank: new Float32Array(n),
+    flood: new Float32Array(n),
+    delta: new Float32Array(n),
+    shore: new Float32Array(n),
+    lakeClosed: new Uint8Array(n),
     volcano: new Float32Array(n),
     lava: new Float32Array(n),
     lavaGlow: new Float32Array(n),
@@ -657,9 +704,20 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
             f.waterKind[i] = 1;
             f.riverWidth[i] = w * 2;
           }
-          // Green banks.
-          const bank = 0.5 * (1 - smooth(w, w + 1.5 + w * 8, d));
-          if (bank > f.wet[i]) f.wet[i] = bank;
+          // Banks and floodplain: about 2 miles out from a stream, up to 10 or more from a big river.
+          const sq = Math.sqrt(flow);
+          const reachKm = Math.min(18, 0.8 + 5 * sq);
+          const bank = 1 - smooth(w, w + reachKm, d);
+          if (bank > f.bank[i]) f.bank[i] = bank;
+          const big = smooth(1.2, 2.6, sq);
+          if (big > 0) {
+            const fl = bank * big;
+            if (fl > f.flood[i]) f.flood[i] = fl;
+            // The last stretch before the mouth fans out into a delta.
+            const dl = Math.min(24, 8 + 6 * sq);
+            const de = smooth(info.total - dl * 2.5, info.total, t) * (1 - smooth(w, w + dl, d)) * big;
+            if (de > f.delta[i]) f.delta[i] = de;
+          }
         });
         for (const fall of s.falls ?? []) {
           if (typeof fall !== 'object') continue;
@@ -674,14 +732,26 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
         }
         break;
       }
-      case 'lake':
+      case 'lake': {
+        const closed = er ? false : lakeIsClosed(surface, s);
         unionStroke(s, g, o, seed, (i, x, y, e, r) => {
+          // A fringe of reeds or salt just outside the shore.
+          if (!er && e >= 0.9) {
+            const fr = Math.min(6, 1 + 0.08 * r) / r;
+            const sh = 1 - smooth(1, 1 + fr, e + 0.1 * s.roughness * fbm(x, y, r * 0.3, px, seed + 9, 3));
+            if (sh > f.shore[i]) {
+              f.shore[i] = sh;
+              if (closed) f.lakeClosed[i] = 1;
+            }
+          }
           const c = edge(s, x, y, e, r, px, seed);
           if (c <= 0) return;
           if (er) {
             f.water[i] *= 1 - c;
+            f.shore[i] *= 1 - c;
             return;
           }
+          if (closed) f.lakeClosed[i] = 1;
           if (c * str >= f.water[i]) {
             f.water[i] = c * str;
             f.waterKind[i] = 2;
@@ -689,6 +759,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
           f.waterDepth[i] = Math.max(f.waterDepth[i], Math.min(1, (1 - e) * 2));
         });
         break;
+      }
       case 'waterfall': {
         const [x0, y0] = s.pts;
         if (er) {
@@ -1233,7 +1304,7 @@ export function surfaceAt(surface: Surface, x: number, y: number, o: Options): P
     water: f.water[0] > 0.5 && f.ground[0] >= 1.5 ? (f.waterKind[0] === 1 ? 'river' : 'lake') : null,
     riverWidth: f.waterKind[0] === 1 && f.water[0] > 0.3 ? Math.round(f.riverWidth[0] * 100) / 100 : 0,
     waterfall: f.foam[0] > 0.5,
-    wet: Math.round(f.wet[0] * 100) / 100,
+    wet: Math.round(Math.max(f.wet[0], f.bank[0] * 0.6, f.shore[0] * 0.5) * 100) / 100,
     volcanic: f.volcano[0] > 0.3 || f.lava[0] > 0.3,
     whirlpool: w,
     reefPaint: f.reefPaint[0],

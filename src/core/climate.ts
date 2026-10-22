@@ -242,6 +242,10 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
   const height = f.climateH;
   const land = new Uint8Array(n);
   for (let k = 0; k < n; k++) land[k] = ground[k] >= 1.5 ? 1 : 0;
+  // Lakes (big enough to show at the climate's spacing): they feed moisture to the air passing
+  // over them and soften the seasons on their shores.
+  const lake = new Float32Array(n);
+  for (let k = 0; k < n; k++) if (land[k] && f.waterKind[k] === 2 && f.water[k] > 0.3) lake[k] = f.water[k];
   const kpd = kmPerDegree(s);
   const lat = new Float32Array(h);
   for (let j = 0; j < h; j++) lat[j] = s.northLatitude - ((j + 0.5) * stepY) / kpd;
@@ -270,7 +274,10 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
     }
   }
 
-  const ctx: Ctx = { kpd, s, c, w, h, n, stepX, stepY, W, H, wrap, lat, land, ground, height, distSea, distLand, distDeep, toLandX, toLandY, tilt, tiltF, avgShift, edges, latOf };
+  // How close a big lake is (about 150 km round it).
+  const lakeNear = blur(lake, w, h, wrap, Math.max(1, Math.round(150 / stepX)));
+  for (let k = 0; k < n; k++) lakeNear[k] = Math.min(1, lakeNear[k] * 3);
+  const ctx: Ctx = { kpd, s, c, w, h, n, stepX, stepY, W, H, wrap, lat, land, ground, height, distSea, distLand, distDeep, toLandX, toLandY, tilt, tiltF, avgShift, edges, latOf, lake, lakeNear };
   const summer = season(ctx, surface, 1);
   const winter = season(ctx, surface, -1);
   const zone = zones(ctx, summer, winter);
@@ -285,6 +292,9 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
 }
 
 interface Ctx {
+  /** Lake water at each point (0–1), and how near a big lake is (0–1). */
+  lake: Float32Array;
+  lakeNear: Float32Array;
   /** Kilometres per degree of latitude on this planet. */
   kpd: number;
   s: WorldSettings;
@@ -431,7 +441,8 @@ function season(ctx: Ctx, surface: Surface, s: number): SeasonClimate {
       }
       const cont = Math.min(1, cd[k] / 2200);
       const annual = seaBase(ctx, la, 0) - cont * 12 * sn * sn;
-      const amp = ctx.tiltF * (6 + 22 * cont) * Math.pow(sn, 0.8);
+      // Big lakes soften the seasons on their shores (cooler summers, milder winters).
+      const amp = ctx.tiltF * (6 + 22 * cont) * Math.pow(sn, 0.8) * (1 - 0.3 * ctx.lakeNear[k]);
       let T = annual + Math.sign(la) * s * amp + ca[k] - c.altitudeCoolingC * ctx.height[k];
       T += crystalEffect(crystals, (i + 0.5) * stepX, (j + 0.5) * stepY, 'heat', ctx) * 12;
       T -= crystalEffect(crystals, (i + 0.5) * stepX, (j + 0.5) * stepY, 'cold', ctx) * 12;
@@ -1328,8 +1339,12 @@ function rain(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate, crystal
       // Wet, green land hands much of its rain back to the air; dry land doesn't.
       const recycle = 0.2 + 0.55 * smooth(0.1, 0.45, r[k]) * (0.5 + 0.5 * warmAt[k]);
       const next = Math.max(0, qa - rate * lossPerStep * (1 - recycle) - qa * liftF * 0.85) * Math.pow(decay, 1 / (1 + recycle));
-      change = Math.max(change, Math.abs(next - q[k]));
-      q[k] = next;
+      // Air crossing a lake picks up moisture from it (rain and snow on the far shore), unless it is frozen.
+      const lk = ctx.lake[k];
+      const refill = lk > 0 ? lk * 0.7 * mult * Math.max(0.05, Math.min(1.1, (out.temp[k] + 2) / 28)) ** 1.2 * (out.temp[k] < -3 ? 0.15 : 1) : 0;
+      const nextQ = Math.max(next, refill);
+      change = Math.max(change, Math.abs(nextQ - q[k]));
+      q[k] = nextQ;
     }
     if (it > 10 && change < 1e-4) break;
   }
