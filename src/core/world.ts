@@ -22,6 +22,27 @@ export interface FlatPoint {
 /** Version of the saved-world format; bumped when it changes. */
 export const WORLD_FORMAT = 2;
 
+/**
+ * A picture laid over the map to paint from (an atlas page, a sketch, Earth): stretched to any
+ * size, see-through by its opacity. Only for looking at; the simulation never reads it.
+ */
+export interface ReferenceImage {
+  /** The picture, as a data URL (scaled down when imported, so saves stay small). */
+  src: string;
+  /** Its north-west corner and size on the map (km). */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** The picture's own width ÷ height. */
+  aspect: number;
+  /** 0–1. */
+  opacity: number;
+  shown: boolean;
+  /** The file it came from. */
+  name?: string;
+}
+
 export interface World {
   format: number;
   id: string;
@@ -30,6 +51,8 @@ export interface World {
   layers: Record<LayerId, boolean>;
   /** The painted surface layer: land, sea, relief and ground cover (Phase 1). */
   surface: Surface;
+  /** A picture to paint from, if one has been imported. */
+  reference?: ReferenceImage | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -73,6 +96,10 @@ export function onMapShift(t: Translator): void {
 // Painted strokes keep their place on the land.
 onMapShift((w, dx, dy) => {
   w.surface = shiftSurface(w.surface, dx, dy);
+});
+// The reference picture stays over the land it was lined up with.
+onMapShift((w, dx, dy) => {
+  if (w.reference) w.reference = { ...w.reference, x: w.reference.x + dx, y: w.reference.y + dy };
 });
 
 /**

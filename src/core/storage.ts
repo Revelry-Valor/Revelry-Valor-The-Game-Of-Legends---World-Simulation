@@ -1,5 +1,5 @@
 import { CLIMATE_DEFAULTS, defaultSettings, validateSettings } from './settings';
-import { newWorldId, WORLD_FORMAT, type World } from './world';
+import { newWorldId, WORLD_FORMAT, type ReferenceImage, type World } from './world';
 import { BRUSHES, emptySurface, type Surface } from './paint';
 
 /** Where saved worlds live: the browser's local storage, or anything shaped like it (tests). */
@@ -71,15 +71,26 @@ export function parseWorld(text: string): World {
   const problems = validateSettings(settings);
   if (problems.length) throw new Error(`This saved world has a problem: ${problems[0]}`);
   const now = Date.now();
+  const reference = readReference(w.reference);
   return {
     format: WORLD_FORMAT,
     id: typeof w.id === 'string' && w.id ? w.id : newWorldId(),
     settings,
     layers: { underdark: false, surface: true, canopy: false, sky1: false, sky2: false, sky3: false, ...(w.layers ?? {}) },
     surface: readSurface(w.surface),
+    ...(reference ? { reference } : {}),
     createdAt: typeof w.createdAt === 'number' ? w.createdAt : now,
     updatedAt: typeof w.updatedAt === 'number' ? w.updatedAt : now,
   };
+}
+
+/** The reference picture from a save, if it is whole. */
+function readReference(raw: unknown): ReferenceImage | null {
+  const r = raw as Partial<ReferenceImage> | null | undefined;
+  if (!r || typeof r.src !== 'string' || !r.src.startsWith('data:image/')) return null;
+  const nums = [r.x, r.y, r.w, r.h, r.aspect, r.opacity];
+  if (!nums.every((v) => typeof v === 'number' && Number.isFinite(v)) || !(r.w! > 0) || !(r.h! > 0)) return null;
+  return { src: r.src, x: r.x!, y: r.y!, w: r.w!, h: r.h!, aspect: r.aspect! > 0 ? r.aspect! : r.w! / r.h!, opacity: Math.max(0, Math.min(1, r.opacity!)), shown: r.shown !== false, name: typeof r.name === 'string' ? r.name : undefined };
 }
 
 /** Painted strokes from a save, dropping any that are damaged. Worlds from format 1 have none. */

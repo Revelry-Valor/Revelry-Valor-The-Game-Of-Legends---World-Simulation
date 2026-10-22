@@ -267,3 +267,29 @@ describe('the ITCZ follows the land, not past it', () => {
     for (const v of c2.summer.itcz) expect(v).toBeLessThanOrEqual(set2.axialTilt + 1e-3);
   }, 60000);
 });
+
+describe('the ITCZ drawn by hand and the life balance', () => {
+  it('follows a drawn ITCZ line in its season, easing back to the automatic path past its ends', () => {
+    const s2 = world((add) => add('itcz', line([[2000, yAt(-12)], [9000, yAt(-12)]], 200), { season: 'summer' }));
+    const c2 = computeClimate(s2, settings);
+    const col = (x: number) => Math.floor(x / c2.step);
+    // Where it runs, the belt sits on the line.
+    expect(c2.summer.itcz[col(5000)]).toBeCloseTo(-12, 0);
+    // Far past its ends it is the automatic path again.
+    expect(Math.abs(c2.summer.itcz[col(12500)] - cl.summer.itcz[col(12500)])).toBeLessThan(1);
+    // Winter keeps its own (automatic) path.
+    expect(c2.winter.itcz[col(5000)]).toBeCloseTo(cl.winter.itcz[col(5000)], 3);
+  }, 60000);
+
+  it('the life balance shrinks deserts one way and spreads them the other', () => {
+    const desert = (b: number) => {
+      const c = computeClimate(world(), { ...settings, climate: { ...settings.climate, lifeBalance: b } });
+      let d = 0;
+      for (const z of c.zone) if (z === 3 || z === 4) d++;
+      return d;
+    };
+    const base = desert(0);
+    expect(desert(80)).toBeLessThan(base);
+    expect(desert(-80)).toBeGreaterThan(base);
+  }, 120000);
+});

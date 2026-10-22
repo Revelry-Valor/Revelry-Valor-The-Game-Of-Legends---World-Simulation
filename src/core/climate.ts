@@ -363,6 +363,7 @@ function season(ctx: Ctx, surface: Surface, s: number): SeasonClimate {
 
   // 1. ITCZ path.
   itczPath(ctx, s, out.itcz);
+  drawnItcz(ctx, surface, s, out.itcz);
 
   // 2. Ocean currents.
   currents(ctx, surface, s, out);
@@ -663,6 +664,71 @@ function itczPath(ctx: Ctx, s: number, out: Float32Array): void {
     cur = next;
   }
   out.set(cur);
+}
+
+/**
+ * The ITCZ drawn by hand (the ITCZ brush) for this season: where its line runs it sets the belt's
+ * latitude; past its ends the belt eases back to the automatic path over about 1,500 km.
+ */
+function drawnItcz(ctx: Ctx, surface: Surface, s: number, out: Float32Array): void {
+  const { w, stepX, wrap } = ctx;
+  const sum = new Float32Array(w);
+  const cnt = new Float32Array(w);
+  for (const st of surface.strokes) {
+    if (st.brush !== 'itcz' || st.pts.length < 4 || !inSeason(st, s)) continue;
+    const p = st.pts;
+    for (let q = 2; q < p.length; q += 2) {
+      const ax = p[q - 2];
+      const bx = p[q];
+      const ay = p[q - 1];
+      const by = p[q + 1];
+      const lo = Math.min(ax, bx);
+      const hi = Math.max(ax, bx);
+      // Every column whose middle this piece of line crosses.
+      for (let i = Math.ceil(lo / stepX - 0.5); i + 0.5 <= hi / stepX; i++) {
+        const x = (i + 0.5) * stepX;
+        const t = bx === ax ? 0.5 : (x - ax) / (bx - ax);
+        const y = ay + (by - ay) * t;
+        let ii = i;
+        if (ii < 0 || ii >= w) {
+          if (!wrap) continue;
+          ii = ((ii % w) + w) % w;
+        }
+        sum[ii] += ctx.s.northLatitude - y / ctx.kpd;
+        cnt[ii]++;
+      }
+    }
+  }
+  if (!cnt.some((v) => v > 0)) return;
+  // The change from the automatic path at each drawn column, carried (fading) to the others.
+  const delta = new Float32Array(w);
+  const dist = new Float32Array(w).fill(Infinity);
+  for (let i = 0; i < w; i++) if (cnt[i]) {
+    delta[i] = sum[i] / cnt[i] - out[i];
+    dist[i] = 0;
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    for (const dir of [1, -1]) {
+      for (let n0 = 0; n0 < w * (wrap ? 2 : 1); n0++) {
+        const i = dir > 0 ? n0 % w : w - 1 - (n0 % w);
+        let prev = i - dir;
+        if (prev < 0 || prev >= w) {
+          if (!wrap) continue;
+          prev = (prev + w) % w;
+        }
+        if (dist[prev] + stepX < dist[i]) {
+          dist[i] = dist[prev] + stepX;
+          delta[i] = delta[prev];
+        }
+      }
+    }
+  }
+  const lim = Math.max(ctx.tilt + 10, 15);
+  for (let i = 0; i < w; i++) {
+    if (!Number.isFinite(dist[i])) continue;
+    const f = dist[i] === 0 ? 1 : 1 - smooth(0, 1500, dist[i]);
+    out[i] = Math.max(-lim, Math.min(lim, out[i] + delta[i] * f));
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1095,7 +1161,11 @@ function upwelling(ctx: Ctx, s: number, out: SeasonClimate): void {
 function rain(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate, crystals: Stroke[]): void {
   const { w, h, n, land, stepX, stepY, lat, wrap, c, height } = ctx;
   const mult = ctx.s.rainfall.mode === 'manual' ? ctx.s.rainfall.percent / 100 : Math.max(0.3, 1 + 0.03 * ctx.avgShift);
-  const carry = c.moistureCarryKm * (0.6 + 0.4 * mult);
+  // Life balance: above 0 the things that make deserts (sinking air under highs, rain shadows,
+  // cold coasts, moisture running out inland) lose strength; below 0 they gain it.
+  const lb = Math.max(-1, Math.min(1, (c.lifeBalance ?? 0) / 100));
+  const desertPower = lb >= 0 ? 1 - 0.6 * lb : 1 + 0.8 * -lb;
+  const carry = c.moistureCarryKm * (0.6 + 0.4 * mult) * (lb >= 0 ? 1 + 0.6 * lb : 1 - 0.45 * -lb);
   // Moisture over the sea, from its temperature; cold upwelling water gives little.
   const src = new Float32Array(n);
   for (let k = 0; k < n; k++) {
@@ -1196,11 +1266,11 @@ function rain(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate, crystal
     // Windward slopes: rising air drops its moisture (starting on the approach); very high ground is dry air.
     const rise = Math.max(0, he - hu);
     // The lee: sinking air warms and dries, so little falls even from moist air.
-    lee[k] = Math.min(0.8, Math.max(0, hu - he) * 2.5);
+    lee[k] = Math.min(0.9, Math.max(0, hu - he) * 2.5 * desertPower);
     const block = c.blockingReliefKm * (3 - 2 * smooth(15, 50, Math.abs(la)));
     liftAt[k] = Math.min(0.85, Math.max(rise * 0.9 + (he > block && rise > 0 ? 0.25 : 0), 0.35 * smooth(0.3, 1.5, ahead[k]))) * Math.exp(-Math.max(0, he - 2) / 2);
     const itcz = gauss(la - out.itcz[k % w], 9);
-    const sup = Math.max(0, Math.min(0.92, (out.pressure[k] - 0.5) / 4.5));
+    const sup = Math.max(0, Math.min(0.95, ((out.pressure[k] - 0.5) / 4.5) * desertPower + (lb < 0 ? 0.1 * -lb : 0)));
     const conv = Math.max(0, Math.min(1, out.front[k]));
     const warm = smooth(15, 26, out.temp[k]);
     warmAt[k] = warm;
@@ -1208,7 +1278,7 @@ function rain(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate, crystal
     const storms = belt(ctx, la, s).band % 2 === 1 ? 0.3 : 0;
     // Rain rate (per 1,000 km of travel) from the air's moisture: everywhere a little, much
     // more at the ITCZ, fronts and in westerly storms, from warm tropical land; little under highs.
-    const cold = smooth(0.2, 1.2, coldNear[k]) * Math.exp(-ctx.distSea[k] / 900) * (1 - smooth(30, 40, Math.abs(la)));
+    const cold = Math.min(1, smooth(0.2, 1.2, coldNear[k]) * Math.exp(-ctx.distSea[k] / 900) * (1 - smooth(30, 40, Math.abs(la))) * desertPower);
     baseRate[k] = (0.35 + storms + (1.5 * itcz + 0.5 * warm * gauss(la, 12)) * (1 - 0.85 * cold) + 0.7 * conv) * (1 - sup) * (1 - 0.5 * cold) * (1 - lee[k]);
   }
   const iters = Math.min(260, Math.ceil(Math.max(ctx.W, ctx.H) / step) + 10);
@@ -1304,6 +1374,9 @@ function rain(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate, crystal
     }
     r[k] += 0.2 * belt * Math.exp(-ctx.distSea[k] / 2500) * mult * (1 - 0.85 * shadow);
     r[k] += 0.6 * crystalEffect(crystals, ((k % w) + 0.5) * stepX, (((k / w) | 0) + 0.5) * stepY, 'rain', ctx);
+    // Life balance, last: the driest places gain (or lose) the most, so wet places stay much as they are.
+    if (lb > 0) r[k] = r[k] * (1 + 0.35 * lb) + 0.09 * lb * (1 - smooth(0.05, 0.4, r[k]));
+    else if (lb < 0) r[k] = Math.max(0, r[k] * (1 - 0.35 * -lb) - 0.07 * -lb * (1 - smooth(0.1, 0.5, r[k])));
   }
   // Land-only blur, so coasts don't pick up the sea's zero.
   const lw = new Float32Array(n);

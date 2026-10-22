@@ -42,6 +42,9 @@ export interface ClimateSliders {
   landJoinKm: number;
   /** Ocean currents crossing open sea travel this far (km) for each degree they move north or south. */
   currentSlopeKm: number;
+  /** Life balance, −100 to 100: 0 leaves the climate alone; above 0 weakens what makes deserts and
+   * favours green, living climates; below 0 strengthens the deserts. */
+  lifeBalance: number;
 }
 
 export const CLIMATE_DEFAULTS: ClimateSliders = {
@@ -62,6 +65,7 @@ export const CLIMATE_DEFAULTS: ClimateSliders = {
   polarFrontShift: 0,
   landJoinKm: 300,
   currentSlopeKm: 250,
+  lifeBalance: 0,
 };
 
 /** Rainfall follows the world's temperature automatically, or is set by hand (100% = what the temperature would give). */

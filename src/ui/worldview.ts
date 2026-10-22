@@ -9,7 +9,7 @@ import type { App } from './main';
 import { choice, h, numberField, toast } from './dom';
 import { deleteWorld } from '../core/storage';
 import { createMapView } from './mapview';
-import { planetFields } from './settingsform';
+import { planetFields, worldTabFields } from './settingsform';
 import { createToolPanel } from './toolpanel';
 import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
 import { climateReport } from './report';
@@ -105,11 +105,13 @@ export function showWorld(app: App, start: World): () => void {
   };
   let showCurrentsView: (() => void) | null = null;
   let showPressureView: (() => void) | null = null;
+  let showRainView: (() => void) | null = null;
   const tools = createToolPanel(() => {
     map?.redraw();
     // Drawing currents is done on the currents map.
     if (tools?.state.tool === 'current' && look.view !== 'currents') showCurrentsView?.();
     if ((tools?.state.tool === 'high' || tools?.state.tool === 'wind') && look.view !== 'pressure') showPressureView?.();
+    if (tools?.state.tool === 'itcz' && look.view !== 'rain' && look.view !== 'pressure') showRainView?.();
   }, () => map?.sketch ?? null, () => map?.high ?? null);
   const map = createMapView({
     world: () => world,
@@ -147,7 +149,114 @@ export function showWorld(app: App, start: World): () => void {
     },
     sketchSelected: () => tools.refresh(),
     climate: () => climate.climate,
+    referenceEditing: () => refEdit && !!world.reference?.shown,
+    referenceKeepShape: () => refKeep,
+    setReference(ref, done) {
+      world = { ...world, reference: ref };
+      changed();
+      if (done) renderRef();
+    },
   });
+
+  // ---- Reference picture: an image to paint from, laid over the map ----
+  let refEdit = false;
+  let refKeep = true;
+  const refPanel = h('section', { class: 'view-panel' });
+  const fileInput = h('input', { type: 'file', accept: 'image/*', hidden: true }) as HTMLInputElement;
+  const importImage = (file: File) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      // Scaled down so it saves with the world without filling the browser's storage.
+      const max = 2048;
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const cw = Math.max(1, Math.round(img.naturalWidth * k));
+      const ch = Math.max(1, Math.round(img.naturalHeight * k));
+      const cv = h('canvas', { width: cw, height: ch }) as HTMLCanvasElement;
+      const g = cv.getContext('2d')!;
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, cw, ch);
+      g.drawImage(img, 0, 0, cw, ch);
+      const src = cv.toDataURL('image/jpeg', 0.85);
+      const s = world.settings;
+      const aspect = img.naturalWidth / img.naturalHeight;
+      // Fit to the map's width, keeping its shape, centred top to bottom.
+      const w = s.widthKm;
+      const hh = w / aspect;
+      const old = world.reference;
+      world = { ...world, reference: { src, aspect, x: 0, y: (s.heightKm - hh) / 2, w, h: hh, opacity: old?.opacity ?? 0.5, shown: true, name: file.name } };
+      changed();
+      save();
+      refEdit = false;
+      renderRef();
+      map.redraw();
+      toast(`Imported "${file.name}". Line it up with Move & size on the map, or the fields here.`);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      toast('That file could not be read as a picture.');
+    };
+    img.src = url;
+  };
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if (f) importImage(f);
+    fileInput.value = '';
+  });
+  const setRef = (patch: Partial<NonNullable<World['reference']>>) => {
+    if (!world.reference) return;
+    world = { ...world, reference: { ...world.reference, ...patch } };
+    changed();
+    map.redraw();
+  };
+  const renderRef = () => {
+    const ref = world.reference;
+    const pick = h('button', { type: 'button', class: 'ghost small', onclick: () => fileInput.click() }, ref ? 'Replace image…' : 'Import image…');
+    if (!ref) {
+      refPanel.replaceChildren(h('h2', {}, 'Reference image'), h('p', { class: 'muted small' }, 'Lay a picture over the map to paint from: an atlas page, a sketch of your world, or a map of Earth. Stretch it, size it and fade it as you like. It is only for looking at; the world never reads it.'), pick, fileInput);
+      return;
+    }
+    const mi = (km: number) => Math.round(kmToMiles(km));
+    const sizeFields: Partial<Record<'w' | 'h', HTMLElement>> = {};
+    const showSize = (key: 'w' | 'h', km: number) => sizeFields[key]?.querySelectorAll('input').forEach((i) => ((i as HTMLInputElement).value = String(mi(km))));
+    const sizeField = (label: string, key: 'w' | 'h') =>
+      (sizeFields[key] = numberField({ label, value: mi(ref[key]), min: 10, max: Math.round(kmToMiles(MAX_SIDE_KM * 2)), step: 10, unit: 'miles', change: (v) => {
+        if (!(v > 0)) return;
+        const km = milesToKm(v);
+        const cur = world.reference!;
+        const ratio = cur.w / cur.h;
+        if (refKeep) {
+          const patch = key === 'w' ? { w: km, h: km / ratio } : { h: km, w: km * ratio };
+          setRef(patch);
+          showSize(key === 'w' ? 'h' : 'w', key === 'w' ? patch.h : patch.w);
+        } else setRef({ [key]: km });
+      } }));
+    const posField = (label: string, key: 'x' | 'y', hint: string) =>
+      numberField({ label, value: mi(ref[key]), min: -60000, max: 60000, step: 10, unit: 'miles', hint, change: (v) => { if (Number.isFinite(v)) setRef({ [key]: milesToKm(v) }); } });
+    const s = world.settings;
+    refPanel.replaceChildren(
+      h('h2', {}, 'Reference image'),
+      h('p', { class: 'muted small' }, ref.name ? `“${ref.name}”` : 'A picture to paint from.'),
+      choice<'on' | 'off'>('Show', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], ref.shown ? 'on' : 'off', (v) => { setRef({ shown: v === 'on' }); if (v === 'off') { refEdit = false; renderRef(); } }),
+      numberField({ label: 'Opacity', value: Math.round(ref.opacity * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint: 'See-through at 0%, solid at 100%.', change: (v) => setRef({ opacity: Math.max(0, Math.min(100, v)) / 100 }) }),
+      h('label', { class: 'field-row small' }, h('input', { type: 'checkbox', checked: refEdit, disabled: !ref.shown, onchange: (e: Event) => { refEdit = (e.target as HTMLInputElement).checked; map.redraw(); } }), 'Move & size on the map'),
+      h('p', { class: 'muted small' }, 'While this is ticked, drag the picture to move it and drag a corner to stretch it (the map pans only outside the picture). Untick it to paint again.'),
+      h('label', { class: 'field-row small' }, h('input', { type: 'checkbox', checked: refKeep, onchange: (e: Event) => { refKeep = (e.target as HTMLInputElement).checked; } }), 'Keep its shape when sizing'),
+      sizeField('Width', 'w'),
+      sizeField('Height', 'h'),
+      posField('From the west edge', 'x', 'Where its left side sits.'),
+      posField('From the north edge', 'y', 'Where its top sits.'),
+      h('div', { class: 'sketch-actions' },
+        h('button', { type: 'button', class: 'ghost small', title: 'Stretch it to cover the whole map exactly (for a world map with the same edges)', onclick: () => { setRef({ x: 0, y: 0, w: s.widthKm, h: s.heightKm }); renderRef(); } }, 'Stretch to the map'),
+        h('button', { type: 'button', class: 'ghost small', title: 'As wide as the map, in its own shape', onclick: () => { const hh = s.widthKm / ref.aspect; setRef({ x: 0, y: (s.heightKm - hh) / 2, w: s.widthKm, h: hh }); renderRef(); } }, 'Fit to the width'),
+        h('button', { type: 'button', class: 'ghost small', title: 'Undo any stretching: back to its own shape, keeping its width', onclick: () => { setRef({ h: world.reference!.w / ref.aspect }); renderRef(); } }, 'Its own shape'),
+      ),
+      h('div', { class: 'sketch-actions' }, pick, h('button', { type: 'button', class: 'ghost small danger', onclick: () => { world = { ...world, reference: null }; refEdit = false; changed(); renderRef(); map.redraw(); } }, 'Remove')),
+      fileInput,
+    );
+  };
+  renderRef();
 
   // ---- Climate: worked out again a moment after painting pauses, or at once with the button. ----
   const climateStatus = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Working out the climate…');
@@ -175,7 +284,7 @@ export function showWorld(app: App, start: World): () => void {
   const key = (colour: string, text: string, line = false) => h('div', { class: 'key' }, h('span', { class: line ? 'swatch line' : 'swatch', style: `background: ${colour}` }), text);
   const renderClimateLegend = () => {
     const toHex = (c: number[]) => `rgb(${c.join(',')})`;
-    const itcz = key('#ffffff', 'Dashed white line: the ITCZ, the belt of tropical rain', true);
+    const itcz = key('#ffffff', 'Dashed white line: the ITCZ, the belt of tropical rain (draw it by hand with the ITCZ brush; yellow lines)', true);
     switch (look.view) {
       case 'zones':
         climateLegend.replaceChildren(...ZONE_INFO.map((z) => key(z.colour, z.name)), itcz);
@@ -237,6 +346,7 @@ export function showWorld(app: App, start: World): () => void {
   );
   showCurrentsView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(6)')?.click();
   showPressureView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(5)')?.click();
+  showRainView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(4)')?.click();
   // The Climate tab (creating): working the climate out, and the report.
   const climatePanel = h(
     'section',
@@ -447,7 +557,7 @@ export function showWorld(app: App, start: World): () => void {
       h('h2', {}, 'World settings'),
       h('div', { class: 'field' }, h('label', { for: 'ws-name' }, 'Name'), h('input', { id: 'ws-name', type: 'text', value: s.name, maxlength: 60, oninput: (ev: Event) => { s.name = (ev.target as HTMLInputElement).value; check(); } })),
       s.mapType === 'flat' ? h('div', {}, h('h3', {}, 'Where it sits on its world'), locator.el, latField) : '',
-      planetFields(s, check),
+      planetFields(s, check, { climate: false }),
       problems,
       h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => dialog.close() }, 'Cancel'), apply),
       dangerZone,
@@ -486,11 +596,31 @@ export function showWorld(app: App, start: World): () => void {
   const sideToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true' }, 'Tools');
   const layersPanel = h('section', {}, h('h2', {}, 'Layers'), layerList, h('p', { class: 'muted small' }, 'Other layers get their own views in a later phase.'));
   // Tabs: each shows only the tools and options for one kind of work.
+  // The World tab: temperature, rain and the rest of the world's climate, applied as you go.
+  const worldPanel = h('div', {});
+  const renderWorldTab = () => {
+    const s = { ...world.settings, climate: { ...world.settings.climate }, rainfall: { ...world.settings.rainfall } };
+    const problems = h('ul', { class: 'problems', role: 'alert' });
+    worldPanel.replaceChildren(
+      worldTabFields(s, () => {
+        const next = { ...world.settings, axialTilt: s.axialTilt, dayLengthHours: s.dayLengthHours, averageTemperatureC: s.averageTemperatureC, rainfall: { ...s.rainfall }, climate: { ...s.climate } };
+        const list = validateSettings(next);
+        problems.replaceChildren(...list.map((p) => h('li', {}, p)));
+        if (list.length) return;
+        world = { ...world, settings: next };
+        changed();
+        climate.changed();
+        map.redraw();
+      }),
+      problems,
+    );
+  };
   const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
     { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
     { id: 'terrain', name: 'Terrain', groups: ['Relief', 'Volcanic', 'Mountain zones'], extra: [] },
     { id: 'cover', name: 'Ground cover', groups: ['Ground cover'], extra: [] },
     { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
+    { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
   ];
   const tabBody = h('div', { class: 'tab-body' });
   const tabButtons = TABS.map((t) =>
@@ -498,6 +628,7 @@ export function showWorld(app: App, start: World): () => void {
   );
   const showTab = (id: string) => {
     const t = TABS.find((x) => x.id === id) ?? TABS[0];
+    if (t.id === 'world') renderWorldTab();
     tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
     if (t.groups.length) tools.showGroups(t.groups);
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
@@ -511,7 +642,7 @@ export function showWorld(app: App, start: World): () => void {
     map.redraw();
   });
   // The View panel on the right: what you're looking at, kept apart from the tools for making.
-  const viewSide = h('aside', { class: 'side view-side', 'aria-label': 'View' }, mapPanel, lookPanel, zonesPanel, layersPanel);
+  const viewSide = h('aside', { class: 'side view-side', 'aria-label': 'View' }, mapPanel, lookPanel, refPanel, zonesPanel, layersPanel);
   const viewToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true', title: 'Show or hide the View panel' }, 'View');
   // On a phone the screen is too small for both panels and the map: the View panel starts hidden.
   if (window.matchMedia?.('(max-width: 720px)').matches) {

@@ -243,3 +243,4 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
   .workspace .stage { min-height: 50vh; flex: 1 0 50vh; }
   .view-side { max-height: 32vh; }
 }
+.balance-ends{display:flex;justify-content:space-between;gap:.5rem;margin-top:-.15rem}

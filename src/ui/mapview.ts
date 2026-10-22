@@ -4,7 +4,7 @@ import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
 import { formatDistance, formatLatitude, kmToMiles, milesToKm } from '../core/units';
-import type { World } from '../core/world';
+import type { ReferenceImage, World } from '../core/world';
 import { MapCache, type MapLook } from '../render/mapcache';
 import { tempColourF } from '../render/paintmap';
 import { h } from './dom';
@@ -42,6 +42,8 @@ export interface SketchOps {
   set(patch: Partial<Stroke>, undoStep?: boolean): void;
   reverse(): void;
   remove(): void;
+  /** ITCZ: draw a line along the path the climate worked out for the season shown, to adjust by hand. */
+  traceItcz(): boolean;
 }
 
 export interface MapViewOptions {
@@ -64,6 +66,11 @@ export interface MapViewOptions {
   remove(id: number): void;
   /** The selected current sketch changed. */
   sketchSelected?(): void;
+  /** The reference picture: whether it is being moved and sized on the map, and changing it (`done` at the end of a drag). */
+  referenceEditing?(): boolean;
+  /** Stretching keeps the picture's shape. */
+  referenceKeepShape?(): boolean;
+  setReference?(ref: ReferenceImage, done: boolean): void;
 }
 
 export interface MapView {
@@ -85,8 +92,8 @@ export interface MapView {
 
 const SKETCH_COLOUR = { warm: '#e0301e', cold: '#1f66e0', neutral: '#0d1014' };
 /** Brushes drawn as a course through points and adjusted afterwards: ocean currents and winds. */
-type SketchBrush = 'current' | 'wind';
-const isSketch = (t: string): t is SketchBrush => t === 'current' || t === 'wind';
+type SketchBrush = 'current' | 'wind' | 'itcz';
+const isSketch = (t: string): t is SketchBrush => t === 'current' || t === 'wind' || t === 'itcz';
 
 export function createMapView(o: MapViewOptions): MapView {
   const canvas = h('canvas', { class: 'map', 'aria-label': 'World map. Drag to paint with the selected brush.' });
@@ -142,12 +149,14 @@ export function createMapView(o: MapViewOptions): MapView {
       g.fillRect(x0 - span, y0, span, y1 - y0);
       g.fillRect(x1, y0, span, y1 - y0);
     }
+    drawReference(g, r);
     const cl = o.climate();
     if (cl && look.view !== 'land') drawClimate(g, r, cl, look, x0, span, copies);
     if (look.view === 'currents' || o.tool().tool === 'current') drawSketches(g, r, x0, span, copies, 'current');
     if (cl && o.tool().tool === 'wind') drawWindSway(g, r, cl, look.season, x0, span, copies);
     if (look.view === 'pressure' || look.view === 'air' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
     if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
+    if (o.tool().tool === 'itcz') drawSketches(g, r, x0, span, copies, 'itcz');
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
     drawClimateTools(g, r, x0, span, copies);
@@ -394,6 +403,87 @@ export function createMapView(o: MapViewOptions): MapView {
    * Ocean currents and winds as drawn: bold lines (thinner for secondary currents and light winds)
    * with an edge and arrows; points shown while adjusting.
    */
+  // ---- The reference picture: drawn over the map at its opacity; moved and sized by dragging. ----
+  const refImg = new Image();
+  refImg.onload = () => schedule();
+  const REF_HANDLE = 16;
+  function drawReference(g: CanvasRenderingContext2D, r: DOMRect) {
+    const ref = o.world().reference;
+    if (!ref || !ref.shown) return;
+    if (refImg.getAttribute('src') !== ref.src) refImg.src = ref.src;
+    const [ax, ay] = toScreen(ref.x, ref.y, r);
+    const [bx, by] = toScreen(ref.x + ref.w, ref.y + ref.h, r);
+    if (refImg.complete && refImg.naturalWidth) {
+      g.save();
+      // Kept inside the map's frame (a wrapping map shows it on the wrapped copies too).
+      const s = o.world().settings;
+      const [mx0, my0] = toScreen(0, 0, r);
+      const [mx1, my1] = toScreen(s.widthKm, s.heightKm, r);
+      const wrapped = s.edges === 'wrap';
+      g.beginPath();
+      g.rect(wrapped ? mx0 - (mx1 - mx0) : mx0, my0, (mx1 - mx0) * (wrapped ? 3 : 1), my1 - my0);
+      g.clip();
+      g.globalAlpha = ref.opacity;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(refImg, ax, ay, bx - ax, by - ay);
+      g.restore();
+    }
+    if (o.referenceEditing?.()) {
+      g.save();
+      g.setLineDash([6, 4]);
+      g.strokeStyle = '#f2c36b';
+      g.lineWidth = 2;
+      g.strokeRect(ax, ay, bx - ax, by - ay);
+      g.setLineDash([]);
+      g.fillStyle = '#f2c36b';
+      g.strokeStyle = '#2a241b';
+      for (const [hx, hy] of [[bx, by], [ax, ay], [bx, ay], [ax, by]]) {
+        g.fillRect(hx - REF_HANDLE / 2 + 3, hy - REF_HANDLE / 2 + 3, REF_HANDLE - 6, REF_HANDLE - 6);
+        g.strokeRect(hx - REF_HANDLE / 2 + 3, hy - REF_HANDLE / 2 + 3, REF_HANDLE - 6, REF_HANDLE - 6);
+      }
+      g.restore();
+    }
+  }
+  let refDrag: { pointer: number; corner: number; x: number; y: number; start: ReferenceImage; keep: boolean } | null = null;
+  /** Corners 0 NW, 1 NE, 2 SE, 3 SW; −1 moves the whole picture. */
+  const refPointer = (e: PointerEvent, x: number, y: number): boolean => {
+    const ref = o.world().reference;
+    if (!ref) return false;
+    const corners = [[ref.x, ref.y], [ref.x + ref.w, ref.y], [ref.x + ref.w, ref.y + ref.h], [ref.x, ref.y + ref.h]];
+    let corner = corners.findIndex(([cx, cy]) => Math.hypot(cx - x, cy - y) * view.scale < REF_HANDLE);
+    if (corner < 0) {
+      if (x < ref.x || x > ref.x + ref.w || y < ref.y || y > ref.y + ref.h) return false;
+      corner = -1;
+    }
+    // Shift (or the panel's Keep its shape) keeps the picture's shape while stretching.
+    refDrag = { pointer: e.pointerId, corner, x, y, start: { ...ref }, keep: e.shiftKey || !!o.referenceKeepShape?.() };
+    return true;
+  };
+  const dragReference = (x: number, y: number, done: boolean) => {
+    if (!refDrag) return;
+    const a = refDrag.start;
+    const dx = x - refDrag.x;
+    const dy = y - refDrag.y;
+    let next: ReferenceImage;
+    if (refDrag.corner < 0) next = { ...a, x: a.x + dx, y: a.y + dy };
+    else {
+      // The opposite corner stays put.
+      const left = refDrag.corner === 0 || refDrag.corner === 3;
+      const top = refDrag.corner === 0 || refDrag.corner === 1;
+      const min = 10;
+      let w = Math.max(min, a.w + (left ? -dx : dx));
+      let hh = Math.max(min, a.h + (top ? -dy : dy));
+      if (refDrag.keep) {
+        const ratio = a.w / a.h;
+        if (w / hh > ratio) hh = w / ratio;
+        else w = hh * ratio;
+      }
+      next = { ...a, w, h: hh, x: left ? a.x + a.w - w : a.x, y: top ? a.y + a.h - hh : a.y };
+    }
+    o.setReference?.(next, done);
+    schedule();
+  };
+
   function drawSketches(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[], brush: SketchBrush) {
     const t = o.tool();
     const adjusting = t.tool === brush && (t.sketchMode === 'adjust' || t.erase);
@@ -405,8 +495,9 @@ export function createMapView(o: MapViewOptions): MapView {
     const airSe = airCl ? (o.look().season === 1 ? airCl.summer : airCl.winter) : null;
     for (const st of sketches(brush)) {
       const wind = brush === 'wind';
-      const colour = wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
-      const minor = wind ? st.strength < 0.45 : st.currentSize === 'secondary';
+      const itcz = brush === 'itcz';
+      const colour = itcz ? '#f2b705' : wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
+      const minor = itcz ? false : wind ? st.strength < 0.45 : st.currentSize === 'secondary';
       const p = st.pts;
       for (const c of copies) {
         const ox = x0 + c * span;
@@ -436,10 +527,10 @@ export function createMapView(o: MapViewOptions): MapView {
           for (let q = 0; q < p.length; q += 2) (q ? g.lineTo : g.moveTo).call(g, sx(q), sy(q));
           g.stroke();
         }
-        // Arrows every so far along the course.
+        // Arrows every so far along the course (the ITCZ has no direction).
         let along = 0;
         let next = 250;
-        for (let q = 2; q < p.length; q += 2) {
+        for (let q = 2; q < (itcz ? 0 : p.length); q += 2) {
           const dx = p[q] - p[q - 2];
           const dy = p[q + 1] - p[q - 1];
           along += Math.hypot(dx, dy) * view.scale;
@@ -701,13 +792,13 @@ export function createMapView(o: MapViewOptions): MapView {
       return;
     }
     const t = o.tool();
-    if (brush === 'current' || brush === 'wind') {
+    if (brush === 'current' || brush === 'wind' || brush === 'itcz') {
       // An ocean current or a wind: a smooth course through the points.
       const wrapKm = o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0;
       const live = o.begin({ ...t.settings, brush, erase: undefined, pts: roundPath(sketchCourse(ctrl, wrapKm)), route: 'points', ctrl: roundPath(ctrl) });
       sel = live.id;
       o.sketchSelected?.();
-      o.notice(brush === 'wind' ? 'Wind drawn. Use Adjust to move or add points, change its strength, reverse it or delete it.' : 'Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
+      o.notice(brush === 'itcz' ? 'ITCZ drawn: where it runs, it replaces the automatic path for this season. Use Adjust to move or add points.' : brush === 'wind' ? 'Wind drawn. Use Adjust to move or add points, change its strength, reverse it or delete it.' : 'Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
       schedule();
       return;
     }
@@ -725,6 +816,7 @@ export function createMapView(o: MapViewOptions): MapView {
     if (routing.brush === 'lava') return '#ff7a26';
     if (routing.brush === 'current') return SKETCH_COLOUR[o.tool().settings.current ?? 'warm'];
     if (routing.brush === 'wind') return '#1b2027';
+    if (routing.brush === 'itcz') return '#f2b705';
     return '#bfe6ff';
   };
 
@@ -864,7 +956,7 @@ export function createMapView(o: MapViewOptions): MapView {
         o.remove(hit);
         if (sel === hit) sel = null;
         o.sketchSelected?.();
-        o.notice(`${o.tool().tool === 'wind' ? 'Wind' : 'Current'} deleted (Undo brings it back).`);
+        o.notice(`${o.tool().tool === 'wind' ? 'Wind' : o.tool().tool === 'itcz' ? 'ITCZ line' : 'Current'} deleted (Undo brings it back).`);
       }
       schedule();
       return true;
@@ -948,10 +1040,32 @@ export function createMapView(o: MapViewOptions): MapView {
       o.sketchSelected?.();
       schedule();
     },
+    traceItcz() {
+      const cl = o.climate();
+      if (!cl) return false;
+      const se = o.look().season === 1 ? cl.summer : cl.winter;
+      const s = o.world().settings;
+      const kpd = kmPerDegree(s);
+      // About a dozen points across the map, at the latitude the climate gives each.
+      const n = Math.max(4, Math.min(16, Math.round(s.widthKm / 600)));
+      const ctrl: number[] = [];
+      for (let q = 0; q <= n; q++) {
+        const x = Math.min(s.widthKm - 1, Math.max(1, (q / n) * s.widthKm));
+        const i = Math.max(0, Math.min(cl.w - 1, Math.floor(x / cl.step)));
+        ctrl.push(x, Math.max(0, Math.min(s.heightKm, (s.northLatitude - se.itcz[i]) * kpd)));
+      }
+      const live = o.begin({ ...o.tool().settings, brush: 'itcz', erase: undefined, pts: roundPath(sketchCourse(ctrl, 0)), route: 'points', ctrl: roundPath(ctrl), season: 'shown' });
+      sel = live.id;
+      o.sketchSelected?.();
+      o.notice('The ITCZ is now a line you can move: drag its dots, or tap the line to add a bend.');
+      schedule();
+      return true;
+    },
   };
 
   const startStroke = (e: PointerEvent, x: number, y: number) => {
     const t = o.tool();
+    if (o.referenceEditing?.()) return refPointer(e, x, y);
     if (t.tool === 'pan') return false;
     if (isSketch(t.tool) && (t.erase || t.sketchMode === 'adjust')) return sketchPointer(e, x, y, t.erase);
     if (t.tool === 'high' && (t.erase || t.sketchMode === 'adjust')) return highPointer(e, x, y, t.erase);
@@ -1075,6 +1189,12 @@ export function createMapView(o: MapViewOptions): MapView {
     if (drawing && drawing.pointer === e.pointerId) finishStroke();
     if (dragging?.pointer === e.pointerId) dragging = null;
     if (highDrag?.pointer === e.pointerId) highDrag = null;
+    if (refDrag?.pointer === e.pointerId) {
+      const r = rect();
+      const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
+      dragReference(x, y, true);
+      refDrag = null;
+    }
     if (pointers.size === 0) {
       panning = false;
       canvas.classList.remove('panning');
@@ -1117,6 +1237,7 @@ export function createMapView(o: MapViewOptions): MapView {
     hover = { x, y };
     if (dragging?.pointer === e.pointerId) dragSketch(x, y);
     if (highDrag?.pointer === e.pointerId) dragHigh(x, y);
+    if (refDrag?.pointer === e.pointerId) dragReference(x, y, false);
     if (drawing?.pointer === e.pointerId) extendStroke(x, y);
     schedule();
     if (!readoutPending) {
