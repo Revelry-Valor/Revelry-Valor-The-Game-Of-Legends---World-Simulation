@@ -73,6 +73,11 @@ export interface SeasonClimate {
   curU: Float32Array;
   curV: Float32Array;
   curAnomaly: Float32Array;
+  /** Moisture the air carries (0–1): refilled over the sea, spent over land. */
+  moist: Float32Array;
+  /** The drawn wind (its stroke id, −1 for none) holding sway at each point, and how strongly (0–1). */
+  windLine: Int32Array;
+  windSway: Float32Array;
   ice: Uint8Array;
   snow: Uint8Array;
   /** ITCZ latitude for each column. */
@@ -342,6 +347,9 @@ function season(ctx: Ctx, surface: Surface, s: number): SeasonClimate {
     curU: new Float32Array(n),
     curV: new Float32Array(n),
     curAnomaly: new Float32Array(n),
+    moist: new Float32Array(n),
+    windLine: new Int32Array(n).fill(-1),
+    windSway: new Float32Array(n),
     ice: new Uint8Array(n),
     snow: new Uint8Array(n),
     itcz: new Float32Array(w),
@@ -896,14 +904,16 @@ function winds(ctx: Ctx, surface: Surface, s0: number, out: SeasonClimate): void
   // The ranges as the wind feels them: broad, so it starts turning before it reaches the slope.
   const hb = blur(height, w, h, wrap, Math.max(1, Math.round(120 / stepX)));
   // The winds drawn on the map (the Wind brush). Every place takes its wind from the drawn winds,
-  // the nearest counting most, so a wind carries on across a gap between two lines, and one line
-  // running into another simply joins it. Far from every drawn wind it weakens, but keeps the way
+  // the nearest counting most, so one line drawn touching another simply carries on as it (a gap
+  // between two lines leaves two separate winds). Far from every drawn wind it weakens, but keeps the way
   // the nearest winds blow; with no winds drawn at all, only a light drift of the wind belts remains.
   const wp: number[] = [];
   let line = 0;
+  const lineIds: number[] = [-1];
   for (const st of surface.strokes) {
     if (st.brush !== 'wind' || st.pts.length < 4) continue;
     line++;
+    lineIds.push(st.id);
     const p = st.pts;
     let since = Infinity;
     for (let q = 0; q < p.length; q += 2) {
@@ -920,63 +930,11 @@ function winds(ctx: Ctx, surface: Surface, s0: number, out: SeasonClimate): void
       wp.push(wrap ? ((p[q] % W) + W) % W : p[q], p[q + 1], dx / l, -dy / l, st.strength, line);
     }
   }
-  // A wind whose line stops short of another, or runs into it, carries on: bridge from its end to
-  // the nearest point ahead on another wind (within about 2,000 km), turning to that wind's way.
-  {
-    const ends: { x: number; y: number; dx: number; dy: number; str: number; line: number }[] = [];
-    let li = 0;
-    for (const st of surface.strokes) {
-      if (st.brush !== 'wind' || st.pts.length < 4) continue;
-      li++;
-      const p = st.pts;
-      const m = p.length;
-      const back = Math.max(0, m - 8);
-      const dx = p[m - 2] - p[back];
-      const dy = p[m - 1] - p[back + 1];
-      const l = Math.hypot(dx, dy);
-      if (l > 1e-6) ends.push({ x: p[m - 2], y: p[m - 1], dx: dx / l, dy: dy / l, str: st.strength, line: li });
-    }
-    const bridges: number[] = [];
-    for (const e of ends) {
-      let best = -1;
-      let bestD = 2000;
-      for (let q = 0; q < wp.length; q += 6) {
-        if (wp[q + 5] === e.line) continue;
-        // A wind blowing back against this one isn't joined: they meet head on at a front.
-        if (e.dx * wp[q + 2] - e.dy * wp[q + 3] < -0.3) continue;
-        let ox = wp[q] - (wrap ? ((e.x % W) + W) % W : e.x);
-        if (wrap) ox -= Math.round(ox / W) * W;
-        const oy = wp[q + 1] - e.y;
-        const d = Math.hypot(ox, oy);
-        // Ahead of the end (within about 60° of the way it blows).
-        if (d < bestD && (d < 150 || (ox * e.dx + oy * e.dy) / d > 0.5)) {
-          bestD = d;
-          best = q;
-        }
-      }
-      if (best < 0) continue;
-      let ox = wp[best] - (wrap ? ((e.x % W) + W) % W : e.x);
-      if (wrap) ox -= Math.round(ox / W) * W;
-      const oy = wp[best + 1] - e.y;
-      const nSteps = Math.max(1, Math.floor(bestD / 90));
-      for (let t = 1; t < nSteps; t++) {
-        const f = t / nSteps;
-        // The way it blows turns from the end's direction to the other wind's.
-        let ux = e.dx * (1 - f) + wp[best + 2] * f;
-        let un = -e.dy * (1 - f) + wp[best + 3] * f;
-        const ul = Math.hypot(ux, un) || 1;
-        ux /= ul;
-        un /= ul;
-        const bx = e.x + ox * f;
-        bridges.push(wrap ? ((bx % W) + W) % W : bx, e.y + oy * f, ux, un, e.str * (1 - f) + wp[best + 4] * f, e.line);
-      }
-    }
-    wp.push(...bridges);
-  }
   const d0 = 140;
   // Where two drawn winds run head on into each other: a front.
   const meet = new Float32Array(n);
   const lineD = new Float32Array(line + 1);
+  const lineW = new Float64Array(line + 1);
   const lineX = new Float32Array(line + 1);
   const lineY = new Float32Array(line + 1);
   for (let j = 0; j < h; j++) {
@@ -998,6 +956,7 @@ function winds(ctx: Ctx, surface: Surface, s0: number, out: SeasonClimate): void
         let ws = 0;
         let dmin = Infinity;
         lineD.fill(Infinity);
+        lineW.fill(0);
         for (let q = 0; q < wp.length; q += 6) {
           let dx = Math.abs(wp[q] - x);
           if (wrap) dx = Math.min(dx, W - dx);
@@ -1009,6 +968,7 @@ function winds(ctx: Ctx, surface: Surface, s0: number, out: SeasonClimate): void
           const d = Math.sqrt(d2);
           if (d < dmin) dmin = d;
           const li = wp[q + 5];
+          lineW[li] += wt;
           if (d < lineD[li]) {
             lineD[li] = d;
             lineX[li] = wp[q + 2];
@@ -1020,6 +980,11 @@ function winds(ctx: Ctx, surface: Surface, s0: number, out: SeasonClimate): void
         const near = Math.exp(-dmin / 1500);
         fx = (sx / ws) * 3 * fade * near + fx * (1 - near);
         fy = (sy / ws) * 3 * fade * near + fy * (1 - near);
+        // Which drawn wind holds sway here, and how strongly.
+        let top = 1;
+        for (let li = 2; li <= line; li++) if (lineW[li] > lineW[top]) top = li;
+        out.windLine[k] = lineIds[top];
+        out.windSway[k] = (lineW[top] / ws) * near;
         // The two nearest winds: if they blow against each other, a front between them.
         let b1 = 0;
         let b2 = 0;
@@ -1295,6 +1260,8 @@ function rain(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate, crystal
     }
     if (it > 10 && change < 1e-4) break;
   }
+  // The moisture the air carries, for the map: refilled over the sea, spent over land.
+  for (let k = 0; k < n; k++) out.moist[k] = Math.min(1, land[k] ? q[k] : src[k] * mult);
   // The polar front belt brings rain to all coasts within reach, even with offshore wind.
   const pf = (ctx.edges[1] ?? ctx.edges[0] + 30) - 15;
   for (let k = 0; k < n; k++) {

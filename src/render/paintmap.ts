@@ -10,7 +10,7 @@ import { nearestPoint, RAIN_VERY_WET, RAIN_WET, sampleField, ZONE_INFO, type Cli
 
 export type MapStyle = 'satellite' | 'paper';
 /** What the map shows: the land itself, or one of the climate views. */
-export type MapView = 'land' | 'zones' | 'temp' | 'rain' | 'pressure' | 'currents';
+export type MapView = 'land' | 'zones' | 'temp' | 'rain' | 'pressure' | 'currents' | 'air';
 
 export interface RenderJob {
   /** Top-left corner of the picture in km, and km per pixel. */
@@ -462,6 +462,8 @@ const rainColour = (r: number): RGB => {
   return mix(RAIN_RAMP[i], RAIN_RAMP[i + 1], s - i);
 };
 export const TEMP_LEGEND = TEMP_F;
+/** Temperature (°F) as the map's temperature colour. */
+export const tempColourF = tempColour;
 export const RAIN_LEGEND = RAIN_RAMP;
 
 /** The climate map views, laid over the painted map. */
@@ -494,6 +496,13 @@ function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer']
       const fr = sampleField(cl, se.front, x, y);
       c = mix(c, [150, 150, 158], smooth(0.25, 0.6, fr) * 0.7);
       return c;
+    }
+    case 'air': {
+      // How much moisture the air carries: deep teal where moist, pale where it has dried out.
+      const m = Math.max(0, Math.min(1, sampleField(cl, se.moist, x, y)));
+      const base = grey(col, land >= 0.5 ? 0.7 : 0.8);
+      const c = mix(mix(base, [236, 226, 196], 0.35), [22, 128, 140], Math.pow(m, 0.8) * 0.85);
+      return land >= 0.5 ? [c[0] * (0.8 + 0.2 * shade), c[1] * (0.8 + 0.2 * shade), c[2] * (0.8 + 0.2 * shade)] : mix(c, [40, 70, 110], 0.25);
     }
     case 'currents': {
       if (land >= 0.5) return grey(col, 0.6);

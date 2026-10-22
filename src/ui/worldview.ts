@@ -190,6 +190,16 @@ export function showWorld(app: App, start: World): () => void {
       case 'currents':
         climateLegend.replaceChildren(key('#d23a2a', 'Warm current'), key('#2a6fd2', 'Cold current'), key('#111418', 'Neutral current (thin lines: secondary currents)'), key('#78dce6', 'Upwelling: cold, rich water (fishing, fog)'), key('#e4ecf1', 'Sea ice'), key('#5fd2c3', 'Coral reef'));
         break;
+      case 'air':
+        climateLegend.replaceChildren(
+          ramp(['#e6e0cc', '#8fbfb8', '#16808c']),
+          h('div', { class: 'ramp-labels' }, h('span', {}, 'Dry air'), h('span', {}, 'Moist air')),
+          h('p', { class: 'muted' }, 'How much moisture the air carries in the season shown. Over the sea it is refilled (lots over warm water, little over cold); from the coast inland it is spent as rain and fades with distance (Climate fine-tuning: moisture reach). Each drawn wind is coloured by the temperature of the air it carries.'),
+          ramp(TEMP_LEGEND.map(([, c]) => c)),
+          h('div', { class: 'ramp-labels' }, ...TEMP_LEGEND.map(([t]) => h('span', {}, `${t}°F`))),
+          itcz,
+        );
+        break;
       default:
         climateLegend.replaceChildren();
     }
@@ -218,6 +228,7 @@ export function showWorld(app: App, start: World): () => void {
       { value: 'rain', label: 'Rainfall' },
       { value: 'pressure', label: 'Pressure & winds' },
       { value: 'currents', label: 'Currents & sea' },
+      { value: 'air', label: 'Air & moisture' },
     ],
     look.view,
     (v) => { look.view = v; renderClimateLegend(); map.redraw(); },

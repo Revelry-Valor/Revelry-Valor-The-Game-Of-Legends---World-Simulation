@@ -1,4 +1,4 @@
-import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
+import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
 import { brushInfo, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
@@ -6,6 +6,7 @@ import { finishCourse, onWater } from '../core/water';
 import { formatDistance, formatLatitude, kmToMiles, milesToKm } from '../core/units';
 import type { World } from '../core/world';
 import { MapCache, type MapLook } from '../render/mapcache';
+import { tempColourF } from '../render/paintmap';
 import { h } from './dom';
 
 /** Brush settings without a path: what the tool panel edits. */
@@ -140,7 +141,8 @@ export function createMapView(o: MapViewOptions): MapView {
     const cl = o.climate();
     if (cl && look.view !== 'land') drawClimate(g, r, cl, look, x0, span, copies);
     if (look.view === 'currents' || o.tool().tool === 'current') drawSketches(g, r, x0, span, copies, 'current');
-    if (look.view === 'pressure' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
+    if (cl && o.tool().tool === 'wind') drawWindSway(g, r, cl, look.season, x0, span, copies);
+    if (look.view === 'pressure' || look.view === 'air' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
     if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
     if (look.grid) drawLatitudes(g, r, x0, x1, y0);
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
@@ -306,6 +308,39 @@ export function createMapView(o: MapViewOptions): MapView {
     }
   }
 
+  // The area each drawn wind holds sway over (grey), the selected wind's darker; an image of the
+  // climate grid, rebuilt when the climate, season or selection changes.
+  let sway: { key: string; img: HTMLCanvasElement } | null = null;
+  function drawWindSway(g: CanvasRenderingContext2D, r: DOMRect, cl: Climate, season: number, x0: number, span: number, copies: number[]) {
+    const se = season === 1 ? cl.summer : cl.winter;
+    const key = `${season}:${sel}`;
+    if (!sway || sway.key !== key || swayFor !== cl) {
+      const img = document.createElement('canvas');
+      img.width = cl.w;
+      img.height = cl.h;
+      const ig = img.getContext('2d')!;
+      const data = ig.createImageData(cl.w, cl.h);
+      for (let k = 0; k < cl.w * cl.h; k++) {
+        const id = se.windLine[k];
+        if (id < 0) continue;
+        const picked = id === sel;
+        const a = Math.min(1, se.windSway[k] * 1.3) * (picked ? 0.55 : 0.22);
+        const v = picked ? 20 : 70;
+        data.data.set([v, v, v + 4, Math.round(a * 255)], k * 4);
+      }
+      ig.putImageData(data, 0, 0);
+      sway = { key, img };
+      swayFor = cl;
+    }
+    const yTop = toScreen(0, 0, r)[1];
+    const s = o.world().settings;
+    g.save();
+    g.imageSmoothingEnabled = true;
+    for (const c of copies) g.drawImage(sway.img, x0 + c * span, yTop, s.widthKm * view.scale, s.heightKm * view.scale);
+    g.restore();
+  }
+  let swayFor: Climate | null = null;
+
   /** High-pressure zones as placed: an H with its strength; the selected one shows its reach. */
   function drawHighs(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[]) {
     const t = o.tool();
@@ -362,6 +397,8 @@ export function createMapView(o: MapViewOptions): MapView {
     g.save();
     g.lineCap = 'round';
     g.lineJoin = 'round';
+    const airCl = o.look().view === 'air' ? o.climate() : null;
+    const airSe = airCl ? (o.look().season === 1 ? airCl.summer : airCl.winter) : null;
     for (const st of sketches(brush)) {
       const wind = brush === 'wind';
       const colour = wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
@@ -371,8 +408,25 @@ export function createMapView(o: MapViewOptions): MapView {
         const ox = x0 + c * span;
         const sx = (q: number) => ox + p[q] * view.scale;
         const sy = (q: number) => yTop + p[q + 1] * view.scale;
+        // In the Air & moisture view a wind is coloured by the temperature of the air it carries.
+        const airAt = wind && airSe ? (q: number): string => {
+          const W = o.world().settings.widthKm;
+          const t = sampleField(airCl!, airSe!.temp, ((p[q] % W) + W) % W, p[q + 1]) * 1.8 + 32;
+          const c = tempColourF(t);
+          return `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+        } : null;
         for (const [w, col] of (minor ? [[3.6, 'rgba(255,255,255,0.85)'], [1.8, colour]] : [[6, 'rgba(255,255,255,0.9)'], [3.2, colour]]) as [number, string][]) {
           g.lineWidth = st.id === sel && adjusting ? w + 2 : w;
+          if (airAt && col === colour) {
+            for (let q = 2; q < p.length; q += 2) {
+              g.strokeStyle = airAt(q);
+              g.beginPath();
+              g.moveTo(sx(q - 2), sy(q - 2));
+              g.lineTo(sx(q), sy(q));
+              g.stroke();
+            }
+            continue;
+          }
           g.strokeStyle = col;
           g.beginPath();
           for (let q = 0; q < p.length; q += 2) (q ? g.lineTo : g.moveTo).call(g, sx(q), sy(q));
