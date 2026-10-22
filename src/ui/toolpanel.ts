@@ -2,6 +2,7 @@ import { BRUSHES, brushDefaults, brushInfo, penColour, strokeSeason, ZONES, type
 import { kmToMiles, milesToKm } from '../core/units';
 import { choice, h, numberField } from './dom';
 import type { BrushSettings, HighOps, SketchOps, ToolState } from './mapview';
+import type { NameOf } from '../core/geography';
 
 /** The brush picker and the selected brush's settings (REDESIGN.md, 6.2). */
 export interface ToolPanel {
@@ -22,9 +23,9 @@ export interface NameOps {
   /** The spot picked on the map (km), if any. */
   picked(): { x: number; y: number } | null;
   /** The features there, most general first; empty while the geography is being worked out. */
-  at(x: number, y: number): { of: 'land' | 'archipelago' | 'water' | 'region'; kind: string; name: string }[];
+  at(x: number, y: number): { of: NameOf; kind: string; name: string }[];
   /** Name a feature (an empty name takes its name away). */
-  set(x: number, y: number, of: 'land' | 'archipelago' | 'water' | 'region', label: string): void;
+  set(x: number, y: number, of: NameOf, label: string): void;
 }
 
 export function createToolPanel(changed: () => void, sketch: () => SketchOps | null = () => null, highOps: () => HighOps | null = () => null, names: () => NameOps | null = () => null): ToolPanel {
@@ -259,7 +260,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     out.push(h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete')));
     return out;
   };
-  const OF_NAMES = { land: 'Land', archipelago: 'Islands', water: 'Water', region: 'Region' } as const;
+  const OF_NAMES: Record<NameOf, string> = { land: 'Land', archipelago: 'Islands', water: 'Water', region: 'Region', lake: 'Lake', river: 'River' };
   /** The Name tool: click a place, then name what is there. */
   const nameFields = (): HTMLElement[] => {
     const out: HTMLElement[] = [h('p', { class: 'muted small hint' }, brushInfo('name').hint)];

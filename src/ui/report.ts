@@ -1,5 +1,5 @@
 import type { Climate } from '../core/climate';
-import { geoNames } from '../core/geography';
+import { freshWaters, geoNames } from '../core/geography';
 import { strokeSeason, type Stroke } from '../core/paint';
 import { centreLatitude, kmPerDegree, latitudeAt, planetRadiusKm, southLatitude } from '../core/settings';
 import { EARTH_RADIUS_KM, formatDistance, formatLatitude } from '../core/units';
@@ -100,7 +100,10 @@ export async function climateReport(world: World, cl: Climate | null): Promise<s
     const kinds = new Map<string, number>();
     for (const r of geo.regions) kinds.set(r.kind, (kinds.get(r.kind) ?? 0) + 1);
     out.push(`  Natural regions: ${geo.regions.length} (${[...kinds].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(', ')})`);
-    for (const r of geo.regions) if (names.region.has(r.id)) out.push(`    ${nm(r.kind, names.region.get(r.id))} at ${at(r.x, r.y)}`);
+    for (const r of geo.regions) if (names.region.has(r.id) || r.kind === 'Mountains') out.push(`    ${nm(r.kind === 'Mountains' ? 'Mountain range' : r.kind, names.region.get(r.id))} at ${at(r.x, r.y)}`);
+    const fresh = freshWaters(world.surface);
+    for (const l of fresh.lakes) out.push(`  ${nm('Lake', names.lake.get(l.id))} at ${at(l.x, l.y)}`);
+    for (const r of fresh.rivers) if (names.river.has(r.id)) out.push(`  ${nm('River', names.river.get(r.id))} from ${at(r.pts[0], r.pts[1])} to ${at(r.pts[r.pts.length - 2], r.pts[r.pts.length - 1])}`);
   }
 
   // The ocean currents, winds and highs, as placed by hand, with the season each holds in.

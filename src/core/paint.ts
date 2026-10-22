@@ -137,7 +137,7 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'gap', name: 'Gap (pass)', group: 'Climate', kind: 'area', hint: 'Cut a pass through high ground so moist air slips through.', sizeMi: 30, strength: 1, softness: 0.4, roughness: 0, detailMi: 1, hidden: true },
   { id: 'divide', name: 'Divide', group: 'Geography', kind: 'line', hint: 'Draw a line to cut one feature in two: a landmass into two continents (like Europe and Asia), a sea into two seas, or a region into two regions. Tap points along it, then tap the last point again (or press Enter).', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'join', name: 'Join', group: 'Geography', kind: 'line', hint: 'Draw a line across two or more features of the same kind to make them one: two landmasses one continent, two seas one sea, two regions one region.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
-  { id: 'name', name: 'Name', group: 'Geography', kind: 'point', hint: 'Click a continent, island, sea, bay or region to name it. Names stay with the land as you repaint.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'name', name: 'Name', group: 'Geography', kind: 'point', hint: 'Click a continent, island, sea, bay, mountain range, region, lake or river to name it. Names stay with the land as you repaint.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
 
@@ -207,7 +207,7 @@ export interface Stroke {
   penHeight?: number;
   /** Name pins: the name, and what it names (the landmass, archipelago, water or region under the pin). */
   label?: string;
-  nameOf?: 'land' | 'archipelago' | 'water' | 'region';
+  nameOf?: 'land' | 'archipelago' | 'water' | 'region' | 'lake' | 'river';
   /** Rain Shadow Pen: high ground (the default) or a gap (pass) that lets moist air through. */
   penMode?: 'raise' | 'gap';
   /** Drawn current (teaching sketch): what kind of water it carries. Its course is `ctrl`. */

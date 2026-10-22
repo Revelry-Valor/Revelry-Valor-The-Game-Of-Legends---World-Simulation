@@ -1,7 +1,7 @@
 import type { Climate } from './climate';
 import { COVER_BRUSHES, sketchCourse, type Stroke, type Surface } from './paint';
 import type { WorldSettings } from './settings';
-import { flowAt, riverNetwork } from './water';
+import { flowAt, riverNetwork, widthForFlow } from './water';
 
 /**
  * Geography (REDESIGN.md, section 8.13): the land split into continents, islands and
@@ -14,7 +14,7 @@ import { flowAt, riverNetwork } from './water';
  * Names are looked up through the pins, so they stay with the land even as it is repainted.
  */
 
-export type GeoLevel = 'continent' | 'island' | 'archipelago' | 'ocean' | 'sea' | 'gulf' | 'bay' | 'region';
+export type GeoLevel = 'continent' | 'island' | 'archipelago' | 'ocean' | 'sea' | 'gulf' | 'bay' | 'region' | 'lake';
 
 export interface GeoFeature {
   id: number;
@@ -318,22 +318,25 @@ export function computeGeography(surface: Surface, s: WorldSettings, cl: Climate
     if (!cl.land[k]) continue;
     const z = cl.zone[k];
     const hk = cl.height[k];
-    if (z === 13) kind[k] = 'Icefield';
-    else if (hk >= 1.8) kind[k] = 'Mountains';
+    // Height first: snowcapped or not, high ground is mountains; ice sheets are on low ground.
+    if (hk >= 1.8) kind[k] = 'Mountains';
     else if (hk >= 0.85) kind[k] = 'Highlands';
+    else if (z === 13) kind[k] = 'Icefield';
     else {
       const c = cl.cover;
       const main = c.share[k] > 0.5 ? c.second[k] : c.main[k];
       kind[k] = main >= 0 ? COVER_KIND[COVER_BRUSHES[main]] ?? 'Plains' : 'Plains';
     }
   }
-  // Smooth out specks, so regions are not broken up by single odd points.
+  // Smooth out specks, so regions are not broken up by single odd points. Mountains and
+  // highlands are kept as painted: never worn away, and never spread.
+  const RELIEF = new Set(['Mountains', 'Highlands']);
   for (let pass = 0; pass < 2; pass++) {
     const next = kind.slice();
     for (let k = 0; k < n; k++) {
-      if (!kind[k]) continue;
+      if (!kind[k] || RELIEF.has(kind[k])) continue;
       const count = new Map<string, number>();
-      for (const m of nb(k, buf)) if (kind[m]) count.set(kind[m], (count.get(kind[m]) ?? 0) + 1);
+      for (const m of nb(k, buf)) if (kind[m] && !RELIEF.has(kind[m])) count.set(kind[m], (count.get(kind[m]) ?? 0) + 1);
       let best = kind[k];
       let bc = (count.get(kind[k]) ?? 0) + 1;
       for (const [kk, c] of count) if (c > bc) {
@@ -358,8 +361,11 @@ export function computeGeography(surface: Surface, s: WorldSettings, cl: Climate
   const sameKind = (a: number, b: number) => kind[a] === kind[b] && landId[a] === landId[b];
   let regionId = labelComponents(n, (k) => cl.land[k] === 1, regionWall, nb, buf, sameKind);
   absorbWalls(regionId, (k) => cl.land[k] === 1, regionWall, nb, buf, (a, b) => landId[a] === landId[b]);
-  regionId = mergeSmall(regionId, n, nb, buf, (0.4 * D) ** 2 / cellArea, (a, b) => landId[a] === landId[b]);
-  regionId = splitLarge(regionId, n, nb, buf, (D * D) / cellArea, xOf, yOf, (1.6 * D) ** 2 / cellArea, s.seed);
+  // Small pieces join a neighbour, but a piece of mountains or highlands only joins more of the
+  // same (or stays on its own): the lowlands never swallow a range.
+  regionId = mergeSmall(regionId, n, nb, buf, (0.4 * D) ** 2 / cellArea, (a, b) => landId[a] === landId[b] && (!RELIEF.has(kind[a]) || RELIEF.has(kind[b])), (k) => (kind[k] === 'Mountains' ? 1 : 0));
+  // A mountain range stays whole however long it is (one range, one name); other land is cut to about the region size.
+  regionId = splitLarge(regionId, n, nb, buf, (D * D) / cellArea, xOf, yOf, (1.6 * D) ** 2 / cellArea, s.seed, (k) => kind[k] === 'Mountains');
   unionByJoins(regionId, joins);
   const regions: GeoFeature[] = [];
   const regionCells = groupCells(regionId);
@@ -541,14 +547,21 @@ function distanceFrom(n: number, seed: (k: number) => boolean, nb: (k: number, o
 }
 
 /** Parts smaller than `minCells` join the neighbour they share the longest border with. */
-function mergeSmall(id: Int32Array, n: number, nb: (k: number, out: number[]) => number[], buf: number[], minCells: number, may: (a: number, b: number) => boolean): Int32Array {
+function mergeSmall(id: Int32Array, n: number, nb: (k: number, out: number[]) => number[], buf: number[], minCells: number, may: (a: number, b: number) => boolean, keep: (k: number) => number = () => 0): Int32Array {
   for (let round = 0; round < 6; round++) {
     const size = new Map<number, number>();
     for (let k = 0; k < n; k++) if (id[k] >= 0) size.set(id[k], (size.get(id[k]) ?? 0) + 1);
     const border = new Map<number, Map<number, number>>();
+    // Parts mostly made of what should be kept (mountains) are never too small to stand alone.
+    const kept = new Map<number, number>();
+    for (let k = 0; k < n; k++) if (id[k] >= 0 && keep(k)) kept.set(id[k], (kept.get(id[k]) ?? 0) + 1);
     for (let k = 0; k < n; k++) {
       const a = id[k];
       if (a < 0 || size.get(a)! >= minCells) continue;
+      if ((kept.get(a) ?? 0) * 2 >= size.get(a)!) {
+        // A small range may still join more mountains next to it.
+        if (!nb(k, buf).some((m) => id[m] >= 0 && id[m] !== a && keep(m))) continue;
+      }
       for (const m of nb(k, buf)) {
         const b = id[m];
         if (b < 0 || b === a || !may(k, m)) continue;
@@ -581,7 +594,7 @@ function mergeSmall(id: Int32Array, n: number, nb: (k: number, out: number[]) =>
 }
 
 /** Parts much bigger than the region size are cut into about region-sized pieces, with ragged, natural-looking borders. */
-function splitLarge(id: Int32Array, n: number, nb: (k: number, out: number[]) => number[], buf: number[], targetCells: number, xOf: (k: number) => number, yOf: (k: number) => number, maxCells: number, seed: number): Int32Array {
+function splitLarge(id: Int32Array, n: number, nb: (k: number, out: number[]) => number[], buf: number[], targetCells: number, xOf: (k: number) => number, yOf: (k: number) => number, maxCells: number, seed: number, whole: (k: number) => boolean = () => false): Int32Array {
   const groups = groupCells(id);
   let next = Math.max(-1, ...id) + 1;
   const out = id.slice();
@@ -594,6 +607,7 @@ function splitLarge(id: Int32Array, n: number, nb: (k: number, out: number[]) =>
   };
   for (const [, cells] of groups) {
     if (cells.length <= maxCells) continue;
+    if (cells.filter(whole).length * 2 >= cells.length) continue;
     const parts = Math.max(2, Math.round(cells.length / targetCells));
     // Seeds spread out: each new one as far as possible from those already chosen.
     const seeds = [cells[Math.floor(random() * cells.length)]];
@@ -659,16 +673,180 @@ function splitLarge(id: Int32Array, n: number, nb: (k: number, out: number[]) =>
   return out;
 }
 
-/** The names given by Name pins: the latest pin inside each feature wins. */
-export function geoNames(surface: Surface, cl: Climate): { land: Map<number, string>; water: Map<number, string>; region: Map<number, string>; archipelago: Map<number, string> } {
-  const out = { land: new Map<number, string>(), water: new Map<number, string>(), region: new Map<number, string>(), archipelago: new Map<number, string>() };
-  const g = cl.geo;
-  if (!g) return out;
+/** A river, for naming and its label: its course (km) and how wide it is. */
+export interface RiverFeature {
+  id: number;
+  pts: number[];
+  length: number;
+  width: number;
+}
+
+const freshCache = new WeakMap<Stroke[], { lakes: (GeoFeature & { dabs: number[] })[]; rivers: RiverFeature[] }>();
+
+/**
+ * Lakes and rivers as places to name, straight from what is painted (so even a small lake has
+ * its own name). Lake strokes that touch are one lake; each river stroke is one river (a
+ * tributary is a river of its own).
+ */
+export function freshWaters(surface: Surface): { lakes: (GeoFeature & { dabs: number[] })[]; rivers: RiverFeature[] } {
+  const hit = freshCache.get(surface.strokes);
+  if (hit) return hit;
+  const lakeStrokes = surface.strokes.filter((k) => k.brush === 'lake' && !k.erase && k.pts.length >= 2);
+  const parent = lakeStrokes.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < lakeStrokes.length; i++) {
+    for (let j = i + 1; j < lakeStrokes.length; j++) {
+      const a = lakeStrokes[i];
+      const b = lakeStrokes[j];
+      const gap = (a.size + b.size) / 2;
+      let touch = false;
+      for (let p = 0; p < a.pts.length && !touch; p += 2) for (let q = 0; q < b.pts.length; q += 2) if (Math.hypot(a.pts[p] - b.pts[q], a.pts[p + 1] - b.pts[q + 1]) < gap) {
+        touch = true;
+        break;
+      }
+      if (touch) parent[find(i)] = find(j);
+    }
+  }
+  const groups = new Map<number, Stroke[]>();
+  lakeStrokes.forEach((st, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), st]));
+  const lakes: (GeoFeature & { dabs: number[] })[] = [];
+  for (const members of groups.values()) {
+    // Its dabs (x, y, radius), and points spread over it for its size and shape.
+    const dabs: number[] = [];
+    for (const st of members) for (let p = 0; p < st.pts.length; p += 2) dabs.push(st.pts[p], st.pts[p + 1], st.size / 2);
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    let rmin = Infinity;
+    for (let d = 0; d < dabs.length; d += 3) {
+      x0 = Math.min(x0, dabs[d] - dabs[d + 2]);
+      x1 = Math.max(x1, dabs[d] + dabs[d + 2]);
+      y0 = Math.min(y0, dabs[d + 1] - dabs[d + 2]);
+      y1 = Math.max(y1, dabs[d + 1] + dabs[d + 2]);
+      rmin = Math.min(rmin, dabs[d + 2]);
+    }
+    const st = Math.max(rmin / 4, Math.max(x1 - x0, y1 - y0) / 120);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let y = y0 + st / 2; y < y1; y += st) for (let x = x0 + st / 2; x < x1; x += st) {
+      for (let d = 0; d < dabs.length; d += 3) if (Math.hypot(x - dabs[d], y - dabs[d + 1]) < dabs[d + 2]) {
+        xs.push(x);
+        ys.push(y);
+        break;
+      }
+    }
+    if (!xs.length) continue;
+    const m = xs.length;
+    const mx = xs.reduce((a, b) => a + b, 0) / m;
+    const my = ys.reduce((a, b) => a + b, 0) / m;
+    let sxx = 0;
+    let syy = 0;
+    let sxy = 0;
+    for (let q = 0; q < m; q++) {
+      sxx += (xs[q] - mx) ** 2;
+      syy += (ys[q] - my) ** 2;
+      sxy += (xs[q] - mx) * (ys[q] - my);
+    }
+    let angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    angle = Math.max(-1.05, Math.min(1.05, angle > Math.PI / 2 ? angle - Math.PI : angle < -Math.PI / 2 ? angle + Math.PI : angle));
+    let lo = Infinity;
+    let hi = -Infinity;
+    let wlo = Infinity;
+    let whi = -Infinity;
+    let best = 0;
+    let bd = -Infinity;
+    for (let q = 0; q < m; q++) {
+      const u = (xs[q] - mx) * Math.cos(angle) + (ys[q] - my) * Math.sin(angle);
+      const v = -(xs[q] - mx) * Math.sin(angle) + (ys[q] - my) * Math.cos(angle);
+      lo = Math.min(lo, u);
+      hi = Math.max(hi, u);
+      wlo = Math.min(wlo, v);
+      whi = Math.max(whi, v);
+      // The label goes where the lake is widest, near its middle.
+      let depth = 0;
+      for (let d = 0; d < dabs.length; d += 3) depth = Math.max(depth, dabs[d + 2] - Math.hypot(xs[q] - dabs[d], ys[q] - dabs[d + 1]));
+      const sc = depth - 0.2 * Math.hypot(xs[q] - mx, ys[q] - my);
+      if (sc > bd) {
+        bd = sc;
+        best = q;
+      }
+    }
+    lakes.push({ id: Math.min(...members.map((k) => k.id)), level: 'lake', kind: 'Lake', area: m * st * st, x: xs[best], y: ys[best], angle, length: hi - lo + st, width: whi - wlo + st, alt: [], dabs });
+  }
+  const rivers: RiverFeature[] = [];
+  for (const r of riverNetwork(surface).values()) {
+    if (r.stroke.pts.length < 4) continue;
+    rivers.push({ id: r.stroke.id, pts: r.stroke.pts, length: r.total, width: widthForFlow(flowAt(r, r.total * 0.5)) });
+  }
+  const out = { lakes, rivers };
+  freshCache.set(surface.strokes, out);
+  return out;
+}
+
+/** The lake at a place (its id), within `tol` km of its shore; −1 for none. */
+export function lakeAt(surface: Surface, x: number, y: number, tol = 0): number {
+  let best = -1;
+  let bd = Infinity;
+  for (const l of freshWaters(surface).lakes) {
+    for (let d = 0; d < l.dabs.length; d += 3) {
+      const dist = Math.hypot(x - l.dabs[d], y - l.dabs[d + 1]) - l.dabs[d + 2];
+      if (dist <= tol && dist < bd) {
+        bd = dist;
+        best = l.id;
+      }
+    }
+  }
+  return best;
+}
+
+/** The river nearest a place, within `tol` km of its course (its id and the nearest point on it); null for none. */
+export function riverAt(surface: Surface, x: number, y: number, tol: number): { id: number; x: number; y: number } | null {
+  let best: { id: number; x: number; y: number } | null = null;
+  let bd = tol;
+  for (const r of freshWaters(surface).rivers) {
+    const p = r.pts;
+    for (let q = 2; q < p.length; q += 2) {
+      const ax = p[q - 2];
+      const ay = p[q - 1];
+      const vx = p[q] - ax;
+      const vy = p[q + 1] - ay;
+      const t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1)));
+      const px = ax + vx * t;
+      const py = ay + vy * t;
+      const d = Math.hypot(x - px, y - py);
+      if (d < bd) {
+        bd = d;
+        best = { id: r.id, x: px, y: py };
+      }
+    }
+  }
+  return best;
+}
+
+export type NameOf = 'land' | 'archipelago' | 'water' | 'region' | 'lake' | 'river';
+
+/** The names given by Name pins: the latest pin on each feature wins. */
+export function geoNames(surface: Surface, cl: Climate | null): Record<NameOf, Map<number, string>> {
+  const out: Record<NameOf, Map<number, string>> = { land: new Map(), archipelago: new Map(), water: new Map(), region: new Map(), lake: new Map(), river: new Map() };
+  const g = cl?.geo;
   for (const st of surface.strokes) {
     if (st.brush !== 'name' || st.erase || !st.label || st.pts.length < 2) continue;
-    const k = geoCell(cl, st.pts[0], st.pts[1]);
-    if (k < 0) continue;
+    const [x, y] = st.pts;
     const of = st.nameOf ?? 'land';
+    if (of === 'lake') {
+      const id = lakeAt(surface, x, y, 2);
+      if (id >= 0) out.lake.set(id, st.label);
+      continue;
+    }
+    if (of === 'river') {
+      const r = riverAt(surface, x, y, 5);
+      if (r) out.river.set(r.id, st.label);
+      continue;
+    }
+    if (!cl || !g) continue;
+    const k = geoCell(cl, x, y);
+    if (k < 0) continue;
     if (of === 'land' && g.land[k] >= 0) out.land.set(g.land[k], st.label);
     else if (of === 'archipelago' && g.land[k] >= 0 && g.archipelagoOf.has(g.land[k])) out.archipelago.set(g.archipelagoOf.get(g.land[k])!, st.label);
     else if (of === 'water' && g.water[k] >= 0) out.water.set(g.water[k], st.label);

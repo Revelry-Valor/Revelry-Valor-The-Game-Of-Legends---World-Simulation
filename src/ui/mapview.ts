@@ -1,4 +1,4 @@
-import { geoCell, geoNames, type GeoFeature } from '../core/geography';
+import { freshWaters, geoCell, geoNames, lakeAt, riverAt, type GeoFeature } from '../core/geography';
 import { autoCoverName, climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
 import { brushInfo, inSeason, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
@@ -95,6 +95,8 @@ export interface MapView {
   worldReset(): void;
   /** The spot last clicked with the Name tool (km). */
   namePick(): { x: number; y: number } | null;
+  /** Kilometres per screen pixel at the current zoom. */
+  pxKm(): number;
   dispose(): void;
 }
 
@@ -590,19 +592,30 @@ export function createMapView(o: MapViewOptions): MapView {
     const names = geoNames(o.world().surface, cl);
     const paper = o.look().style === 'paper';
     const minCells = 3 * cl.step * cl.step;
-    type L = { f: GeoFeature; text: string; named: boolean; water: boolean; max: number; caps: boolean; weight: number; italic: boolean; spacing: number };
+    type L = { f: GeoFeature; text: string; named: boolean; water: boolean; max: number; caps: boolean; weight: number; italic: boolean; spacing: number; wide?: number };
     const list: L[] = [];
-    const add = (f: GeoFeature, name: string | undefined, water: boolean, max: number, caps: boolean, weight: number, italic: boolean, spacing: number) => {
-      if (f.area < minCells) return;
-      list.push({ f, text: name ?? f.kind, named: !!name, water, max, caps, weight, italic, spacing });
+    const add = (f: GeoFeature, name: string | undefined, water: boolean, max: number, caps: boolean, weight: number, italic: boolean, spacing: number, wide = 0.32) => {
+      if (f.area < minCells && !(name || f.kind === 'Mountains')) return;
+      list.push({ f, text: name ?? f.kind, named: !!name, water, max, caps, weight, italic, spacing, wide });
     };
     for (const f of geo.landmasses) if (f.level === 'continent') add(f, names.land.get(f.id), false, 46, true, 700, false, 0.45);
     for (const f of geo.waters) if (f.level === 'ocean') add(f, names.water.get(f.id), true, 40, true, 600, true, 0.5);
     for (const f of geo.waters) if (f.level === 'sea') add(f, names.water.get(f.id), true, 24, true, 500, true, 0.3);
+    // Mountain ranges come before other regions: they keep their own names.
+    // (Their names run along the range and may be wider than it is, as on a drawn map.)
+    for (const f of geo.regions) if (f.kind === 'Mountains') add(f, names.region.get(f.id), false, 20, true, 600, false, 0.3, 1.6);
+    const fresh = freshWaters(o.world().surface);
+    for (const f of fresh.lakes) {
+      const nm = names.lake.get(f.id);
+      // Named lakes always; unnamed ones only if big.
+      if (nm || f.area >= minCells) list.push({ f, text: nm ?? f.kind, named: !!nm, water: true, max: 18, caps: false, weight: 600, italic: true, spacing: 0.08 });
+    }
     for (const f of geo.archipelagos) add(f, names.archipelago.get(f.id), false, 17, true, 600, false, 0.25);
     for (const f of geo.landmasses) if (f.level === 'island') add(f, names.land.get(f.id), false, 15, false, 600, false, 0.08);
     for (const f of geo.waters) if (f.level === 'gulf' || f.level === 'bay') add(f, names.water.get(f.id), true, f.level === 'gulf' ? 18 : 14, false, 500, true, 0.1);
-    if (which === 'all') for (const f of geo.regions) add(f, names.region.get(f.id), false, 15, true, 500, false, 0.18);
+    if (which === 'all') for (const f of geo.regions) if (f.kind !== 'Mountains') add(f, names.region.get(f.id), false, 15, true, 500, false, 0.18);
+    // Named places before unnamed ones (the order above holds within each).
+    list.sort((a, b) => Number(b.named) - Number(a.named));
     // Placed labels as rows of circles along their lines (so slanted ones don't block a whole box).
     const taken: [number, number, number][] = [];
     const yTop = toScreen(0, 0, r)[1];
@@ -613,8 +626,10 @@ export function createMapView(o: MapViewOptions): MapView {
       const text = l.caps ? l.text.toUpperCase() : l.text;
       const chars = [...text];
       // Size: fill most of the place's length, but not more than about a third of its width.
-      const em = Math.min((l.f.length * 0.8) / Math.max(3, chars.length * (0.62 + l.spacing)), l.f.width * 0.32);
+      const em = Math.min((l.f.length * 0.8) / Math.max(3, chars.length * (0.62 + l.spacing)), l.f.width * (l.wide ?? 0.32));
       let px = Math.min(l.max, em * view.scale) * (l.named ? 1 : 0.82);
+      // A named place keeps readable lettering whenever it is big enough to see, even if its name runs past its shores.
+      if (l.named && px < 10 && Math.max(l.f.length, l.f.width) * view.scale >= 6) px = 10;
       if (px < 8) continue;
       px = Math.round(px);
       g.font = `${l.italic ? 'italic ' : ''}${l.weight} ${px}px ${l.water ? '"Alegreya Sans", serif' : '"Alegreya SC", Georgia, serif'}`;
@@ -653,6 +668,60 @@ export function createMapView(o: MapViewOptions): MapView {
           g.strokeText(ch, x, 0);
           g.fillText(ch, x, 0);
           x += widths[i] + gap;
+        });
+        g.restore();
+      }
+    }
+    // Named rivers: written along the river, in its middle stretch.
+    for (const rv of fresh.rivers) {
+      const nm = names.river.get(rv.id);
+      if (!nm) continue;
+      const px = Math.round(Math.max(10, Math.min(16, 9 + rv.width * 4)));
+      g.font = `italic 600 ${px}px "Alegreya Sans", serif`;
+      const text = [...nm];
+      const widths = text.map((c) => g.measureText(c).width);
+      const gap = px * 0.12;
+      const total = widths.reduce((a, b) => a + b, 0) + gap * (text.length - 1);
+      for (const c of copies) {
+        // The course on screen, read left to right.
+        let pts: number[] = [];
+        for (let q = 0; q < rv.pts.length; q += 2) pts.push(x0 + c * span + rv.pts[q] * view.scale, yTop + rv.pts[q + 1] * view.scale);
+        if (pts[pts.length - 2] < pts[0]) {
+          const rev: number[] = [];
+          for (let q = pts.length - 2; q >= 0; q -= 2) rev.push(pts[q], pts[q + 1]);
+          pts = rev;
+        }
+        const cum = [0];
+        for (let q = 2; q < pts.length; q += 2) cum.push(cum[cum.length - 1] + Math.hypot(pts[q] - pts[q - 2], pts[q + 1] - pts[q - 1]));
+        const L = cum[cum.length - 1];
+        if (L < total * 1.3) continue;
+        const at = (d: number): [number, number, number] => {
+          let q = 1;
+          while (q < cum.length - 1 && cum[q] < d) q++;
+          const t = (d - cum[q - 1]) / Math.max(1e-6, cum[q] - cum[q - 1]);
+          const ax = pts[(q - 1) * 2];
+          const ay = pts[(q - 1) * 2 + 1];
+          const bx = pts[q * 2];
+          const by = pts[q * 2 + 1];
+          return [ax + (bx - ax) * t, ay + (by - ay) * t, Math.atan2(by - ay, bx - ax)];
+        };
+        let d = L / 2 - total / 2;
+        const mid = at(L / 2);
+        if (mid[0] < 0 || mid[0] > r.width || mid[1] < 0 || mid[1] > r.height) continue;
+        g.save();
+        g.textBaseline = 'alphabetic';
+        g.fillStyle = paper ? '#2c4f66' : '#dcefff';
+        g.strokeStyle = paper ? 'rgba(240,230,205,0.85)' : 'rgba(8,28,52,0.8)';
+        g.lineWidth = Math.max(2, px * 0.18);
+        text.forEach((ch, i) => {
+          const [cx, cy, a] = at(d + widths[i] / 2);
+          g.save();
+          g.translate(cx, cy);
+          g.rotate(Math.max(-1.2, Math.min(1.2, a)));
+          g.strokeText(ch, -widths[i] / 2, -px * 0.35);
+          g.fillText(ch, -widths[i] / 2, -px * 0.35);
+          g.restore();
+          d += widths[i] + gap;
         });
         g.restore();
       }
@@ -1487,9 +1556,15 @@ export function createMapView(o: MapViewOptions): MapView {
       if (cover) parts.push(brushInfo(cover[0] as BrushId).name);
       if (p.water === 'river') {
         const ft = p.riverWidth * 3280.84;
-        parts.push(`River, ${ft < 5280 ? `${Math.round(ft / 10) * 10} ft (${Math.round(p.riverWidth * 1000)} m)` : formatDistance(p.riverWidth)} wide`);
+        const rv = riverAt(w.surface, xw, y, 5);
+        const nm = rv ? geoNames(w.surface, o.climate()).river.get(rv.id) : undefined;
+        parts.push(`${nm ? `${nm} (river)` : 'River'}, ${ft < 5280 ? `${Math.round(ft / 10) * 10} ft (${Math.round(p.riverWidth * 1000)} m)` : formatDistance(p.riverWidth)} wide`);
       }
-      if (p.water === 'lake') parts.push('Lake');
+      if (p.water === 'lake') {
+        const id = lakeAt(w.surface, xw, y, 1 / view.scale + 3);
+        const nm = id >= 0 ? geoNames(w.surface, o.climate()).lake.get(id) : undefined;
+        parts.push(nm ? `${nm} (lake)` : 'Lake');
+      }
       if (p.waterfall) parts.push('Waterfall');
       if (p.wet > 0.4 && !p.water) parts.push('Well watered');
       if (p.volcanic) parts.push('Volcanic');
@@ -1591,6 +1666,7 @@ export function createMapView(o: MapViewOptions): MapView {
     sketch: sketchOps,
     high: highOps,
     namePick: () => namePicked,
+    pxKm: () => 1 / view.scale,
     climateChanged() {
       cache.setClimate(o.climate());
       schedule();

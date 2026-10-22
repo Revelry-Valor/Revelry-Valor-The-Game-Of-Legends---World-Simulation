@@ -11,7 +11,7 @@ import { deleteWorld } from '../core/storage';
 import { createMapView } from './mapview';
 import { planetFields, worldTabFields } from './settingsform';
 import { createToolPanel, type NameOps } from './toolpanel';
-import { geoCell, geoNames, GEO_DEFAULTS, REGION_KINDS } from '../core/geography';
+import { freshWaters, geoCell, geoNames, GEO_DEFAULTS, lakeAt, REGION_KINDS, riverAt, type NameOf } from '../core/geography';
 import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
 import { climateReport } from './report';
 
@@ -160,8 +160,10 @@ export function showWorld(app: App, start: World): () => void {
   });
 
   // ---- Names: pins on the map that name the feature under them ----
-  type NameOf = 'land' | 'archipelago' | 'water' | 'region';
+  const riverTol = () => Math.max(3, map.pxKm() * 14);
   const featureAt = (x: number, y: number, of: NameOf): number => {
+    if (of === 'lake') return lakeAt(world.surface, x, y, map.pxKm() * 6);
+    if (of === 'river') return riverAt(world.surface, x, y, riverTol())?.id ?? -1;
     const cl = climate.climate;
     const g = cl?.geo;
     if (!cl || !g) return -1;
@@ -182,6 +184,10 @@ export function showWorld(app: App, start: World): () => void {
       if (k < 0) return [];
       const names = geoNames(world.surface, cl);
       const out: ReturnType<NameOps['at']> = [];
+      const lk = lakeAt(world.surface, x, y, map.pxKm() * 6);
+      if (lk >= 0) out.push({ of: 'lake', kind: 'Lake', name: names.lake.get(lk) ?? '' });
+      const rv = riverAt(world.surface, x, y, riverTol());
+      if (rv) out.push({ of: 'river', kind: 'River', name: names.river.get(rv.id) ?? '' });
       if (g.land[k] >= 0) {
         const f = g.landmasses.find((q) => q.id === g.land[k]);
         out.push({ of: 'land', kind: f?.kind ?? 'Land', name: names.land.get(g.land[k]) ?? '' });
@@ -196,7 +202,7 @@ export function showWorld(app: App, start: World): () => void {
       const target = featureAt(x, y, of);
       if (target < 0) return;
       // Pins already naming this feature: the latest is renamed; an empty name removes them all.
-      const pins = world.surface.strokes.filter((st) => st.brush === 'name' && !st.erase && (st.nameOf ?? 'land') === of && featureAt(st.pts[0], st.pts[1], of) === target);
+      const pins = world.surface.strokes.filter((st) => st.brush === 'name' && !st.erase && (st.nameOf ?? 'land') === of && (of === 'lake' ? lakeAt(world.surface, st.pts[0], st.pts[1], 2) : of === 'river' ? riverAt(world.surface, st.pts[0], st.pts[1], 5)?.id ?? -1 : featureAt(st.pts[0], st.pts[1], of)) === target);
       snapshot();
       if (!label) setStrokes(world.surface.strokes.filter((st) => !pins.includes(st)));
       else if (pins.length) {
@@ -204,7 +210,23 @@ export function showWorld(app: App, start: World): () => void {
         setStrokes(world.surface.strokes.map((st) => (st === last ? { ...st, label } : st)));
       } else {
         const id = world.surface.nextId;
-        const pin: Stroke = { ...brushDefaults('name'), id, pts: [Math.round(x * 100) / 100, Math.round(y * 100) / 100], label, nameOf: of };
+        // A river's pin goes on the river itself, so it stays with it.
+        let at = of === 'river' ? riverAt(world.surface, x, y, riverTol()) ?? { x, y } : { x, y };
+        // A lake's pin goes in the lake: at the nearest of its dabs' middles.
+        if (of === 'lake') {
+          const l = freshWaters(world.surface).lakes.find((q) => q.id === target);
+          if (l) {
+            let bd = Infinity;
+            for (let d = 0; d < l.dabs.length; d += 3) {
+              const dd = Math.hypot(l.dabs[d] - x, l.dabs[d + 1] - y);
+              if (dd < bd) {
+                bd = dd;
+                at = { x: l.dabs[d], y: l.dabs[d + 1] };
+              }
+            }
+          }
+        }
+        const pin: Stroke = { ...brushDefaults('name'), id, pts: [Math.round(at.x * 100) / 100, Math.round(at.y * 100) / 100], label, nameOf: of };
         world = { ...world, surface: { strokes: [...world.surface.strokes, pin], nextId: id + 1 } };
         setStrokes(world.surface.strokes);
       }

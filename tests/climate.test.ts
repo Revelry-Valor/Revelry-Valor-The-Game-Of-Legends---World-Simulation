@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { geoCell, geoNames } from '../src/core/geography';
+import { freshWaters, geoCell, geoNames } from '../src/core/geography';
 import { autoCoverName, cellEdges, climateAt, computeClimate, nearestPoint, rainClass, ZONE_INFO, type Climate } from '../src/core/climate';
 import { brushDefaults, COVER_BRUSHES, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { cToF, defaultSettings, fToC, latitudeAt, southLatitude } from '../src/core/settings';
@@ -362,4 +362,28 @@ describe('geography', () => {
     expect(sizes[sizes.length >> 1]).toBeGreaterThan(120);
     expect(sizes[sizes.length >> 1]).toBeLessThan(450);
   }, 60000);
+});
+
+describe('geography: ranges, lakes and rivers keep their own names', () => {
+  it('mountains are never swallowed by the regions around them', () => {
+    const g = cl.geo!;
+    let m = 0;
+    for (let k = 0; k < cl.land.length; k++) if (cl.land[k] && cl.height[k] >= 1.8) {
+      m++;
+      expect(g.regions[g.region[k]].kind).toBe('Mountains');
+    }
+    expect(m).toBeGreaterThan(0);
+  });
+  it('names lakes and rivers with pins', () => {
+    const s2 = world((add) => {
+      add('lake', [6500, yAt(10)], { size: 120 });
+      add('river', line([[6000, yAt(30)], [7500, yAt(25)]], 20), { size: 12, strength: 1 });
+      add('name', [6500, yAt(10)], { label: 'Mirrormere', nameOf: 'lake' });
+      add('name', [6750, yAt(30 - 2.5)], { label: 'Long Water', nameOf: 'river' });
+    });
+    const names = geoNames(s2, null);
+    expect([...names.lake.values()]).toEqual(['Mirrormere']);
+    expect([...names.river.values()]).toEqual(['Long Water']);
+    expect(freshWaters(s2).lakes.length).toBe(1);
+  });
 });
