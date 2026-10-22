@@ -108,24 +108,6 @@ const COVER_PAPER: Record<CoverBrush, RGB> = {
   rockdesert: hex('#dcc6a0'),
 };
 
-/** Ground cover the climate gives each zone (two covers blended for variety). */
-const ZONE_COVER: [CoverBrush, CoverBrush][] = [
-  ['jungle', 'jungle'], // rainforest
-  ['jungle', 'forest'], // monsoon
-  ['savanna', 'grassland'], // savanna
-  ['dunes', 'rockdesert'], // hot desert
-  ['rockdesert', 'steppe'], // cold desert
-  ['steppe', 'savanna'], // hot steppe
-  ['steppe', 'grassland'], // cold steppe
-  ['scrub', 'grassland'], // Mediterranean
-  ['forest', 'grassland'], // humid subtropical
-  ['forest', 'grassland'], // oceanic
-  ['forest', 'taiga'], // humid continental
-  ['taiga', 'taiga'], // subarctic
-  ['tundra', 'tundra'], // tundra
-  ['glacier', 'glacier'], // ice cap
-];
-
 /** Render one picture. Returns RGBA bytes, transparent outside the map. */
 export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | null = null): Uint8ClampedArray {
   const { w, h, px } = job;
@@ -197,7 +179,7 @@ export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | nu
         if (land > 0) {
           let c: RGB;
           const ck = climatePoint(x, y, true);
-          if (ck >= 0 && cl!.zone[ck] >= 0) c = climateCover(cl!.zone[ck], x, y, px, seed, false);
+          if (ck >= 0 && cl!.cover.main[ck] >= 0) c = climateCover(cl!, ck, x, y, px, seed, false);
           else {
             const dryness = 0.5 + 0.5 * fbm(x, y, 220, Math.max(px * 2, 12), seed + 51, 5);
             c = mix(SAT.grass, SAT.dry, smooth(0.35, 0.75, dryness));
@@ -262,7 +244,7 @@ export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | nu
         if (land > 0) {
           let c = mix(PAPER.land, PAPER.shade, 0.06 * (fbm(x, y, 40, px, seed + 60) + 1));
           const ck = climatePoint(x, y, true);
-          if (ck >= 0 && cl!.zone[ck] >= 0) c = mix(c, climateCover(cl!.zone[ck], x, y, px, seed, true), 0.75);
+          if (ck >= 0 && cl!.cover.main[ck] >= 0) c = mix(c, climateCover(cl!, ck, x, y, px, seed, true), 0.75);
           c = landCover(c, f, k, x, y, px, seed, true);
           if (se && ck >= 0 && se.snow[ck]) c = mix(c, [250, 250, 248], 0.7);
           const shade = Math.max(0, Math.min(1.3, bright));
@@ -407,13 +389,16 @@ function coverTint(key: CoverBrush, x: number, y: number, px: number, seed: numb
   return tint;
 }
 
-/** The ground cover a climate zone gives, two covers blended in large patches. */
-function climateCover(zone: number, x: number, y: number, px: number, seed: number, paper: boolean): RGB {
-  const [a, b] = ZONE_COVER[zone] ?? ['grassland', 'grassland'];
+/** The ground cover the climate gives a point: its main cover, with the second in patches by its share. */
+function climateCover(cl: Climate, k: number, x: number, y: number, px: number, seed: number, paper: boolean): RGB {
+  const a = COVER_BRUSHES[cl.cover.main[k]];
   const ta = coverTint(a, x, y, px, seed, paper);
-  if (a === b) return ta;
-  const t = smooth(-0.15, 0.25, fbm(x, y, 60, Math.max(px, 2), seed + 220, 4));
-  return mix(ta, coverTint(b, x, y, px, seed, paper), t);
+  const share = cl.cover.share[k];
+  if (share <= 0.01) return ta;
+  // Patches about 30–60 km across, with ragged edges; the threshold sets how much ground they take.
+  const nz = fbm(x, y, 45, Math.max(px, 2), seed + 220, 4);
+  const t = smooth(-0.12, 0.12, (share - 0.5) * 1.3 - nz);
+  return t <= 0 ? ta : mix(ta, coverTint(COVER_BRUSHES[cl.cover.second[k]], x, y, px, seed, paper), t);
 }
 
 

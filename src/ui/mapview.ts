@@ -1,4 +1,4 @@
-import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
+import { autoCoverName, climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
 import { brushInfo, inSeason, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
@@ -1163,6 +1163,8 @@ export function createMapView(o: MapViewOptions): MapView {
       const f = (t: number) => `${Math.round(cToF(t))}°F`;
       if (p.ground === 'land') {
         if (c.zone >= 0) parts.push(ZONE_INFO[c.zone].name);
+        const auto = Object.keys(p.cover).length ? null : autoCoverName(cl, nearestPoint(cl, xw, y));
+        if (auto) parts.push(auto);
         parts.push(`Summer ${f(c.summerT)}, ${RAIN_NAMES[rainClass(c.summerRain)]}`, `Winter ${f(c.winterT)}, ${RAIN_NAMES[rainClass(c.winterRain)]}`);
       } else {
         parts.push(`Sea ${f(c.winterT)} to ${f(c.summerT)}`);

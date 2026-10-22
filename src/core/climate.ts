@@ -1,5 +1,5 @@
 import { CLIMATE_DEFAULTS, kmPerDegree, type WorldSettings } from './settings';
-import { inSeason, type Stroke, type Surface } from './paint';
+import { BRUSHES, COVER_BRUSHES, inSeason, type CoverBrush, type Stroke, type Surface } from './paint';
 import { evaluate } from './terrain';
 import { flowAt, riverNetwork, widthForFlow } from './water';
 
@@ -117,6 +117,8 @@ export interface Climate {
   summer: SeasonClimate;
   winter: SeasonClimate;
   zone: Int8Array;
+  /** Ground cover the climate gives, where nothing is painted. */
+  cover: AutoCover;
   reef: Uint8Array;
 }
 
@@ -272,8 +274,9 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
   const summer = season(ctx, surface, 1);
   const winter = season(ctx, surface, -1);
   const zone = zones(ctx, summer, winter);
+  const cover = groundCover(ctx, summer, winter, zone);
   const reef = reefs(ctx, surface, summer, winter);
-  const cl: Climate = { x0: stepX / 2, y0: stepY / 2, step: stepX, w, h, wrapKm: wrap ? W : 0, lat, land, ground, height, distSea, summer, winter, zone, reef };
+  const cl: Climate = { x0: stepX / 2, y0: stepY / 2, step: stepX, w, h, wrapKm: wrap ? W : 0, lat, land, ground, height, distSea, summer, winter, zone, cover, reef };
   for (const se of [summer, winter]) {
     flowPaths(se);
     delete se.major;
@@ -1313,11 +1316,29 @@ function rain(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate, crystal
 }
 
 // ---------------------------------------------------------------------------------------------
-// Climate zones from both seasons (decided rules, Köppen groups).
+// Climate zones from both seasons (decided rules, Köppen groups; the user's list of 14 climates).
+
+/** How steep the hidden climate heights are at each point (km of rise per 100 km). */
+function slopeField(ctx: Ctx): Float32Array {
+  const { w, h, n, height, stepX, wrap } = ctx;
+  const out = new Float32Array(n);
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const k = j * w + i;
+      const il = i > 0 ? k - 1 : wrap ? k + w - 1 : k;
+      const ir = i < w - 1 ? k + 1 : wrap ? k - w + 1 : k;
+      const ju = j > 0 ? k - w : k;
+      const jd = j < h - 1 ? k + w : k;
+      out[k] = (Math.hypot(height[ir] - height[il], height[jd] - height[ju]) / (2 * stepX)) * 100;
+    }
+  }
+  return out;
+}
 
 function zones(ctx: Ctx, a: SeasonClimate, b: SeasonClimate): Int8Array {
-  const { w, h, n, land, lat, stepX, wrap } = ctx;
+  const { w, h, n, land, stepX, wrap } = ctx;
   const zone = new Int8Array(n).fill(-1);
+  // 1 hot desert, 2 cold desert.
   const desert = new Uint8Array(n);
   for (let k = 0; k < n; k++) {
     if (!land[k]) continue;
@@ -1326,21 +1347,24 @@ function zones(ctx: Ctx, a: SeasonClimate, b: SeasonClimate): Int8Array {
     const win = north ? b : a;
     const Ts = Math.max(sum.temp[k], win.temp[k]);
     const Tw = Math.min(sum.temp[k], win.temp[k]);
+    // The rainy season is usually summer; on some coasts it is winter, so take the wetter one.
+    const rWet = Math.max(sum.rain[k], win.rain[k]);
+    const rDry = Math.min(sum.rain[k], win.rain[k]);
     const rs = rainClass(sum.rain[k]);
     const rw = rainClass(win.rain[k]);
-    const mean = (Ts + Tw) / 2;
     let z: number;
     if (Ts < 0) z = 13;
     else if (Ts < 10) z = 12;
     else if (rs === 0 && rw === 0) {
-      z = mean >= 18 ? 3 : 4;
-      desert[k] = 1;
+      // Arid at any temperature: hot where winters stay above freezing, cold where they don't.
+      z = Tw >= 0 ? 3 : 4;
+      desert[k] = Tw >= 0 ? 1 : 2;
     } else if (Tw >= 18) {
-      // Tropical: rainforest wet all year, monsoon with a short dry season, savanna with a long one.
-      const rMin = Math.min(sum.rain[k], win.rain[k]);
-      const rMax = Math.max(sum.rain[k], win.rain[k]);
-      if (rMin >= RAIN_WET * 2) z = 0;
-      else if (rMax >= RAIN_VERY_WET && rMin >= RAIN_WET * 0.6) z = 1;
+      // Tropical: rainforest very wet in both seasons, monsoon very wet in the rainy season with a
+      // drier one, savanna wet in the rainy season and dry in the other.
+      if (rainClass(rDry) === 2) z = 0;
+      else if (rainClass(rWet) === 2) z = 1;
+      else if (rainClass(rDry) >= 1) z = rWet + rDry >= RAIN_VERY_WET * 1.4 ? 0 : 2;
       else z = 2;
     } else if (Tw >= 0) {
       if (rs === 0 && rw >= 1) z = 7;
@@ -1348,22 +1372,176 @@ function zones(ctx: Ctx, a: SeasonClimate, b: SeasonClimate): Int8Array {
     } else z = Ts >= 19 ? 10 : 11;
     zone[k] = z;
   }
-  // Steppe borders around deserts (wider away from the tropics), and dry margins.
-  const dd = distanceField(w, h, stepX, wrap, (k) => desert[k] === 1, false);
+  // Steppe: a border around deserts, about 100–300 km round a hot desert and 200–600 km round a
+  // cold one; thinner on steep slopes, wider on gentle highlands. Dry ground at the desert's edge
+  // that catches occasional rain is steppe too.
+  const slope = slopeField(ctx);
+  const ddHot = distanceField(w, h, stepX, wrap, (k) => desert[k] === 1, false);
+  const ddCold = distanceField(w, h, stepX, wrap, (k) => desert[k] === 2, false);
   for (let k = 0; k < n; k++) {
     const z = zone[k];
-    if (z < 0 || desert[k] || z >= 12) continue;
-    const la = Math.abs(lat[(k / w) | 0]);
-    const border = 160 * (la < 25 ? 1 : 2) * (ctx.height[k] > 1.5 ? 0.5 : 1);
-    const north = ctx.latOf(k) >= 0;
+    if (z < 0 || z >= 12) continue;
+    const Tw = Math.min(a.temp[k], b.temp[k]);
     const minRain = Math.min(a.rain[k], b.rain[k]);
-    const maxRain = Math.max(north ? a.rain[k] : b.rain[k], north ? b.rain[k] : a.rain[k]);
-    if ((dd[k] <= border && minRain < RAIN_WET && maxRain < RAIN_VERY_WET) || (maxRain < RAIN_WET * 1.6 && minRain < RAIN_WET && z !== 7)) {
-      const mean = (a.temp[k] + b.temp[k]) / 2;
-      zone[k] = mean >= 18 ? 5 : 6;
+    const maxRain = Math.max(a.rain[k], b.rain[k]);
+    const steppeZone = Tw >= 0 ? 5 : 6;
+    if (desert[k]) {
+      // Desert that catches some rain in its wetter season fades into steppe.
+      if (maxRain >= RAIN_WET * 0.6) zone[k] = steppeZone;
+      continue;
     }
+    const shape = slope[k] > 1.2 ? 0.5 : ctx.height[k] > 0.8 && slope[k] < 0.5 ? 1.3 : 1;
+    const nearDesert = ddHot[k] <= 200 * shape || ddCold[k] <= 400 * shape;
+    const marginal = minRain < RAIN_WET && maxRain < RAIN_VERY_WET;
+    const scant = maxRain < RAIN_WET * 1.6 && minRain < RAIN_WET && z !== 7;
+    if ((nearDesert && marginal) || scant) zone[k] = steppeZone;
   }
   return zone;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ground cover from the climate: what grows where nothing is painted. Each point gets a main
+// cover and a second one that shows in patches, by its share; both follow the zone, the two
+// seasons' rain and warmth, and the height.
+
+export interface AutoCover {
+  /** Index into COVER_BRUSHES (−1 at sea). */
+  main: Int8Array;
+  second: Int8Array;
+  /** Share of the ground the second cover takes, 0–1. */
+  share: Float32Array;
+}
+
+function groundCover(ctx: Ctx, a: SeasonClimate, b: SeasonClimate, zone: Int8Array): AutoCover {
+  const { n, height } = ctx;
+  const main = new Int8Array(n).fill(-1);
+  const second = new Int8Array(n).fill(-1);
+  const share = new Float32Array(n);
+  const id = (c: CoverBrush) => COVER_BRUSHES.indexOf(c);
+  const W = RAIN_WET;
+  const V = RAIN_VERY_WET;
+  for (let k = 0; k < n; k++) {
+    const z = zone[k];
+    if (z < 0) continue;
+    const north = ctx.latOf(k) >= 0;
+    const sum = north ? a : b;
+    const win = north ? b : a;
+    const Ts = Math.max(sum.temp[k], win.temp[k]);
+    const Tw = Math.min(sum.temp[k], win.temp[k]);
+    const rs = sum.rain[k];
+    const rw = win.rain[k];
+    const rWet = Math.max(rs, rw);
+    const rDry = Math.min(rs, rw);
+    const hk = height[k];
+    let m: CoverBrush;
+    let s2: CoverBrush;
+    let t = 0;
+    switch (z) {
+      case 0: // rainforest; cooler cloud forest on high slopes
+        m = 'jungle';
+        s2 = 'forest';
+        t = 0.7 * smooth(1, 2.2, hk);
+        break;
+      case 1: // monsoon: jungle, with drier deciduous woods where the dry season bites
+        m = 'jungle';
+        s2 = 'forest';
+        t = 0.55 * (1 - smooth(0.04, W * 2, rDry));
+        break;
+      case 2: // savanna: woodland toward the wet side, open grass toward the dry side
+        m = 'savanna';
+        if (rWet >= V * 0.8) {
+          s2 = 'forest';
+          t = 0.35 * smooth(V * 0.8, V * 1.6, rWet);
+        } else {
+          s2 = 'grassland';
+          t = 0.4 * (1 - smooth(W, V * 0.8, rWet));
+        }
+        break;
+      case 3: // hot desert: sand seas on low ground, stony desert on higher and broken ground
+        m = 'dunes';
+        s2 = 'rockdesert';
+        t = Math.min(1, 0.3 + 0.7 * smooth(0.25, 1.1, hk));
+        break;
+      case 4: // cold desert: stony plains with thin steppe grass where a little rain falls
+        m = 'rockdesert';
+        s2 = 'steppe';
+        t = 0.45 * smooth(0.02, W * 0.8, rWet);
+        break;
+      case 5: // hot steppe: short grass, with scattered trees on the tropical side, shrubs elsewhere
+        m = 'steppe';
+        s2 = Tw >= 12 ? 'savanna' : 'scrub';
+        t = 0.45 * smooth(0.04, W * 1.5, rWet);
+        break;
+      case 6: // cold steppe: short grass, taller grass where it is wetter
+        m = 'steppe';
+        s2 = 'grassland';
+        t = 0.5 * smooth(0.05, W * 1.5, rWet);
+        break;
+      case 7: // Mediterranean: scrub, with woods where winters are wetter or on the hills
+        m = 'scrub';
+        s2 = 'forest';
+        t = Math.min(0.75, 0.15 + 0.35 * smooth(W, V, rw) + 0.25 * smooth(0.6, 1.5, hk));
+        break;
+      case 8: // humid subtropical: forest, open grass where one season runs dry
+        m = 'forest';
+        s2 = 'grassland';
+        t = 0.6 * (1 - smooth(W * 0.8, V, (rs + rw) / 2));
+        break;
+      case 9: // oceanic: forest, with moors and meadows on the hills
+        m = 'forest';
+        s2 = 'grassland';
+        t = 0.2 + 0.4 * smooth(0.6, 1.5, hk);
+        break;
+      case 10: {
+        // humid continental: broadleaf forest; prairie where summers are drier, needle-leaf
+        // forest where summers are cool.
+        m = 'forest';
+        const dry = 0.7 * (1 - smooth(W, V * 0.9, rs));
+        if (dry > 0.2) {
+          s2 = 'grassland';
+          t = dry;
+        } else {
+          s2 = 'taiga';
+          t = 0.6 * (1 - smooth(19, 24, Ts));
+        }
+        break;
+      }
+      case 11: // subarctic: taiga, opening into tundra near the tree line, or steppe if summers are dry
+        m = 'taiga';
+        if (rs < W) {
+          s2 = 'steppe';
+          t = 0.45;
+        } else {
+          s2 = 'tundra';
+          t = 0.7 * (1 - smooth(11, 15, Ts));
+        }
+        break;
+      case 12: // tundra, with lasting ice where summers barely thaw
+        m = 'tundra';
+        s2 = 'glacier';
+        t = 0.45 * (1 - smooth(0, 4, Ts));
+        break;
+      default: // ice cap
+        m = 'glacier';
+        s2 = 'tundra';
+        t = 0;
+    }
+    main[k] = id(m);
+    second[k] = id(s2);
+    share[k] = Math.max(0, Math.min(1, t));
+  }
+  return { main, second, share };
+}
+
+/** The name of the ground cover the climate gives a point ("Forest", "Steppe grass with Savanna"). */
+export function autoCoverName(cl: Climate, k: number): string | null {
+  const ac = cl.cover;
+  if (!ac || ac.main[k] < 0) return null;
+  const name = (i: number) => BRUSHES.find((b) => b.id === COVER_BRUSHES[i])!.name;
+  const t = ac.share[k];
+  if (t >= 0.55) return `${name(ac.second[k])} with ${name(ac.main[k]).toLowerCase()}`;
+  if (t >= 0.2) return `${name(ac.main[k])} with ${name(ac.second[k]).toLowerCase()}`;
+  return name(ac.main[k]);
 }
 
 // ---------------------------------------------------------------------------------------------

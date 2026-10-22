@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { cellEdges, climateAt, computeClimate, rainClass, ZONE_INFO, type Climate } from '../src/core/climate';
-import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/core/paint';
+import { autoCoverName, cellEdges, climateAt, computeClimate, nearestPoint, rainClass, ZONE_INFO, type Climate } from '../src/core/climate';
+import { brushDefaults, COVER_BRUSHES, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { cToF, defaultSettings, fToC, latitudeAt, southLatitude } from '../src/core/settings';
 import { KM_PER_DEGREE } from '../src/core/units';
 
@@ -76,6 +76,18 @@ describe('the climate of a test continent', () => {
     const west = at(4100, -22);
     expect(sumRain(4100, -22)).toBeLessThan(sumRain(7700, -22) / 4);
     expect([3, 5]).toContain(west.zone);
+  });
+
+  it('grows ground cover that fits each zone, everywhere on land', () => {
+    const coverAt = (x: number, lat: number) => COVER_BRUSHES[cl.cover.main[nearestPoint(cl, x, yAt(lat))]];
+    for (let k = 0; k < cl.zone.length; k++) expect(cl.cover.main[k] >= 0).toBe(cl.zone[k] >= 0);
+    // The rain belt grows jungle; the dry subtropical west coast is desert or steppe.
+    expect(coverAt(6000, 0)).toBe('jungle');
+    expect(['dunes', 'rockdesert', 'steppe']).toContain(coverAt(4100, -22));
+    expect(autoCoverName(cl, nearestPoint(cl, 6000, yAt(0)))).toMatch(/Jungle/);
+    // Every zone's cover is one the zone allows.
+    const allowed: string[][] = [['jungle'], ['jungle'], ['savanna'], ['dunes'], ['rockdesert'], ['steppe'], ['steppe'], ['scrub'], ['forest'], ['forest'], ['forest'], ['taiga'], ['tundra'], ['glacier']];
+    for (let k = 0; k < cl.zone.length; k++) if (cl.zone[k] >= 0) expect(allowed[cl.zone[k]]).toContain(COVER_BRUSHES[cl.cover.main[k]]);
   });
 
   it('is hot at the equator and colder toward the poles', () => {
