@@ -1,5 +1,6 @@
 import { fbm, noise2 } from '../core/noise';
 import { COVER_BRUSHES, type CoverBrush, type Surface } from '../core/paint';
+import { REGION_KINDS } from '../core/geography';
 import { evaluate, whirlpools, type Whirlpool } from '../core/terrain';
 import { nearestPoint, RAIN_VERY_WET, RAIN_WET, sampleField, ZONE_INFO, type Climate } from '../core/climate';
 
@@ -10,7 +11,7 @@ import { nearestPoint, RAIN_VERY_WET, RAIN_WET, sampleField, ZONE_INFO, type Cli
 
 export type MapStyle = 'satellite' | 'paper';
 /** What the map shows: the land itself, or one of the climate views. */
-export type MapView = 'land' | 'zones' | 'temp' | 'rain' | 'pressure' | 'currents' | 'air';
+export type MapView = 'land' | 'zones' | 'temp' | 'rain' | 'pressure' | 'currents' | 'air' | 'geo';
 
 export interface RenderJob {
   /** Top-left corner of the picture in km, and km per pixel. */
@@ -394,6 +395,12 @@ function coverTint(key: CoverBrush, x: number, y: number, px: number, seed: numb
   return tint;
 }
 
+const hash01 = (v: number) => {
+  let x = ((v + 1) * 2654435761) >>> 0;
+  x ^= x >>> 13;
+  return (x & 255) / 255;
+};
+
 /** Zones where water makes the land green: deserts, steppes, savanna and dry-summer lands. */
 const DRY_ZONES = new Set([3, 4, 5, 6]);
 /** How strongly a river greens its banks in each zone (deserts most, rainforest hardly at all). */
@@ -503,6 +510,35 @@ function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer']
   const shade = 0.75 + 0.25 * Math.min(1.3, bright);
   const grey = (c: RGB, t: number): RGB => mix(c, [128, 132, 136], t);
   switch (view) {
+    case 'geo': {
+      // Natural regions coloured by kind on land, waters by what they are, with borders between.
+      const geo = cl.geo;
+      if (!geo) return col;
+      const onLand = land >= 0.5;
+      const idAt = (xx: number, yy: number) => {
+        const k = climatePoint(xx, yy, onLand);
+        if (k < 0) return -1;
+        return onLand ? geo.region[k] * 4096 + geo.land[k] : geo.water[k];
+      };
+      const id = idAt(x, y);
+      if (id < 0) return col;
+      const d = px * 1.5;
+      const border = idAt(x + d, y) !== id || idAt(x, y + d) !== id;
+      const k = climatePoint(x, y, onLand);
+      let c: RGB;
+      if (onLand) {
+        const f = geo.regions[geo.region[k]];
+        const base = hex(REGION_KINDS[f?.kind ?? ''] ?? '#a8a08a');
+        const v = 0.86 + 0.28 * hash01(geo.region[k]);
+        c = [base[0] * v * shade, base[1] * v * shade, base[2] * v * shade];
+      } else {
+        const lv = geo.waters[geo.water[k]]?.level;
+        const base: RGB = lv === 'ocean' ? [46, 88, 140] : lv === 'sea' ? [70, 122, 178] : lv === 'gulf' ? [96, 156, 200] : [126, 186, 216];
+        const v = 0.9 + 0.2 * hash01(geo.water[k]);
+        c = [base[0] * v, base[1] * v, base[2] * v];
+      }
+      return border ? mix(c, [30, 24, 18], 0.75) : c;
+    }
     case 'zones': {
       if (land < 0.5) return mix(grey(col, 0.5), [40, 60, 80], 0.3);
       const k = climatePoint(x, y, true);

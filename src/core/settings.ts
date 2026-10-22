@@ -72,6 +72,8 @@ export const CLIMATE_DEFAULTS: ClimateSliders = {
 export type Rainfall = { mode: 'auto' } | { mode: 'manual'; percent: number };
 
 export interface WorldSettings {
+  /** Geography: how big a landmass must be to be a continent (sq mi), and the usual size of a natural region (mi across). */
+  geography?: { continentMinSqMi: number; regionMi: number };
   name: string;
   mapType: MapType;
   /** Flat maps: width and height in km. */

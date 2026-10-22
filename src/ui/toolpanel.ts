@@ -17,7 +17,17 @@ export interface ToolPanel {
   refresh(): void;
 }
 
-export function createToolPanel(changed: () => void, sketch: () => SketchOps | null = () => null, highOps: () => HighOps | null = () => null): ToolPanel {
+/** Naming places: what lies under the spot picked with the Name tool, and giving it a name. */
+export interface NameOps {
+  /** The spot picked on the map (km), if any. */
+  picked(): { x: number; y: number } | null;
+  /** The features there, most general first; empty while the geography is being worked out. */
+  at(x: number, y: number): { of: 'land' | 'archipelago' | 'water' | 'region'; kind: string; name: string }[];
+  /** Name a feature (an empty name takes its name away). */
+  set(x: number, y: number, of: 'land' | 'archipelago' | 'water' | 'region', label: string): void;
+}
+
+export function createToolPanel(changed: () => void, sketch: () => SketchOps | null = () => null, highOps: () => HighOps | null = () => null, names: () => NameOps | null = () => null): ToolPanel {
   // Each brush remembers its own settings while you switch between them.
   const remembered = new Map<BrushId, BrushSettings>();
   const settingsFor = (id: BrushId) => {
@@ -58,6 +68,14 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     }
     if (state.tool === 'wind') {
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: wind' : b.name), ...windFields());
+      return;
+    }
+    if (state.tool === 'divide' || state.tool === 'join') {
+      settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...geoLineFields(state.tool));
+      return;
+    }
+    if (state.tool === 'name') {
+      settings.replaceChildren(h('h3', {}, b.name), ...nameFields());
       return;
     }
     if (state.tool === 'itcz') {
@@ -217,6 +235,62 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       ...seasonAdjust(sel, (patch) => ops.set(patch), () => ops.copyToOtherSeason()),
       h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', title: 'Back to the automatic path', onclick: () => { ops.remove(); renderSettings(); } }, 'Reset to automatic')),
     );
+    return out;
+  };
+  /** Divide and Join lines: drawn through points, then moved or deleted. */
+  const geoLineFields = (tool: 'divide' | 'join'): HTMLElement[] => {
+    const b = brushInfo(tool);
+    if (state.erase) return [h('p', { class: 'muted small hint' }, `Tap a ${tool === 'divide' ? 'Divide' : 'Join'} line to delete it.`)];
+    const mode = state.sketchMode ?? 'draw';
+    const out: HTMLElement[] = [
+      h('p', { class: 'muted small hint' }, b.hint),
+      choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
+    ];
+    if (mode === 'draw') {
+      out.push(h('p', { class: 'muted small' }, tool === 'divide' ? 'Draw it right across what you want to cut, from water to water (or edge to edge), so nothing leaks round its ends.' : 'Draw it so it touches each of the features to make one.'));
+      return out;
+    }
+    const ops = sketch();
+    const sel = ops?.selected() ?? null;
+    if (!ops || !sel) {
+      out.push(h('p', { class: 'muted small' }, 'Tap a line to pick it. Drag its dots to move them; tap the line to add a bend.'));
+      return out;
+    }
+    out.push(h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete')));
+    return out;
+  };
+  const OF_NAMES = { land: 'Land', archipelago: 'Islands', water: 'Water', region: 'Region' } as const;
+  /** The Name tool: click a place, then name what is there. */
+  const nameFields = (): HTMLElement[] => {
+    const out: HTMLElement[] = [h('p', { class: 'muted small hint' }, brushInfo('name').hint)];
+    const ops = names();
+    const p = ops?.picked() ?? null;
+    if (!ops || !p) {
+      out.push(h('p', { class: 'muted small' }, 'Click a place on the map.'));
+      return out;
+    }
+    const list = ops.at(p.x, p.y);
+    if (!list.length) {
+      out.push(h('p', { class: 'muted small' }, 'Nothing to name here yet (the geography is worked out with the climate: wait a moment and click again).'));
+      return out;
+    }
+    for (const e of list) {
+      const input = h('input', { type: 'text', value: e.name, placeholder: `Unnamed ${e.kind.toLowerCase()}`, maxlength: 60, 'aria-label': `Name of this ${e.kind.toLowerCase()}` }) as HTMLInputElement;
+      // Set after the event is over: setting a name rebuilds this panel.
+      let done = false;
+      const commit = () => {
+        const v = input.value.trim();
+        if (done || v === e.name) return;
+        done = true;
+        setTimeout(() => ops.set(p.x, p.y, e.of, v), 0);
+      };
+      input.addEventListener('change', commit);
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') commit();
+      });
+      out.push(h('div', { class: 'field' }, h('label', { class: 'label' }, `${OF_NAMES[e.of]}: ${e.kind}`), input));
+    }
+    out.push(h('p', { class: 'muted small' }, 'Press Enter to set a name; clear it to make the place unnamed again. Names stay with the land as you repaint it.'));
     return out;
   };
   type Season = 'both' | 'summer' | 'winter';

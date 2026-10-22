@@ -1,4 +1,5 @@
 import type { Climate } from '../core/climate';
+import { geoNames } from '../core/geography';
 import { strokeSeason, type Stroke } from '../core/paint';
 import { centreLatitude, kmPerDegree, latitudeAt, planetRadiusKm, southLatitude } from '../core/settings';
 import { EARTH_RADIUS_KM, formatDistance, formatLatitude } from '../core/units';
@@ -83,6 +84,23 @@ export async function climateReport(world: World, cl: Climate | null): Promise<s
       }
       out.push(`  ITCZ: ${itcz.join(', ')}`);
     }
+  }
+
+  // Geography: continents, islands, waters and natural regions, with their names.
+  const geo = cl?.geo;
+  if (cl && geo) {
+    const names = geoNames(world.surface, cl);
+    const size = (km2: number) => `${Math.round(km2 / 2589.988).toLocaleString('en-US')} thousand sq mi`;
+    const nm = (kind: string, name?: string) => (name ? `${name} (${kind.toLowerCase()})` : `unnamed ${kind.toLowerCase()}`);
+    out.push('');
+    out.push('Geography:');
+    for (const f of geo.landmasses.filter((q) => q.level === 'continent' || q.area > 50000).sort((a, b) => b.area - a.area)) out.push(`  ${nm(f.kind, names.land.get(f.id))} at ${at(f.x, f.y)}, ${size(f.area)}`);
+    for (const f of geo.archipelagos) out.push(`  ${nm('Islands', names.archipelago.get(f.id))} at ${at(f.x, f.y)}`);
+    for (const f of geo.waters.filter((q) => q.area > 20000).sort((a, b) => b.area - a.area)) out.push(`  ${nm(f.kind, names.water.get(f.id))} at ${at(f.x, f.y)}, ${size(f.area)}`);
+    const kinds = new Map<string, number>();
+    for (const r of geo.regions) kinds.set(r.kind, (kinds.get(r.kind) ?? 0) + 1);
+    out.push(`  Natural regions: ${geo.regions.length} (${[...kinds].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(', ')})`);
+    for (const r of geo.regions) if (names.region.has(r.id)) out.push(`    ${nm(r.kind, names.region.get(r.id))} at ${at(r.x, r.y)}`);
   }
 
   // The ocean currents, winds and highs, as placed by hand, with the season each holds in.

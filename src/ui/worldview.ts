@@ -1,4 +1,4 @@
-import { strokeBounds, ZONES, type Stroke } from '../core/paint';
+import { brushDefaults, strokeBounds, ZONES, type Stroke } from '../core/paint';
 import { centreLatitude, kmPerDegree, MAX_SIDE_KM, placeAtLatitude, southLatitude, validateSettings } from '../core/settings';
 import { formatDistance, formatLatitude, kmToMiles, milesToKm } from '../core/units';
 import { expandedSettings, expandWorld, expansionProblem, LAYERS, type Expansion, type World } from '../core/world';
@@ -10,7 +10,8 @@ import { choice, h, numberField, toast } from './dom';
 import { deleteWorld } from '../core/storage';
 import { createMapView } from './mapview';
 import { planetFields, worldTabFields } from './settingsform';
-import { createToolPanel } from './toolpanel';
+import { createToolPanel, type NameOps } from './toolpanel';
+import { geoCell, geoNames, GEO_DEFAULTS, REGION_KINDS } from '../core/geography';
 import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
 import { climateReport } from './report';
 
@@ -21,7 +22,7 @@ import { climateReport } from './report';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1 };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off' };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -112,7 +113,7 @@ export function showWorld(app: App, start: World): () => void {
     if (tools?.state.tool === 'current' && look.view !== 'currents') showCurrentsView?.();
     if ((tools?.state.tool === 'high' || tools?.state.tool === 'wind') && look.view !== 'pressure') showPressureView?.();
     if (tools?.state.tool === 'itcz' && look.view !== 'rain' && look.view !== 'pressure') showRainView?.();
-  }, () => map?.sketch ?? null, () => map?.high ?? null);
+  }, () => map?.sketch ?? null, () => map?.high ?? null, () => nameOps);
   const map = createMapView({
     world: () => world,
     tool: () => tools.state,
@@ -157,6 +158,59 @@ export function showWorld(app: App, start: World): () => void {
       if (done) renderRef();
     },
   });
+
+  // ---- Names: pins on the map that name the feature under them ----
+  type NameOf = 'land' | 'archipelago' | 'water' | 'region';
+  const featureAt = (x: number, y: number, of: NameOf): number => {
+    const cl = climate.climate;
+    const g = cl?.geo;
+    if (!cl || !g) return -1;
+    const k = geoCell(cl, x, y);
+    if (k < 0) return -1;
+    if (of === 'land') return g.land[k];
+    if (of === 'archipelago') return g.land[k] >= 0 ? g.archipelagoOf.get(g.land[k]) ?? -1 : -1;
+    if (of === 'water') return g.water[k];
+    return g.region[k];
+  };
+  const nameOps: NameOps = {
+    picked: () => map.namePick(),
+    at(x, y) {
+      const cl = climate.climate;
+      const g = cl?.geo;
+      if (!cl || !g) return [];
+      const k = geoCell(cl, x, y);
+      if (k < 0) return [];
+      const names = geoNames(world.surface, cl);
+      const out: ReturnType<NameOps['at']> = [];
+      if (g.land[k] >= 0) {
+        const f = g.landmasses.find((q) => q.id === g.land[k]);
+        out.push({ of: 'land', kind: f?.kind ?? 'Land', name: names.land.get(g.land[k]) ?? '' });
+        const a = g.archipelagoOf.get(g.land[k]);
+        if (a !== undefined) out.push({ of: 'archipelago', kind: 'Islands', name: names.archipelago.get(a) ?? '' });
+      }
+      if (g.water[k] >= 0) out.push({ of: 'water', kind: g.waters.find((q) => q.id === g.water[k])?.kind ?? 'Sea', name: names.water.get(g.water[k]) ?? '' });
+      if (g.region[k] >= 0) out.push({ of: 'region', kind: g.regions[g.region[k]]?.kind ?? 'Region', name: names.region.get(g.region[k]) ?? '' });
+      return out;
+    },
+    set(x, y, of, label) {
+      const target = featureAt(x, y, of);
+      if (target < 0) return;
+      // Pins already naming this feature: the latest is renamed; an empty name removes them all.
+      const pins = world.surface.strokes.filter((st) => st.brush === 'name' && !st.erase && (st.nameOf ?? 'land') === of && featureAt(st.pts[0], st.pts[1], of) === target);
+      snapshot();
+      if (!label) setStrokes(world.surface.strokes.filter((st) => !pins.includes(st)));
+      else if (pins.length) {
+        const last = pins[pins.length - 1];
+        setStrokes(world.surface.strokes.map((st) => (st === last ? { ...st, label } : st)));
+      } else {
+        const id = world.surface.nextId;
+        const pin: Stroke = { ...brushDefaults('name'), id, pts: [Math.round(x * 100) / 100, Math.round(y * 100) / 100], label, nameOf: of };
+        world = { ...world, surface: { strokes: [...world.surface.strokes, pin], nextId: id + 1 } };
+        setStrokes(world.surface.strokes);
+      }
+      map.redraw();
+    },
+  };
 
   // ---- Reference picture: an image to paint from, laid over the map ----
   let refEdit = false;
@@ -301,6 +355,16 @@ export function showWorld(app: App, start: World): () => void {
       case 'currents':
         climateLegend.replaceChildren(key('#d23a2a', 'Warm current'), key('#2a6fd2', 'Cold current'), key('#111418', 'Neutral current (thin lines: secondary currents)'), key('#78dce6', 'Upwelling: cold, rich water (fishing, fog)'), key('#e4ecf1', 'Sea ice'), key('#5fd2c3', 'Coral reef'));
         break;
+      case 'geo':
+        climateLegend.replaceChildren(
+          ...Object.entries(REGION_KINDS).map(([k, c]) => key(c, k)),
+          key('#2e588c', 'Ocean'),
+          key('#467ab2', 'Sea'),
+          key('#609cc8', 'Gulf'),
+          key('#7ebad8', 'Bay'),
+          h('p', { class: 'muted' }, 'Natural regions, worked out from the land, its height, climate and ground cover, and parted by mountain crests and big rivers. Change them in the Geography tab: Divide, Join and Name.'),
+        );
+        break;
       case 'air':
         climateLegend.replaceChildren(
           ramp(['#e6e0cc', '#8fbfb8', '#16808c']),
@@ -323,6 +387,7 @@ export function showWorld(app: App, start: World): () => void {
     h('h2', {}, 'Map look'),
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
+    choice<'all' | 'main' | 'off'>('Labels', [{ value: 'all', label: 'All' }, { value: 'main', label: 'Land & sea only' }, { value: 'off', label: 'Hidden' }], look.labels, (v) => { look.labels = v; map.redraw(); }),
   );
   const zonesPanel = h(
     'section',
@@ -340,6 +405,7 @@ export function showWorld(app: App, start: World): () => void {
       { value: 'pressure', label: 'Pressure & winds' },
       { value: 'currents', label: 'Currents & sea' },
       { value: 'air', label: 'Air & moisture' },
+      { value: 'geo', label: 'Geography' },
     ],
     look.view,
     (v) => { look.view = v; renderClimateLegend(); map.redraw(); },
@@ -615,11 +681,31 @@ export function showWorld(app: App, start: World): () => void {
       problems,
     );
   };
+  // The Geography tab's own settings: when land counts as a continent, and how big regions are.
+  const geoPanel = h('div', {});
+  const renderGeoPanel = () => {
+    const gs = { ...GEO_DEFAULTS, ...(world.settings.geography ?? {}) };
+    const apply = (patch: Partial<typeof gs>) => {
+      world = { ...world, settings: { ...world.settings, geography: { ...gs, ...patch } } };
+      Object.assign(gs, patch);
+      changed();
+      climate.changed();
+    };
+    geoPanel.replaceChildren(
+      h('section', { class: 'view-panel' },
+        h('h2', {}, 'Geography'),
+        h('p', { class: 'muted small' }, 'Continents, islands, oceans, seas, gulfs, bays and natural regions are worked out with the climate. Divide cuts one in two, Join makes several one, and Name names them. Labels and the Geography map are in the View panel.'),
+        numberField({ label: 'Smallest continent', value: gs.continentMinSqMi, min: 10000, max: 20000000, step: 10000, unit: 'sq mi', hint: 'Landmasses at least this big are continents; smaller ones are islands. Earth: Australia (about 3 million) is the smallest continent, Greenland (about 840,000) the biggest island.', change: (v) => { if (v > 0) apply({ continentMinSqMi: v }); } }),
+        numberField({ label: 'Region size', value: gs.regionMi, min: 60, max: 1200, step: 10, unit: 'miles', slider: true, hint: 'About how far across a natural region usually is.', change: (v) => { if (v > 0) apply({ regionMi: v }); } }),
+      ),
+    );
+  };
   const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
     { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
     { id: 'terrain', name: 'Terrain', groups: ['Relief', 'Volcanic', 'Mountain zones'], extra: [] },
     { id: 'cover', name: 'Ground cover', groups: ['Ground cover'], extra: [] },
     { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
+    { id: 'geo', name: 'Geography', groups: ['Geography'], extra: [geoPanel] },
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
   ];
   const tabBody = h('div', { class: 'tab-body' });
@@ -629,6 +715,7 @@ export function showWorld(app: App, start: World): () => void {
   const showTab = (id: string) => {
     const t = TABS.find((x) => x.id === id) ?? TABS[0];
     if (t.id === 'world') renderWorldTab();
+    if (t.id === 'geo') renderGeoPanel();
     tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
     if (t.groups.length) tools.showGroups(t.groups);
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);

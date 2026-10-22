@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { geoCell, geoNames } from '../src/core/geography';
 import { autoCoverName, cellEdges, climateAt, computeClimate, nearestPoint, rainClass, ZONE_INFO, type Climate } from '../src/core/climate';
 import { brushDefaults, COVER_BRUSHES, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { cToF, defaultSettings, fToC, latitudeAt, southLatitude } from '../src/core/settings';
@@ -315,5 +316,50 @@ describe('lakes and the climate', () => {
     const k = nearestPoint(c2, lakeAt[0] + 340, lakeAt[1]);
     const range = (c: Climate) => Math.abs(c.summer.temp[k] - c.winter.temp[k]);
     expect(range(c2)).toBeLessThan(range(cl));
+  }, 60000);
+});
+
+describe('geography', () => {
+  const g0 = () => cl.geo!;
+  const landAt = (c: Climate, x: number, lat: number) => c.geo!.land[geoCell(c, x, yAt(lat))];
+  it('finds the continent, and an island off its coast', () => {
+    const c = computeClimate(world((add) => add('land', [11000, yAt(10)], { size: 400 })), settings);
+    const cont = c.geo!.landmasses.find((f) => f.id === landAt(c, 6000, 10))!;
+    const isl = c.geo!.landmasses.find((f) => f.id === landAt(c, 11000, 10))!;
+    expect(cont.level).toBe('continent');
+    expect(isl.level).toBe('island');
+  }, 60000);
+  it('a Divide line cuts a landmass in two; a Join line makes two one', () => {
+    expect(landAt(cl, 6000, 30)).toBe(landAt(cl, 6000, -10));
+    const cut = computeClimate(world((add) => add('divide', line([[2500, yAt(10)], [9500, yAt(10)]], 100))), settings);
+    expect(landAt(cut, 6000, 30)).not.toBe(landAt(cut, 6000, -10));
+    const both = computeClimate(world((add) => {
+      add('land', [11000, yAt(10)], { size: 400 });
+      add('join', line([[7500, yAt(10)], [11000, yAt(10)]], 100));
+    }), settings);
+    expect(landAt(both, 11000, 10)).toBe(landAt(both, 6000, 10));
+  }, 120000);
+  it('names a place with a Name pin', () => {
+    const s2 = world((add) => add('name', [6000, yAt(20)], { label: 'Aerth', nameOf: 'land' }));
+    const c = computeClimate(s2, settings);
+    expect(geoNames(s2, c).land.get(landAt(c, 6000, -20))).toBe('Aerth');
+  }, 60000);
+  it('splits the water at narrow straits, and parts the land into regions of about the region size', () => {
+    // A sea almost closed off by land, opening through a narrow strait.
+    const c = computeClimate(world((add) => {
+      add('land', line([[8500, yAt(45)], [12500, yAt(45)], [12500, yAt(20)], [8500, yAt(20)]], 60), { size: 400 });
+      add('land', line([[12500, yAt(20)], [12500, yAt(45)]], 60), { size: 400 });
+      add('land', line([[8500, yAt(20)], [10200, yAt(20)]], 60), { size: 600 });
+      add('land', line([[10600, yAt(20)], [12500, yAt(20)]], 60), { size: 600 });
+    }), settings);
+    const w = (x: number, lat: number) => c.geo!.water[geoCell(c, x, yAt(lat))];
+    expect(w(10500, 33)).toBeGreaterThanOrEqual(0);
+    expect(w(10500, 33)).not.toBe(w(10500, 0));
+    const g = g0();
+    expect(g.regions.length).toBeGreaterThan(10);
+    for (let k = 0; k < cl.land.length; k++) if (cl.land[k]) expect(g.region[k]).toBeGreaterThanOrEqual(0);
+    const sizes = g.regions.map((r) => Math.sqrt(r.area) / 1.609).sort((a, b) => a - b);
+    expect(sizes[sizes.length >> 1]).toBeGreaterThan(120);
+    expect(sizes[sizes.length >> 1]).toBeLessThan(450);
   }, 60000);
 });

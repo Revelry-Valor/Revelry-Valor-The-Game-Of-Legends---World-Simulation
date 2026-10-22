@@ -1,3 +1,4 @@
+import { geoCell, geoNames, type GeoFeature } from '../core/geography';
 import { autoCoverName, climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
 import { brushInfo, inSeason, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
@@ -54,7 +55,7 @@ export interface SketchOps {
 export interface MapViewOptions {
   world(): World;
   tool(): ToolState;
-  look(): MapLook & { grid: boolean };
+  look(): MapLook & { grid: boolean; labels?: 'all' | 'main' | 'off' };
   /** The latest climate, if worked out yet. */
   climate(): Climate | null;
   /** Start a stroke: it joins the world at once and gets its id. */
@@ -92,13 +93,16 @@ export interface MapView {
   high: HighOps;
   /** The map's size or position changed (canvas options). */
   worldReset(): void;
+  /** The spot last clicked with the Name tool (km). */
+  namePick(): { x: number; y: number } | null;
   dispose(): void;
 }
 
 const SKETCH_COLOUR = { warm: '#e0301e', cold: '#1f66e0', neutral: '#0d1014' };
 /** Brushes drawn as a course through points and adjusted afterwards: ocean currents and winds. */
-type SketchBrush = 'current' | 'wind' | 'itcz';
-const isSketch = (t: string): t is SketchBrush => t === 'current' || t === 'wind' || t === 'itcz';
+type SketchBrush = 'current' | 'wind' | 'itcz' | 'divide' | 'join';
+const isSketch = (t: string): t is SketchBrush => t === 'current' || t === 'wind' || t === 'itcz' || t === 'divide' || t === 'join';
+const GEO_LINE = { divide: '#d1347f', join: '#1f9e62' } as const;
 
 export function createMapView(o: MapViewOptions): MapView {
   const canvas = h('canvas', { class: 'map', 'aria-label': 'World map. Drag to paint with the selected brush.' });
@@ -161,6 +165,10 @@ export function createMapView(o: MapViewOptions): MapView {
     if (cl && o.tool().tool === 'wind') drawWindSway(g, r, cl, look.season, x0, span, copies);
     if (look.view === 'pressure' || look.view === 'air' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
     if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
+    for (const gl of ['divide', 'join'] as const) if (o.tool().tool === gl || (look.view === 'geo' && (o.tool().tool === 'divide' || o.tool().tool === 'join'))) drawSketches(g, r, x0, span, copies, gl);
+    const labels = look.labels ?? 'all';
+    if (cl?.geo && labels !== 'off') drawLabels(g, r, cl, x0, span, copies, labels);
+    if (o.tool().tool === 'name') drawNamePins(g, r);
     if (o.tool().tool === 'itcz') {
       drawSketches(g, r, x0, span, copies, 'itcz');
       drawItczGhost(g, r);
@@ -544,6 +552,114 @@ export function createMapView(o: MapViewOptions): MapView {
     g.restore();
   }
 
+  // ---- Names and labels ----
+  let namePicked: { x: number; y: number } | null = null;
+  function drawNamePins(g: CanvasRenderingContext2D, r: DOMRect) {
+    g.save();
+    for (const st of o.world().surface.strokes) {
+      if (st.brush !== 'name' || st.erase) continue;
+      const [sx, sy] = toScreen(st.pts[0], st.pts[1], r);
+      g.fillStyle = '#f2c36b';
+      g.strokeStyle = '#2a241b';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(sx, sy, 4, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+    }
+    if (namePicked) {
+      const [sx, sy] = toScreen(namePicked.x, namePicked.y, r);
+      g.strokeStyle = '#ffffff';
+      g.lineWidth = 2.5;
+      g.beginPath();
+      g.arc(sx, sy, 9, 0, Math.PI * 2);
+      g.stroke();
+      g.strokeStyle = '#2a241b';
+      g.lineWidth = 1.2;
+      g.stroke();
+    }
+    g.restore();
+  }
+  /**
+   * Fantasy-map labels: spaced capitals along the way each place runs, larger for more important
+   * places (continents and oceans grandest). Unnamed places show what they are, in plainer
+   * lettering. Labels that would crowd a more important one are left out.
+   */
+  function drawLabels(g: CanvasRenderingContext2D, r: DOMRect, cl: Climate, x0: number, span: number, copies: number[], which: 'all' | 'main') {
+    const geo = cl.geo!;
+    const names = geoNames(o.world().surface, cl);
+    const paper = o.look().style === 'paper';
+    const minCells = 3 * cl.step * cl.step;
+    type L = { f: GeoFeature; text: string; named: boolean; water: boolean; max: number; caps: boolean; weight: number; italic: boolean; spacing: number };
+    const list: L[] = [];
+    const add = (f: GeoFeature, name: string | undefined, water: boolean, max: number, caps: boolean, weight: number, italic: boolean, spacing: number) => {
+      if (f.area < minCells) return;
+      list.push({ f, text: name ?? f.kind, named: !!name, water, max, caps, weight, italic, spacing });
+    };
+    for (const f of geo.landmasses) if (f.level === 'continent') add(f, names.land.get(f.id), false, 46, true, 700, false, 0.45);
+    for (const f of geo.waters) if (f.level === 'ocean') add(f, names.water.get(f.id), true, 40, true, 600, true, 0.5);
+    for (const f of geo.waters) if (f.level === 'sea') add(f, names.water.get(f.id), true, 24, true, 500, true, 0.3);
+    for (const f of geo.archipelagos) add(f, names.archipelago.get(f.id), false, 17, true, 600, false, 0.25);
+    for (const f of geo.landmasses) if (f.level === 'island') add(f, names.land.get(f.id), false, 15, false, 600, false, 0.08);
+    for (const f of geo.waters) if (f.level === 'gulf' || f.level === 'bay') add(f, names.water.get(f.id), true, f.level === 'gulf' ? 18 : 14, false, 500, true, 0.1);
+    if (which === 'all') for (const f of geo.regions) add(f, names.region.get(f.id), false, 15, true, 500, false, 0.18);
+    // Placed labels as rows of circles along their lines (so slanted ones don't block a whole box).
+    const taken: [number, number, number][] = [];
+    const yTop = toScreen(0, 0, r)[1];
+    g.save();
+    g.textBaseline = 'middle';
+    g.lineJoin = 'round';
+    for (const l of list) {
+      const text = l.caps ? l.text.toUpperCase() : l.text;
+      const chars = [...text];
+      // Size: fill most of the place's length, but not more than about a third of its width.
+      const em = Math.min((l.f.length * 0.8) / Math.max(3, chars.length * (0.62 + l.spacing)), l.f.width * 0.32);
+      let px = Math.min(l.max, em * view.scale) * (l.named ? 1 : 0.82);
+      if (px < 8) continue;
+      px = Math.round(px);
+      g.font = `${l.italic ? 'italic ' : ''}${l.weight} ${px}px ${l.water ? '"Alegreya Sans", serif' : '"Alegreya SC", Georgia, serif'}`;
+      const widths = chars.map((c) => g.measureText(c).width);
+      const gap = l.spacing * px;
+      const total = widths.reduce((a, b) => a + b, 0) + gap * (chars.length - 1);
+      let placed = false;
+      for (const c of copies) for (const [fx, fy] of [[l.f.x, l.f.y], ...(l.f.alt ?? [])]) {
+        if (placed) break;
+        const cx = x0 + c * span + fx * view.scale;
+        const cy = yTop + fy * view.scale;
+        const ca = Math.abs(Math.cos(l.f.angle));
+        const sa = Math.abs(Math.sin(l.f.angle));
+        const hw = (total / 2) * ca + (px / 2) * sa;
+        const hh = (total / 2) * sa + (px / 2) * ca;
+        if (cx + hw < 0 || cx - hw > r.width || cy + hh < 0 || cy - hh > r.height) continue;
+        const rad = px * 0.6;
+        const along: [number, number, number][] = [];
+        const nC = Math.max(1, Math.ceil(total / (px * 0.9)));
+        for (let q = 0; q <= nC; q++) {
+          const t = -total / 2 + (total * q) / nC;
+          along.push([cx + Math.cos(l.f.angle) * t, cy + Math.sin(l.f.angle) * t, rad]);
+        }
+        if (along.some(([a, b2, ra]) => taken.some(([c2, d, rb]) => Math.hypot(a - c2, b2 - d) < ra + rb))) continue;
+        taken.push(...along);
+        placed = true;
+        g.save();
+        g.translate(cx, cy);
+        g.rotate(l.f.angle);
+        g.globalAlpha = l.named ? 1 : 0.8;
+        g.fillStyle = paper ? (l.water ? '#2c4f66' : '#3f3122') : l.water ? '#dcefff' : '#f8f1e2';
+        g.strokeStyle = paper ? 'rgba(240,230,205,0.85)' : l.water ? 'rgba(8,28,52,0.75)' : 'rgba(28,22,14,0.75)';
+        g.lineWidth = Math.max(2, px * 0.16);
+        let x = -total / 2;
+        chars.forEach((ch, i) => {
+          g.strokeText(ch, x, 0);
+          g.fillText(ch, x, 0);
+          x += widths[i] + gap;
+        });
+        g.restore();
+      }
+    }
+    g.restore();
+  }
+
   function drawSketches(g: CanvasRenderingContext2D, r: DOMRect, x0: number, span: number, copies: number[], brush: SketchBrush) {
     const t = o.tool();
     const adjusting = t.tool === brush && (adjustMode(t) || t.erase);
@@ -555,8 +671,8 @@ export function createMapView(o: MapViewOptions): MapView {
     const airSe = airCl ? (o.look().season === 1 ? airCl.summer : airCl.winter) : null;
     for (const st of sketches(brush)) {
       const wind = brush === 'wind';
-      const itcz = brush === 'itcz';
-      const colour = itcz ? '#f2b705' : wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
+      const itcz = brush === 'itcz' || brush === 'divide' || brush === 'join';
+      const colour = brush === 'divide' || brush === 'join' ? GEO_LINE[brush] : itcz ? '#f2b705' : wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
       const minor = itcz ? false : wind ? st.strength < 0.45 : st.currentSize === 'secondary';
       const p = st.pts;
       for (const c of copies) {
@@ -863,13 +979,13 @@ export function createMapView(o: MapViewOptions): MapView {
       return;
     }
     const t = o.tool();
-    if (brush === 'current' || brush === 'wind' || brush === 'itcz') {
+    if (brush === 'current' || brush === 'wind' || brush === 'itcz' || brush === 'divide' || brush === 'join') {
       // An ocean current or a wind: a smooth course through the points.
       const wrapKm = o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0;
       const live = o.begin({ ...t.settings, brush, erase: undefined, pts: roundPath(sketchCourse(ctrl, wrapKm)), route: 'points', ctrl: roundPath(ctrl) });
       sel = live.id;
       o.sketchSelected?.();
-      o.notice(brush === 'itcz' ? 'ITCZ drawn: where it runs, it replaces the automatic path for this season. Use Adjust to move or add points.' : brush === 'wind' ? 'Wind drawn. Use Adjust to move or add points, change its strength, reverse it or delete it.' : 'Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
+      o.notice(brush === 'divide' ? 'Divide line drawn: what it crosses is cut in two once the geography updates.' : brush === 'join' ? 'Join line drawn: what it touches becomes one once the geography updates.' : brush === 'itcz' ? 'ITCZ drawn: where it runs, it replaces the automatic path for this season. Use Adjust to move or add points.' : brush === 'wind' ? 'Wind drawn. Use Adjust to move or add points, change its strength, reverse it or delete it.' : 'Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
       schedule();
       return;
     }
@@ -888,6 +1004,7 @@ export function createMapView(o: MapViewOptions): MapView {
     if (routing.brush === 'current') return SKETCH_COLOUR[o.tool().settings.current ?? 'warm'];
     if (routing.brush === 'wind') return '#1b2027';
     if (routing.brush === 'itcz') return '#f2b705';
+    if (routing.brush === 'divide' || routing.brush === 'join') return GEO_LINE[routing.brush];
     return '#bfe6ff';
   };
 
@@ -1062,7 +1179,7 @@ export function createMapView(o: MapViewOptions): MapView {
         o.remove(hit);
         if (sel === hit) sel = null;
         o.sketchSelected?.();
-        o.notice(`${o.tool().tool === 'wind' ? 'Wind' : o.tool().tool === 'itcz' ? 'ITCZ line' : 'Current'} deleted (Undo brings it back).`);
+        o.notice(`${o.tool().tool === 'wind' ? 'Wind' : o.tool().tool === 'itcz' ? 'ITCZ line' : o.tool().tool === 'divide' ? 'Divide line' : o.tool().tool === 'join' ? 'Join line' : 'Current'} deleted (Undo brings it back).`);
       }
       schedule();
       return true;
@@ -1162,6 +1279,12 @@ export function createMapView(o: MapViewOptions): MapView {
     const t = o.tool();
     if (o.referenceEditing?.()) return refPointer(e, x, y);
     if (t.tool === 'pan') return false;
+    if (t.tool === 'name') {
+      namePicked = { x, y };
+      o.sketchSelected?.();
+      schedule();
+      return true;
+    }
     if (isSketch(t.tool) && (t.erase || adjustMode(t))) return sketchPointer(e, x, y, t.erase);
     if (t.tool === 'high' && (t.erase || t.sketchMode === 'adjust')) return highPointer(e, x, y, t.erase);
     if (pointsMode(t)) {
@@ -1390,6 +1513,25 @@ export function createMapView(o: MapViewOptions): MapView {
         if (Math.max(cl.summer.upwell[k], cl.winter.upwell[k]) > 0.3) parts.push('Upwelling (rich fishing)');
       }
     }
+    // Where it is: the landmass, region or water, with their names.
+    const geo = cl?.geo;
+    if (cl && geo) {
+      const k = geoCell(cl, xw, y);
+      if (k >= 0) {
+        const names = geoNames(w.surface, cl);
+        const named = (kind: string, name?: string) => (name ? `${name} (${kind.toLowerCase()})` : kind);
+        const where: string[] = [];
+        if (p.ground === 'land') {
+          if (geo.region[k] >= 0) where.push(named(geo.regions[geo.region[k]]?.kind ?? 'Region', names.region.get(geo.region[k])));
+          if (geo.land[k] >= 0) {
+            const a = geo.archipelagoOf.get(geo.land[k]);
+            if (a !== undefined) where.push(named('Islands', names.archipelago.get(a)));
+            where.push(named(geo.landmasses.find((f) => f.id === geo.land[k])?.kind ?? 'Land', names.land.get(geo.land[k])));
+          }
+        } else if (geo.water[k] >= 0) where.push(named(geo.waters.find((f) => f.id === geo.water[k])?.kind ?? 'Sea', names.water.get(geo.water[k])));
+        if (where.length) parts.unshift(where.join(', '));
+      }
+    }
     return `${formatLatitude(latitudeAt(s, y))} · ${formatDistance(xw)} from the west edge · ${parts.join(' · ')}`;
   };
 
@@ -1448,6 +1590,7 @@ export function createMapView(o: MapViewOptions): MapView {
     },
     sketch: sketchOps,
     high: highOps,
+    namePick: () => namePicked,
     climateChanged() {
       cache.setClimate(o.climate());
       schedule();

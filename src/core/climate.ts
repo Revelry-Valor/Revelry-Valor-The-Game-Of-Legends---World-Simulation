@@ -2,6 +2,7 @@ import { CLIMATE_DEFAULTS, kmPerDegree, type WorldSettings } from './settings';
 import { BRUSHES, COVER_BRUSHES, inSeason, type CoverBrush, type Stroke, type Surface } from './paint';
 import { evaluate } from './terrain';
 import { flowAt, riverNetwork, widthForFlow } from './water';
+import { computeGeography, type Geography } from './geography';
 
 /**
  * The climate (REDESIGN.md, section 7): a chain of rules run once for northern summer and once
@@ -119,6 +120,8 @@ export interface Climate {
   zone: Int8Array;
   /** Ground cover the climate gives, where nothing is painted. */
   cover: AutoCover;
+  /** Continents, waters and natural regions (worked out after the climate). */
+  geo?: Geography;
   reef: Uint8Array;
 }
 
@@ -288,6 +291,7 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
     flowPaths(se);
     delete se.major;
   }
+  cl.geo = computeGeography(surface, s, cl);
   return cl;
 }
 
