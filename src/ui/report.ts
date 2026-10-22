@@ -1,5 +1,5 @@
 import type { Climate } from '../core/climate';
-import type { Stroke } from '../core/paint';
+import { strokeSeason, type Stroke } from '../core/paint';
 import { centreLatitude, kmPerDegree, latitudeAt, planetRadiusKm, southLatitude } from '../core/settings';
 import { EARTH_RADIUS_KM, formatDistance, formatLatitude } from '../core/units';
 import type { World } from '../core/world';
@@ -85,19 +85,33 @@ export async function climateReport(world: World, cl: Climate | null): Promise<s
     }
   }
 
-  // The ocean currents, as placed by hand.
-  const sketches = world.surface.strokes.filter((st) => st.brush === 'current' && st.ctrl && st.ctrl.length >= 4);
-  if (sketches.length) {
+  // The ocean currents, winds and highs, as placed by hand, with the season each holds in.
+  const seasonName = (st: Stroke) => ({ both: 'both seasons', summer: 'northern summer', winter: 'northern winter' })[strokeSeason(st)];
+  const course = (st: Stroke) => {
+    const c = st.ctrl!;
+    const pts: string[] = [];
+    for (let q = 0; q < c.length; q += 2) pts.push(at(c[q], c[q + 1]));
+    let len = 0;
+    for (let q = 2; q < st.pts.length; q += 2) len += Math.hypot(st.pts[q] - st.pts[q - 2], st.pts[q + 1] - st.pts[q - 1]);
+    return `${pts.join(' → ')} (${Math.round(len).toLocaleString('en-US')} km)`;
+  };
+  const currents = world.surface.strokes.filter((st) => st.brush === 'current' && st.ctrl && st.ctrl.length >= 4);
+  if (currents.length) {
     out.push('');
-    out.push(`Ocean currents (${sketches.length}, placed by hand):`);
-    sketches.forEach((st, i) => {
-      const c = st.ctrl!;
-      const pts: string[] = [];
-      for (let q = 0; q < c.length; q += 2) pts.push(at(c[q], c[q + 1]));
-      let len = 0;
-      for (let q = 2; q < st.pts.length; q += 2) len += Math.hypot(st.pts[q] - st.pts[q - 2], st.pts[q + 1] - st.pts[q - 1]);
-      out.push(`  ${i + 1}. ${st.current ?? 'warm'}${st.currentSize === 'secondary' ? ' (secondary)' : ''}: ${pts.join(' → ')} (${Math.round(len).toLocaleString('en-US')} km)`);
-    });
+    out.push(`Ocean currents (${currents.length}, placed by hand):`);
+    currents.forEach((st, i) => out.push(`  ${i + 1}. ${st.current ?? 'warm'}${st.currentSize === 'secondary' ? ' (secondary)' : ''}, ${seasonName(st)}: ${course(st)}`));
+  }
+  const winds = world.surface.strokes.filter((st) => st.brush === 'wind' && st.ctrl && st.ctrl.length >= 4);
+  if (winds.length) {
+    out.push('');
+    out.push(`Winds (${winds.length}, drawn by hand):`);
+    winds.forEach((st, i) => out.push(`  ${i + 1}. ${Math.round(st.strength * 100)}%, ${seasonName(st)}: ${course(st)}`));
+  }
+  const highs = world.surface.strokes.filter((st) => st.brush === 'high' && st.pts.length >= 2);
+  if (highs.length) {
+    out.push('');
+    out.push(`High-pressure zones (${highs.length}):`);
+    highs.forEach((st, i) => out.push(`  ${i + 1}. ${at(st.pts[0], st.pts[1])}, ${Math.round(st.strength * 100)}%, reach ${formatDistance(st.size)}, ${seasonName(st)}`));
   }
 
   // The painted world, compact: rounded, with dense paths thinned.

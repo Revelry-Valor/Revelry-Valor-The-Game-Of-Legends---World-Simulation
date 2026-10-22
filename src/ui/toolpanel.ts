@@ -1,4 +1,4 @@
-import { BRUSHES, brushDefaults, brushInfo, ZONES, type BrushId, type ZoneId } from '../core/paint';
+import { BRUSHES, brushDefaults, brushInfo, strokeSeason, ZONES, type BrushId, type Stroke, type ZoneId } from '../core/paint';
 import { kmToMiles, milesToKm } from '../core/units';
 import { choice, h, numberField } from './dom';
 import type { BrushSettings, HighOps, SketchOps, ToolState } from './mapview';
@@ -155,7 +155,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
     ];
     if (mode === 'draw') {
-      out.push(strength(s.strength, (x) => { s.strength = x; changed(); }), h('p', { class: 'muted small' }, 'Tap points along the way it blows, then tap the last point again to finish. Esc cancels.'));
+      out.push(strength(s.strength, (x) => { s.strength = x; changed(); }), seasonDraw(s), seasonNote, h('p', { class: 'muted small' }, 'Tap points along the way it blows, then tap the last point again to finish. Esc cancels.'));
       return out;
     }
     const ops = sketch();
@@ -166,6 +166,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     }
     out.push(
       strength(sel.strength, (x) => { ops.set({ strength: x }, editedWind !== sel.id); editedWind = sel.id; }),
+      ...seasonAdjust(sel, (patch) => ops.set(patch), () => ops.copyToOtherSeason()),
       h('div', { class: 'sketch-actions' },
         h('button', { type: 'button', class: 'ghost small', title: 'Make it blow the other way.', onclick: () => { ops.reverse(); renderSettings(); } }, 'Reverse'),
         h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete'),
@@ -174,24 +175,32 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     return out;
   };
   type Season = 'both' | 'summer' | 'winter';
-  const SEASONS: { value: Season; label: string }[] = [{ value: 'both', label: 'All year' }, { value: 'summer', label: 'Northern summer' }, { value: 'winter', label: 'Northern winter' }];
+  const SEASONS: { value: Season; label: string }[] = [{ value: 'both', label: 'Both seasons' }, { value: 'summer', label: 'Northern summer' }, { value: 'winter', label: 'Northern winter' }];
+  /** Drawing a current, wind or high: into the season shown on the map, or both. */
+  const seasonDraw = (s: BrushSettings) =>
+    choice<'shown' | 'both'>('Season', [{ value: 'shown', label: 'Season shown', title: 'Into the season shown on the map (switch it in the View panel)' }, { value: 'both', label: 'Both seasons' }], s.season === 'both' ? 'both' : 'shown', (v) => { s.season = v; changed(); });
+  /** A picked current, wind or high: its season, and a copy for the other season. */
+  const seasonAdjust = (sel: Stroke, set: (patch: Partial<Stroke>) => void, copy: () => void): HTMLElement[] => [
+    choice<Season>('Season', SEASONS, strokeSeason(sel), (v) => { set({ season: v }); renderSettings(); }),
+    h('button', { type: 'button', class: 'ghost small', disabled: strokeSeason(sel) === 'both', title: 'Make a copy of it in the other season, to change there', onclick: () => copy() }, 'Copy to other season'),
+  ];
+  const seasonNote = h('p', { class: 'muted small' }, 'Summer and winter each have their own currents, winds and highs: the map shows only those of the season picked in the View panel.');
   let editedHigh: number | null = null;
   /** Settings for high-pressure zones: place them, then pick one to change how strong it is. */
   const highFields = (): HTMLElement[] => {
     const s = state.settings;
     if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a high to delete it.')];
     const mode = state.sketchMode ?? 'draw';
-    const fields = (v: { strength: number; size: number; highSeason?: Season }, set: (patch: Partial<BrushSettings>) => void) => [
+    const fields = (v: { strength: number; size: number }, set: (patch: Partial<BrushSettings>) => void) => [
       numberField({ label: 'Strength', value: Math.round(v.strength * 100), min: 5, max: 100, step: 1, unit: '%', slider: true, hint: 'Stronger highs are drier under them.', change: (x) => set({ strength: Math.max(5, Math.min(100, x)) / 100 }) }),
       numberField({ label: 'Reach', value: Math.round(kmToMiles(v.size)), min: 100, max: 6000, step: 10, unit: 'miles', hint: 'How far it reaches (the dashed circle).', change: (x) => { if (x > 0) set({ size: milesToKm(x) }); } }),
-      choice<Season>('Season', SEASONS, v.highSeason ?? 'both', (x) => set({ highSeason: x })),
     ];
     const out: HTMLElement[] = [
       h('p', { class: 'muted small hint' }, 'High-pressure zones: sinking air, clear skies and little rain under them; stronger highs are drier. Draw the winds round them with the Wind brush (clockwise round a high in the north, anticlockwise in the south).'),
       choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Place' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
     ];
     if (mode === 'draw') {
-      out.push(...fields(s as { strength: number; size: number; highSeason?: Season }, (patch) => { Object.assign(s, patch); changed(); }), h('p', { class: 'muted small' }, 'Click the map to place a high.'));
+      out.push(...fields(s, (patch) => { Object.assign(s, patch); changed(); }), seasonDraw(s), seasonNote, h('p', { class: 'muted small' }, 'Click the map to place a high.'));
       return out;
     }
     const ops = highOps();
@@ -206,6 +215,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
         ops.set(patch, editedHigh !== sel.id);
         editedHigh = sel.id;
       }),
+      ...seasonAdjust(sel, (patch) => ops.set(patch), () => ops.copyToOtherSeason()),
       h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete')),
     );
     return out;
@@ -230,6 +240,8 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       out.push(
         choice<Kind>('Current', KINDS, s.current ?? 'warm', (v) => { s.current = v; changed(); }),
         choice<Size>('Size', SIZES, s.currentSize ?? 'major', (v) => { s.currentSize = v; changed(); }),
+        seasonDraw(s),
+        seasonNote,
         h('p', { class: 'muted small' }, 'Tap points along the course, then tap the last point again to finish. Esc cancels.'),
         currentRules(),
       );
@@ -244,6 +256,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     out.push(
       choice<Kind>('This current', KINDS, sel.current ?? 'warm', (v) => { ops.setKind(v); renderSettings(); }),
       choice<Size>('Size', SIZES, sel.currentSize ?? 'major', (v) => { ops.setSize(v); renderSettings(); }),
+      ...seasonAdjust(sel, (patch) => ops.set(patch), () => ops.copyToOtherSeason()),
       h('p', { class: 'muted small' }, 'Drag its dots to move them; drag the line to add a bend.'),
       h('div', { class: 'sketch-actions' },
         h('button', { type: 'button', class: 'ghost small', title: 'Make it flow the other way.', onclick: () => { ops.reverse(); renderSettings(); } }, 'Reverse'),

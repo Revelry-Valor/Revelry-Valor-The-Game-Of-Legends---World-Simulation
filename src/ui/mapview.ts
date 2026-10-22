@@ -1,5 +1,5 @@
 import { climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
-import { brushInfo, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
+import { brushInfo, inSeason, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
@@ -27,6 +27,8 @@ export interface HighOps {
   /** Change it (strength, reach, season); `undoStep` saves an undo step first. */
   set(patch: Partial<Stroke>, undoStep?: boolean): void;
   remove(): void;
+  /** Copy it into the other season. */
+  copyToOtherSeason(): void;
 }
 
 /** What can be done to the selected current sketch (for the tool panel). */
@@ -34,6 +36,8 @@ export interface SketchOps {
   selected(): Stroke | null;
   setKind(kind: 'warm' | 'cold' | 'neutral'): void;
   setSize(size: 'major' | 'secondary'): void;
+  /** Copy it into the other season (for a current, wind or high that holds in one season). */
+  copyToOtherSeason(): void;
   /** Change it; `undoStep` saves an undo step first. */
   set(patch: Partial<Stroke>, undoStep?: boolean): void;
   reverse(): void;
@@ -727,7 +731,7 @@ export function createMapView(o: MapViewOptions): MapView {
   // ---- High-pressure zones: select, drag, delete ----
   let highSel: number | null = null;
   let highDrag: { id: number; pointer: number } | null = null;
-  const highs = () => o.world().surface.strokes.filter((st) => st.brush === 'high' && st.pts.length >= 2);
+  const highs = () => o.world().surface.strokes.filter((st) => st.brush === 'high' && st.pts.length >= 2 && inSeason(st, o.look().season));
   const highPointer = (e: PointerEvent, x: number, y: number, erase: boolean): boolean => {
     const W = o.world().settings.widthKm;
     const wrap = wrapKm();
@@ -771,7 +775,24 @@ export function createMapView(o: MapViewOptions): MapView {
     o.update({ ...st, pts: [Math.round(x), Math.round(Math.max(0, Math.min(o.world().settings.heightKm, y)))] });
     schedule();
   };
+  /** A copy of a one-season current, wind or high, for the other season. */
+  const copySeason = (st: Stroke) => {
+    const own = st.season === 'winter' ? 'winter' : st.season === 'summer' ? 'summer' : null;
+    if (!own) {
+      o.notice('It already holds in both seasons.');
+      return;
+    }
+    const { id: _id, ...rest } = st;
+    void _id;
+    o.begin({ ...rest, season: own === 'summer' ? 'winter' : 'summer' });
+    o.notice(`Copied to northern ${own === 'summer' ? 'winter' : 'summer'}. Switch the season in the View panel to see and change it.`);
+    schedule();
+  };
   const highOps: HighOps = {
+    copyToOtherSeason() {
+      const st = highOps.selected();
+      if (st) copySeason(st);
+    },
     selected: () => highs().find((k) => k.id === highSel) ?? null,
     set(patch, undoStep = true) {
       const st = highOps.selected();
@@ -794,7 +815,8 @@ export function createMapView(o: MapViewOptions): MapView {
   let dragging: { id: number; idx: number; pointer: number } | null = null;
   const wrapKm = () => (o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0);
   /** The drawn currents or winds (by default, those of the tool in hand). */
-  const sketches = (b: SketchBrush = isSketch(o.tool().tool) ? (o.tool().tool as SketchBrush) : 'current') => o.world().surface.strokes.filter((st) => st.brush === b && st.ctrl && st.ctrl.length >= 4);
+  const sketches = (b: SketchBrush = isSketch(o.tool().tool) ? (o.tool().tool as SketchBrush) : 'current') =>
+    o.world().surface.strokes.filter((st) => st.brush === b && st.ctrl && st.ctrl.length >= 4 && inSeason(st, o.look().season));
   const withCtrl = (st: Stroke, ctrl: number[]): Stroke => ({ ...st, ctrl: roundPath(ctrl), pts: roundPath(sketchCourse(ctrl, wrapKm())) });
   /** Distance on screen (px) from a point to a segment. */
   const segDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
@@ -898,6 +920,10 @@ export function createMapView(o: MapViewOptions): MapView {
       if (undoStep) o.snapshot();
       o.update({ ...st, ...patch });
       schedule();
+    },
+    copyToOtherSeason() {
+      const st = sketchOps.selected();
+      if (st) copySeason(st);
     },
     setSize(size) {
       const st = sketchOps.selected();

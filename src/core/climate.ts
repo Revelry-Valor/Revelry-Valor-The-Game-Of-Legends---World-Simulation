@@ -1,5 +1,5 @@
 import { CLIMATE_DEFAULTS, kmPerDegree, type WorldSettings } from './settings';
-import type { Stroke, Surface } from './paint';
+import { inSeason, type Stroke, type Surface } from './paint';
 import { evaluate } from './terrain';
 import { flowAt, riverNetwork, widthForFlow } from './water';
 
@@ -677,10 +677,10 @@ interface MajorPath {
 }
 
 /** The currents drawn on the map, as paths in km (x may run past the edges on wrapping maps). */
-export function drawnCurrents(surface: Surface): MajorPath[] {
+export function drawnCurrents(surface: Surface, s: number): MajorPath[] {
   const out: MajorPath[] = [];
   for (const st of surface.strokes) {
-    if (st.brush !== 'current' || st.pts.length < 4) continue;
+    if (st.brush !== 'current' || st.pts.length < 4 || !inSeason(st, s)) continue;
     const kind = st.current === 'cold' ? -1 : st.current === 'neutral' ? 0 : 1;
     const major = st.currentSize !== 'secondary';
     const n = st.pts.length / 2;
@@ -693,7 +693,7 @@ function currents(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate): vo
   const { w, h, n, land, stepX, stepY, wrap, W, c } = ctx;
   const shift = s * 2.5 * ctx.tiltF;
   const wx = (x: number) => (wrap ? ((x % W) + W) % W : x);
-  const keep = drawnCurrents(surface);
+  const keep = drawnCurrents(surface, s);
   out.major = keep;
 
   // ---- Water temperature next to the currents ----
@@ -869,7 +869,7 @@ function flowPaths(se: SeasonClimate): void {
 
 /** The placed highs holding in this season (s: 1 northern summer, −1 northern winter). */
 export function placedHighs(surface: Surface, s: number): Stroke[] {
-  return surface.strokes.filter((st) => st.brush === 'high' && st.pts.length >= 2 && (st.highSeason ?? 'both') !== (s > 0 ? 'winter' : 'summer'));
+  return surface.strokes.filter((st) => st.brush === 'high' && st.pts.length >= 2 && inSeason(st, s));
 }
 
 function pressureField(ctx: Ctx, surface: Surface, s: number, out: SeasonClimate): void {
@@ -911,7 +911,7 @@ function winds(ctx: Ctx, surface: Surface, s0: number, out: SeasonClimate): void
   let line = 0;
   const lineIds: number[] = [-1];
   for (const st of surface.strokes) {
-    if (st.brush !== 'wind' || st.pts.length < 4) continue;
+    if (st.brush !== 'wind' || st.pts.length < 4 || !inSeason(st, s0)) continue;
     line++;
     lineIds.push(st.id);
     const p = st.pts;

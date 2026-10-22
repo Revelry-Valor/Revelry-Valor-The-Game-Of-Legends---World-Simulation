@@ -119,6 +119,8 @@ export function showWorld(app: App, start: World): () => void {
     begin(stroke) {
       const id = world.surface.nextId;
       const live: Stroke = { ...stroke, id };
+      // Currents, winds and highs drawn for "the season shown" belong to the season on the map.
+      if (live.season === 'shown') live.season = look.season === 1 ? 'summer' : 'winter';
       undoStack.push(world.surface.strokes);
       if (undoStack.length > 300) undoStack.shift();
       redoStack.length = 0;
@@ -209,7 +211,7 @@ export function showWorld(app: App, start: World): () => void {
   const lookPanel = h(
     'section',
     { class: 'view-panel' },
-    h('h2', {}, 'Look'),
+    h('h2', {}, 'Map look'),
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
   );
@@ -250,7 +252,7 @@ export function showWorld(app: App, start: World): () => void {
     { class: 'view-panel' },
     h('h2', {}, 'View'),
     mapChoice,
-    choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; map.redraw(); }),
+    choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; tools.refresh(); map.redraw(); }),
     climateLegend,
   );
 

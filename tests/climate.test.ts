@@ -166,6 +166,28 @@ describe('the climate of a test continent', () => {
     expect(rain(4500)).toBeGreaterThan(rain(5600) * 2);
   }, 60000);
 
+  it('uses each season’s own currents, winds and highs', () => {
+    const sc = computeClimate(
+      world((add) => {
+        add('current', line([[8900, yAt(10)], [8900, yAt(40)]]), { current: 'warm', season: 'summer' });
+        add('wind', line([[9000, yAt(30)], [13000, yAt(30)]]), { strength: 0.8, season: 'winter' });
+        add('high', [11000, yAt(35)], { strength: 0.6, size: 2000, season: 'winter' });
+        add('wind', line([[9000, yAt(-20)], [13000, yAt(-20)]]), { strength: 0.8, season: 'both' });
+      }),
+      settings,
+    );
+    const k = (x: number, lat: number) => Math.floor(yAt(lat) / (settings.heightKm / sc.h)) * sc.w + Math.floor(x / sc.step);
+    expect(sc.summer.curAnomaly[k(8950, 25)]).toBeGreaterThan(1);
+    expect(Math.abs(sc.winter.curAnomaly[k(8950, 25)])).toBeLessThan(0.3);
+    expect(sc.winter.windU[k(11000, 30)]).toBeGreaterThan(1);
+    expect(sc.summer.windLine[k(11000, 30)]).not.toBe(sc.winter.windLine[k(11000, 30)]);
+    expect(sc.winter.centres.length).toBe(1);
+    expect(sc.summer.centres.length).toBe(0);
+    // One for both seasons blows in both.
+    expect(sc.summer.windU[k(11000, -20)]).toBeGreaterThan(1);
+    expect(sc.winter.windU[k(11000, -20)]).toBeGreaterThan(1);
+  }, 60000);
+
   it('has no currents until they are drawn, then warms and cools the water by them', () => {
     expect(new Set(cl.summer.current).has(1)).toBe(false);
     expect(new Set(cl.summer.current).has(-1)).toBe(false);

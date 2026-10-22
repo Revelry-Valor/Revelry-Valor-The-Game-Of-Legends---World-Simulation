@@ -184,7 +184,12 @@ export interface Stroke {
   falls?: { at: number; to: number }[];
   /** Volcanoes and lava flows: still active (glowing). */
   active?: boolean;
-  /** High-pressure zones: the season they hold in (northern summer, northern winter, or both). */
+  /**
+   * Ocean currents, winds and high-pressure zones: the season they hold in (northern summer,
+   * northern winter, or both). As a brush setting, 'shown' means the season shown on the map.
+   */
+  season?: 'both' | 'summer' | 'winter' | 'shown';
+  /** Older worlds: a high's season, before every seasonal stroke had `season`. */
   highSeason?: 'both' | 'summer' | 'winter';
   /** Climate crystals: what they do. */
   crystal?: 'heat' | 'cold' | 'rain';
@@ -253,11 +258,25 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'river' ? { width: milesToKm(0.1), wander: milesToKm(3) } : {}),
     ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
     ...(id === 'crystal' ? { crystal: 'heat' as const } : {}),
-    ...(id === 'high' ? { highSeason: 'both' as const } : {}),
+    ...(id === 'high' || id === 'current' || id === 'wind' ? { season: 'shown' as const } : {}),
     ...(id === 'wind' ? { route: 'points' as const } : {}),
     ...(id === 'shadowpen' ? { penHeight: 2.5 } : {}),
     ...(id === 'current' ? { current: 'warm' as const, currentSize: 'major' as const, route: 'points' as const } : {}),
   };
+}
+
+/** Brushes whose strokes belong to a season (summer, winter or both). */
+export const SEASONAL: BrushId[] = ['current', 'wind', 'high'];
+
+/** The season a stroke holds in. */
+export function strokeSeason(st: Stroke): 'both' | 'summer' | 'winter' {
+  const v = st.season ?? st.highSeason ?? 'both';
+  return v === 'shown' ? 'both' : v;
+}
+
+/** Whether a stroke holds in a season (1 northern summer, −1 northern winter). */
+export function inSeason(st: Stroke, s: number): boolean {
+  return strokeSeason(st) !== (s > 0 ? 'winter' : 'summer');
 }
 
 /** How far a river's water, banks and waterfall pools can reach from its course, km. */
