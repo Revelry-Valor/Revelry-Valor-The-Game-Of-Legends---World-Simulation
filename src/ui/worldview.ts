@@ -209,7 +209,7 @@ export function showWorld(app: App, start: World): () => void {
   const lookPanel = h(
     'section',
     { class: 'view-panel' },
-    h('h2', {}, 'Map look'),
+    h('h2', {}, 'Look'),
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
   );
@@ -235,12 +235,20 @@ export function showWorld(app: App, start: World): () => void {
   );
   showCurrentsView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(6)')?.click();
   showPressureView = () => mapChoice.querySelector<HTMLButtonElement>('button:nth-child(5)')?.click();
+  // The Climate tab (creating): working the climate out, and the report.
   const climatePanel = h(
     'section',
     { class: 'view-panel' },
-    h('h2', {}, 'Climate maps'),
+    h('h2', {}, 'Climate'),
     h('div', { class: 'climate-run' }, climateBtn, climateStatus),
     h('button', { type: 'button', class: 'ghost small', title: 'Text describing the continents, the ITCZ and the currents, plus a compact copy of this world, to paste into a conversation.', onclick: () => void showReport() }, 'Climate report…'),
+    h('p', { class: 'muted small' }, 'Choose which climate map to look at in the View panel on the right.'),
+  );
+  // The View panel (looking): which map, which season, and how it looks.
+  const mapPanel = h(
+    'section',
+    { class: 'view-panel' },
+    h('h2', {}, 'View'),
     mapChoice,
     choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; map.redraw(); }),
     climateLegend,
@@ -478,10 +486,9 @@ export function showWorld(app: App, start: World): () => void {
   // Tabs: each shows only the tools and options for one kind of work.
   const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
     { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
-    { id: 'terrain', name: 'Terrain', groups: ['Relief', 'Volcanic', 'Mountain zones'], extra: [zonesPanel] },
+    { id: 'terrain', name: 'Terrain', groups: ['Relief', 'Volcanic', 'Mountain zones'], extra: [] },
     { id: 'cover', name: 'Ground cover', groups: ['Ground cover'], extra: [] },
     { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
-    { id: 'view', name: 'View', groups: [], extra: [lookPanel, layersPanel] },
   ];
   const tabBody = h('div', { class: 'tab-body' });
   const tabButtons = TABS.map((t) =>
@@ -501,6 +508,19 @@ export function showWorld(app: App, start: World): () => void {
     sideToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
     map.redraw();
   });
+  // The View panel on the right: what you're looking at, kept apart from the tools for making.
+  const viewSide = h('aside', { class: 'side view-side', 'aria-label': 'View' }, mapPanel, lookPanel, zonesPanel, layersPanel);
+  const viewToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true', title: 'Show or hide the View panel' }, 'View');
+  // On a phone the screen is too small for both panels and the map: the View panel starts hidden.
+  if (window.matchMedia?.('(max-width: 720px)').matches) {
+    viewSide.classList.add('closed');
+    viewToggle.setAttribute('aria-expanded', 'false');
+  }
+  viewToggle.addEventListener('click', () => {
+    const open = viewSide.classList.toggle('closed');
+    viewToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+    map.redraw();
+  });
 
   app.root.append(
     h(
@@ -514,6 +534,7 @@ export function showWorld(app: App, start: World): () => void {
           'nav',
           { class: 'tools' },
           sideToggle,
+          viewToggle,
           undoBtn,
           redoBtn,
           status,
@@ -523,7 +544,7 @@ export function showWorld(app: App, start: World): () => void {
           h('button', { type: 'button', class: 'ghost', onclick: leave }, 'Main menu'),
         ),
       ),
-      h('div', { class: 'workspace' }, side, map.el),
+      h('div', { class: 'workspace' }, side, map.el, viewSide),
       dialog,
     ),
   );
