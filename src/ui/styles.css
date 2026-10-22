@@ -244,3 +244,13 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
   .view-side { max-height: 32vh; }
 }
 .balance-ends{display:flex;justify-content:space-between;gap:.5rem;margin-top:-.15rem}
+@media (max-width: 720px) {
+  /* Phones: a compact top bar, so the tools and the map get the room. */
+  .topbar { padding: 0.35rem 12px; gap: 0.3rem 0.6rem; }
+  .topbar h1 { font-size: 1.1rem; }
+  .topbar .title .muted { display: none; }
+  .topbar .tools { gap: 0.25rem; }
+  .topbar .tools button { min-height: 32px; padding: 0.2rem 0.55rem; font-size: 0.85rem; }
+  .side { max-height: 46vh; }
+  .tabs .tab { padding: 0.25rem 0.45rem; font-size: 0.8rem; }
+}

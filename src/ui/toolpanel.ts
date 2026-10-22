@@ -349,6 +349,13 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     renderPickers();
     renderSettings();
     changed();
+    // On a phone the panel is short: bring the tool's settings into view, or they sit below the fold.
+    if (tool !== 'pan' && window.matchMedia?.('(max-width: 720px)').matches) requestAnimationFrame(() => {
+      const side = settings.closest<HTMLElement>('.side');
+      if (!side) return;
+      const tabs = side.querySelector<HTMLElement>('.tabs')?.offsetHeight ?? 0;
+      side.scrollTo({ top: side.scrollTop + settings.getBoundingClientRect().top - side.getBoundingClientRect().top - tabs - 8, behavior: 'smooth' });
+    });
   };
   const setErase = (on: boolean) => {
     if (state.tool === 'pan') return;
