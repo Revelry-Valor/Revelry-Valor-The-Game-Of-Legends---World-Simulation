@@ -305,3 +305,6 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .tech-chip small { grid-column: 2; color: var(--muted); font-size: 0.72rem; line-height: 1.2; }
 .tech-chip .tier { grid-row: span 2; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); align-self: start; padding-top: 0.1rem; }
 .tech-chip.start { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.pair-row input[type='text']:not(.grow) { width: 12rem; }
+.pair-row { flex-wrap: nowrap; width: 100%; }
+.pair-row .grow { width: auto; }

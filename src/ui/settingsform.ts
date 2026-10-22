@@ -147,5 +147,25 @@ export function worldTabFields(s: WorldSettings, changed: () => void): HTMLEleme
     orbitFields(s, changed),
     h('h3', {}, 'Temperature and rain'),
     weatherFields(s, changed, true),
+    h('h3', {}, 'The gods'),
+    godFields(s, changed),
   );
+}
+
+/** Whether the gods act in this world, and how much (each god also has its own activity, in the Library). */
+function godFields(s: WorldSettings, changed: () => void): HTMLElement {
+  const g = { active: true, activity: 50, ...(s.gods ?? {}) };
+  const set = () => {
+    s.gods = { ...g };
+    changed();
+  };
+  const level = h('div', {});
+  const render = () =>
+    level.replaceChildren(
+      g.active
+        ? numberField({ label: 'How active', value: g.activity, min: 0, max: 100, step: 5, slider: true, hint: '0: distant, they act once in an age. 100: meddling, always at work. Each god also has its own activity.', change: (v) => { g.activity = Math.max(0, Math.min(100, v)); set(); } })
+        : h('p', { class: 'muted small' }, 'Religion is belief only: no miracles, blessings, champions or gods in person.'),
+    );
+  render();
+  return h('div', { class: 'group' }, choice('Gods', [{ value: 'on', label: 'Act in the world' }, { value: 'off', label: 'Belief only' }], g.active ? 'on' : 'off', (v) => { g.active = v === 'on'; set(); render(); }), level);
 }

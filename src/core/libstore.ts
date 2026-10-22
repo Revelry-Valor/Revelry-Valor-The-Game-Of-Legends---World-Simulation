@@ -3,6 +3,7 @@ import { ROSTER } from '../data/roster';
 import { START_BEASTS, START_RESOURCES, START_TRAITS } from '../data/startlists';
 import { START_TECHS } from '../data/techs';
 import { START_BEHAVIOURS, START_TRADITIONS } from '../data/culture';
+import { START_GOVERNMENTS, START_TENETS } from '../data/rule';
 import type { KeyValueStore } from './storage';
 
 /** The starting library: the author's roster of peoples and the starting traits, resources and beasts. */
@@ -37,7 +38,7 @@ export function defaultLibrary(): Library {
       }),
     };
   });
-  return cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS, techs: START_TECHS, behaviours: START_BEHAVIOURS, traditions: START_TRADITIONS, cultures: [] });
+  return cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS, techs: START_TECHS, behaviours: START_BEHAVIOURS, traditions: START_TRADITIONS, cultures: [], governments: START_GOVERNMENTS, tenets: START_TENETS, faiths: [], gods: [] });
 }
 
 /**
@@ -48,8 +49,15 @@ export function upgradeLibrary(raw: unknown): Library {
   const lib = readLibrary(raw);
   const o = (raw ?? {}) as Record<string, unknown>;
   const start = defaultLibrary();
-  for (const key of ['traits', 'resources', 'species', 'beasts', 'techs', 'behaviours', 'traditions', 'cultures'] as const) {
+  for (const key of ['traits', 'resources', 'species', 'beasts', 'techs', 'behaviours', 'traditions', 'cultures', 'governments', 'tenets', 'faiths', 'gods'] as const) {
     if (!Array.isArray(o[key])) (lib[key] as unknown[]) = start[key] as unknown[];
+  }
+  // Cultures named their preferred government before there was a creator: link the name to the government.
+  for (const c of lib.cultures) {
+    if (c.government && !lib.governments.some((gv) => gv.id === c.government)) {
+      const byName = lib.governments.find((gv) => gv.name.toLowerCase() === c.government.toLowerCase());
+      if (byName) c.government = byName.id;
+    }
   }
   return lib;
 }

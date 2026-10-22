@@ -291,6 +291,103 @@ export interface Culture {
   notes: string;
 }
 
+// ---- Government (REDESIGN.md 8.4b): built from parts ----
+
+export const GOV_HEAD = ['Chief', 'Council of elders', 'King or queen', 'Emperor', 'Khan', 'High priest', 'Archmage', 'Elected leader', 'Assembly', 'None (a council rules)'] as const;
+export const GOV_RULING = ['Same as the head', 'Military ruler (shogun-like)', 'High princes', 'Nobility (great lords and lesser nobles)', 'Chancellor or vizier', 'Clergy', 'Mage council', 'Merchant houses'] as const;
+export const GOV_LAND = ['Clans and tribes', 'Great lords with vassals (feudal)', 'Appointed governors', 'Free cities', 'Temples', 'The state directly'] as const;
+export const GOV_SUCCESSION = ['Elders choose', 'Hereditary: eldest', 'Hereditary: any child', 'Hereditary: strongest claimant', 'Challenge or combat', 'Chosen by the gods or temple', 'Merit (such as the strongest mage)', 'Election by lords', 'Election by the people'] as const;
+export const GOV_LEGITIMACY = ['True line / sacred blood', 'Divine right', 'Strength', 'Wealth', 'Magic power', 'Consent of the people'] as const;
+export const GOV_ARMY = ['Clan warbands', 'Levies', 'Lords’ retainers (samurai-like)', 'Standing army', 'Specialized troops', 'Mercenaries', 'Militia', 'Religious or magic orders'] as const;
+export const GOV_LAW = ['Custom', 'Lords’ justice', 'Written law', 'Religious law', 'Magical oaths'] as const;
+
+export interface Government {
+  id: string;
+  name: string;
+  /** One of the preloaded types the AI uses under its conditions (rather than one made for chosen cultures). */
+  builtIn: boolean;
+  description: string;
+  head: string;
+  /** Who is set up in the government as its rulers (not merely who has influence). */
+  ruling: string[];
+  land: string;
+  succession: string;
+  legitimacy: string;
+  army: string[];
+  law: string;
+  /** When the AI turns to it (built-in types). */
+  conditions: string;
+  /** Learned behaviours a people needs before it can have this government. */
+  needs: string[];
+  notes: string;
+}
+
+// ---- Religion (REDESIGN.md 8.4g): faiths, tenets and gods ----
+
+export const BELIEF_NATURE = ['Animism', 'Ancestor worship', 'Polytheism', 'Monotheism', 'Nature or world-tree worship', 'Mana or rift reverence', 'Philosophy'] as const;
+export const FAITH_LEADERS = ['No leader (local shamans)', 'Council of priests', 'High priest', 'The ruler', 'A living god', 'Prophets'] as const;
+export const FAITH_CLERGY = ['Anyone', 'Men only', 'Women only', 'A priestly caste', 'Mages only', 'Chosen by the gods'] as const;
+export const FAITH_TOLERANCE = ['Tolerant', 'Accepting', 'Wary', 'Intolerant', 'Hostile'] as const;
+export const FAITH_MARRIAGE = ['One partner', 'Many partners allowed', 'Within the faith only', 'Arranged by the clergy', 'No rules'] as const;
+export const FAITH_MANA = ['Revered', 'Accepted', 'Feared', 'Forbidden'] as const;
+export const FAITH_ORGANIZATION = ['Loose (local shamans)', 'Gathering (shrines and wise ones)', 'Organized (temples and priesthood)', 'Hierarchy (a head of faith)'] as const;
+export const HOLY_SITE_KINDS = ['Temple city', 'Giant tree', 'Volcano', 'Rift', 'World tree root crossing', 'Mountain', 'Lake or spring', 'Grove', 'Battlefield', 'Other'] as const;
+export const GOD_DOMAINS = ['War', 'Harvest', 'Sea', 'Sky and storms', 'Sun', 'Moon', 'Death', 'Life and healing', 'Forge and craft', 'Love', 'Trickery', 'Wisdom', 'Nature and beasts', 'Mana', 'Rifts', 'Fate', 'Hearth and home', 'Trade', 'Night', 'Earth and stone', 'Fire', 'Chaos', 'Order', 'Justice'] as const;
+export const GOD_POWERS = ['Miracles', 'Blessings', 'Raising heroes', 'Omens and visions', 'Prophecies that come true', 'Choosing champions', 'Appearing in person', 'Proxy wars through followers'] as const;
+export const GOD_PERSONALITY = ['Kind', 'Stern', 'Proud', 'Jealous', 'Playful', 'Cruel', 'Distant', 'Curious', 'Wrathful', 'Patient'] as const;
+
+/** A tenet: a core belief a faith holds, at a severity. */
+export interface Tenet {
+  id: string;
+  name: string;
+  description: string;
+  levels: { name: string; description: string }[];
+  effects: string;
+}
+
+export interface Faith {
+  id: string;
+  name: string;
+  symbols: string;
+  /** Who follows it. */
+  cultures: string[];
+  species: string[];
+  nature: string[];
+  /** About three core beliefs, each at a degree. */
+  tenets: { id: string; level: number }[];
+  leader: string;
+  clergy: string;
+  otherFaiths: string;
+  marriage: string;
+  otherSpecies: string;
+  mana: string;
+  organization: string;
+  holySites: { name: string; kind: string; description: string }[];
+  gods: string[];
+  /** Story faiths can be locked or heavily encouraged for their followers. */
+  hold: string;
+  notes: string;
+}
+
+/** A god: a real actor in the world, with its own personality, goals, favourites and rivals. */
+export interface God {
+  id: string;
+  name: string;
+  titles: string;
+  symbol: string;
+  domains: string[];
+  personality: string;
+  goals: string;
+  favouredSpecies: string[];
+  favouredCultures: string[];
+  rivals: string[];
+  allies: string[];
+  /** How often it acts, 1 (rarely) to 5 (often). */
+  activity: number | null;
+  powers: string[];
+  notes: string;
+}
+
 export interface Library {
   format: number;
   traits: Trait[];
@@ -301,6 +398,10 @@ export interface Library {
   behaviours: Behaviour[];
   traditions: Tradition[];
   cultures: Culture[];
+  governments: Government[];
+  tenets: Tenet[];
+  faiths: Faith[];
+  gods: God[];
 }
 
 export const LIBRARY_FORMAT = 1;
@@ -341,6 +442,11 @@ export const newTech = (id: string, name: string, field = ''): Tech => ({ id, na
 export const newTradition = (id: string, name: string): Tradition => ({ id, name, category: '', description: '', levels: [{ name: 'Mild', description: '' }, { name: 'Strong', description: '' }, { name: 'Extreme', description: '' }], conditions: '', places: [], beasts: [], effects: '' });
 export const newBehaviour = (id: string, name: string): Behaviour => ({ id, name, category: '', description: '', requires: [], needsTech: [], pushesTech: [], unlocks: '' });
 export const newCulture = (id: string, name: string): Culture => ({ id, name, species: [], races: [], ancestry: '', language: '', sounds: '', ethos: '', martial: '', lifestyles: [], traditions: [], specialties: [], behaviours: [], government: '', governmentHold: '', notes: '' });
+
+export const newGovernment = (id: string, name: string): Government => ({ id, name, builtIn: false, description: '', head: '', ruling: [], land: '', succession: '', legitimacy: '', army: [], law: '', conditions: '', needs: [], notes: '' });
+export const newTenet = (id: string, name: string): Tenet => ({ id, name, description: '', levels: [{ name: 'Held', description: '' }, { name: 'Zealous', description: '' }], effects: '' });
+export const newFaith = (id: string, name: string): Faith => ({ id, name, symbols: '', cultures: [], species: [], nature: [], tenets: [], leader: '', clergy: '', otherFaiths: '', marriage: '', otherSpecies: '', mana: '', organization: '', holySites: [], gods: [], hold: '', notes: '' });
+export const newGod = (id: string, name: string): God => ({ id, name, titles: '', symbol: '', domains: [], personality: '', goals: '', favouredSpecies: [], favouredCultures: [], rivals: [], allies: [], activity: 3, powers: [], notes: '' });
 
 /** How deep a technology sits in its tree: 0 for those needing nothing, then one more than its deepest requirement. */
 export function techTiers(techs: Tech[]): Map<string, number> {
@@ -434,6 +540,10 @@ export function readLibrary(raw: unknown): Library {
     techs: arr(o.techs, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), field: str(x.field), description: str(x.description), start: x.start === true, requires: strs(x.requires), resources: strs(x.resources), places: strs(x.places), practice: str(x.practice), need: str(x.need), difficulty: num(x.difficulty), unlocks: str(x.unlocks) } : null)),
     behaviours: arr(o.behaviours, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), category: str(x.category), description: str(x.description), requires: strs(x.requires), needsTech: strs(x.needsTech), pushesTech: strs(x.pushesTech), unlocks: str(x.unlocks) } : null)),
     traditions: arr(o.traditions, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), category: str(x.category), description: str(x.description), levels: arr(x.levels, (l) => (l && typeof l === 'object' ? { name: str((l as Record<string, unknown>).name), description: str((l as Record<string, unknown>).description) } : null)), conditions: str(x.conditions), places: strs(x.places), beasts: strs(x.beasts), effects: str(x.effects) } : null)),
+    governments: arr(o.governments, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), builtIn: x.builtIn === true, description: str(x.description), head: str(x.head), ruling: strs(x.ruling), land: str(x.land), succession: str(x.succession), legitimacy: str(x.legitimacy), army: strs(x.army), law: str(x.law), conditions: str(x.conditions), needs: strs(x.needs), notes: str(x.notes) } : null)),
+    tenets: arr(o.tenets, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), description: str(x.description), levels: arr(x.levels, (l) => (l && typeof l === 'object' ? { name: str((l as Record<string, unknown>).name), description: str((l as Record<string, unknown>).description) } : null)), effects: str(x.effects) } : null)),
+    faiths: arr(o.faiths, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), symbols: str(x.symbols), cultures: strs(x.cultures), species: strs(x.species), nature: strs(x.nature), tenets: arr(x.tenets, (t) => (t && typeof t === 'object' && typeof (t as Record<string, unknown>).id === 'string' ? { id: (t as Record<string, unknown>).id as string, level: num((t as Record<string, unknown>).level) ?? 0 } : null)), leader: str(x.leader), clergy: str(x.clergy), otherFaiths: str(x.otherFaiths), marriage: str(x.marriage), otherSpecies: str(x.otherSpecies), mana: str(x.mana), organization: str(x.organization), holySites: arr(x.holySites, (t) => (t && typeof t === 'object' ? { name: str((t as Record<string, unknown>).name), kind: str((t as Record<string, unknown>).kind), description: str((t as Record<string, unknown>).description) } : null)), gods: strs(x.gods), hold: str(x.hold), notes: str(x.notes) } : null)),
+    gods: arr(o.gods, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), titles: str(x.titles), symbol: str(x.symbol), domains: strs(x.domains), personality: str(x.personality), goals: str(x.goals), favouredSpecies: strs(x.favouredSpecies), favouredCultures: strs(x.favouredCultures), rivals: strs(x.rivals), allies: strs(x.allies), activity: num(x.activity), powers: strs(x.powers), notes: str(x.notes) } : null)),
     cultures: arr(o.cultures, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), species: strs(x.species), races: strs(x.races), ancestry: str(x.ancestry), language: str(x.language), sounds: str(x.sounds), ethos: str(x.ethos), martial: str(x.martial), lifestyles: strs(x.lifestyles), traditions: arr(x.traditions, (t) => (t && typeof t === 'object' && typeof (t as Record<string, unknown>).id === 'string' ? { id: (t as Record<string, unknown>).id as string, level: num((t as Record<string, unknown>).level) ?? 0, hold: str((t as Record<string, unknown>).hold) } : null)), specialties: arr(x.specialties, (t) => (t && typeof t === 'object' ? { name: str((t as Record<string, unknown>).name), description: str((t as Record<string, unknown>).description) } : null)), behaviours: strs(x.behaviours), government: str(x.government), governmentHold: str(x.governmentHold), notes: str(x.notes) } : null)),
   };
 }

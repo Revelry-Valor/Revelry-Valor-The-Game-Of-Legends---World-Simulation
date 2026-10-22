@@ -66,3 +66,26 @@ describe('technology and culture in the library', () => {
     expect(up.traditions.length).toBe(lib.traditions.length);
   });
 });
+
+describe('governments and religion in the library', () => {
+  const lib = defaultLibrary();
+  it('has the built-in government types, each built from parts and needing real behaviours', () => {
+    const names = lib.governments.map((g) => g.name);
+    for (const n of ['Clan', 'Horde', 'Chiefdom', 'Petty kingdom', 'City-state', 'Theocracy', 'Magocracy', 'Feudal kingdom', 'Empire', 'Republic', 'Merchant republic', 'Elective monarchy', 'Gerontocracy']) expect(names).toContain(n);
+    for (const g of lib.governments) {
+      expect(g.builtIn).toBe(true);
+      expect(g.head && g.land && g.succession && g.legitimacy && g.law).toBeTruthy();
+      for (const b of g.needs) expect(lib.behaviours.some((x) => x.id === b)).toBe(true);
+    }
+  });
+  it('starts with tenets, and no faiths or gods (those are the author’s)', () => {
+    expect(lib.tenets.length).toBeGreaterThan(15);
+    for (const t of lib.tenets) expect(t.levels.length).toBeGreaterThan(0);
+    expect(lib.faiths).toEqual([]);
+    expect(lib.gods).toEqual([]);
+  });
+  it('links a culture’s government named before the creator existed', () => {
+    const up = upgradeLibrary({ ...lib, cultures: [{ id: 'c', name: 'C', government: 'Feudal kingdom' }] });
+    expect(up.cultures[0].government).toBe('feudal-kingdom');
+  });
+});

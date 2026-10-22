@@ -691,7 +691,7 @@ export function showWorld(app: App, start: World): () => void {
     const problems = h('ul', { class: 'problems', role: 'alert' });
     worldPanel.replaceChildren(
       worldTabFields(s, () => {
-        const next = { ...world.settings, axialTilt: s.axialTilt, dayLengthHours: s.dayLengthHours, averageTemperatureC: s.averageTemperatureC, rainfall: { ...s.rainfall }, climate: { ...s.climate } };
+        const next = { ...world.settings, axialTilt: s.axialTilt, dayLengthHours: s.dayLengthHours, averageTemperatureC: s.averageTemperatureC, rainfall: { ...s.rainfall }, climate: { ...s.climate }, ...(s.gods ? { gods: { ...s.gods } } : {}) };
         const list = validateSettings(next);
         problems.replaceChildren(...list.map((p) => h('li', {}, p)));
         if (list.length) return;
