@@ -151,7 +151,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     const strength = (v: number, set: (x: number) => void) =>
       numberField({ label: 'Strength', value: Math.round(v * 100), min: 5, max: 100, step: 1, unit: '%', slider: true, hint: 'Light breezes (thin lines) to strong, steady winds. Stronger winds carry moisture and warmth further.', change: (x) => set(Math.max(5, Math.min(100, x)) / 100) });
     const out: HTMLElement[] = [
-      h('p', { class: 'muted small hint' }, 'Draw the winds yourself. They carry moisture and warmth inland, mountains wring rain out of them, and where two winds run into each other a front forms, with clouds and rain.'),
+      h('p', { class: 'muted small hint' }, 'Draw the winds yourself. They carry moisture inland off warm seas (little off cold ones). Rising up a range they drop their rain on the windward side, leaving the far side dry. A wind carries on across a gap to the next wind ahead and joins a wind it runs into; where two winds blow head on into each other, a front forms, with clouds and rain.'),
       choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
     ];
     if (mode === 'draw') {

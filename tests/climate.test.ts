@@ -145,6 +145,23 @@ describe('the climate of a test continent', () => {
     expect(cl.summer.windPaths[0].length).toBe(0);
   }, 60000);
 
+  it('carries a drawn wind across a gap, wets the windward side of a range and leaves its lee dry', () => {
+    const wc = computeClimate(
+      world((add) => {
+        // A westerly onto the west coast, drawn in two pieces with a gap over the range.
+        add('wind', line([[300, yAt(45)], [3700, yAt(45)]]), { strength: 0.8 });
+        add('wind', line([[5400, yAt(45)], [13500, yAt(45)]]), { strength: 0.8 });
+      }),
+      settings,
+    );
+    const k = (x: number, lat: number) => Math.floor(yAt(lat) / (settings.heightKm / wc.h)) * wc.w + Math.floor(x / wc.step);
+    // In the gap it still blows east, about as strongly as along the lines.
+    expect(wc.summer.windU[k(4500, 45)]).toBeGreaterThan(0.8 * wc.summer.windU[k(2000, 45)]);
+    const rain = (x: number) => (wc.summer.rain[k(x, 45)] + wc.winter.rain[k(x, 45)]) / 2;
+    // Windward of the range (it runs at x 4,900) is wetter than far behind it.
+    expect(rain(4500)).toBeGreaterThan(rain(5600) * 2);
+  }, 60000);
+
   it('has no currents until they are drawn, then warms and cools the water by them', () => {
     expect(new Set(cl.summer.current).has(1)).toBe(false);
     expect(new Set(cl.summer.current).has(-1)).toBe(false);
