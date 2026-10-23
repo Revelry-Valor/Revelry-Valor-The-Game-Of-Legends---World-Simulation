@@ -14,6 +14,8 @@ import { createToolPanel, type NameOps } from './toolpanel';
 import { freshWaters, geoCell, geoNames, GEO_DEFAULTS, lakeAt, REGION_KINDS, riverAt, type NameOf } from '../core/geography';
 import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
 import { climateReport } from './report';
+import { createPeoples, type Peoples } from './peoples';
+import { loadSharedLibrary } from '../core/libstore';
 
 /**
  * The world screen: the map, the painting tools (Phase 1), the layer list, the world's
@@ -26,7 +28,7 @@ export function showWorld(app: App, start: World): () => void {
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
-    world = { ...world, updatedAt: Date.now() };
+    world = { ...world, ...(peoples ? { sim: peoples.pack() } : {}), updatedAt: Date.now() };
     if (app.save(world)) {
       dirty = false;
       status.textContent = `Saved ${new Date(world.updatedAt).toLocaleTimeString()}`;
@@ -36,6 +38,8 @@ export function showWorld(app: App, start: World): () => void {
     dirty = true;
     status.textContent = 'Unsaved changes';
   };
+  let peoples: Peoples | null = null;
+  let climateBusy = true;
   const autosave = window.setInterval(() => dirty && save(), 30000);
 
   const title = h('h1', {}, world.settings.name);
@@ -157,6 +161,7 @@ export function showWorld(app: App, start: World): () => void {
       changed();
       if (done) renderRef();
     },
+    overlay: () => peoples?.overlay ?? null,
   });
 
   // ---- Names: pins on the map that name the feature under them ----
@@ -339,8 +344,12 @@ export function showWorld(app: App, start: World): () => void {
   const climateBtn = h('button', { type: 'button', class: 'ghost small', title: 'Work the climate out again now.' }, 'Update climate');
   const climate = createClimateRunner(
     () => ({ surface: world.surface, settings: world.settings }),
-    () => map.climateChanged(),
+    () => {
+      map.climateChanged();
+      peoples?.climateChanged();
+    },
     (st) => {
+      climateBusy = st !== 'idle';
       climateStatus.textContent = st === 'working' ? 'Working out the climate…' : st === 'waiting' ? 'Climate will update when you pause.' : 'Climate is up to date.';
       climateBtn.disabled = st === 'working';
     },
@@ -445,12 +454,13 @@ export function showWorld(app: App, start: World): () => void {
     h('p', { class: 'muted small' }, 'Choose which climate map to look at in the View panel on the right.'),
   );
   // The View panel (looking): which map, which season, and how it looks.
+  const seasonChoice = choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; tools.refresh(); map.redraw(); });
   const mapPanel = h(
     'section',
     { class: 'view-panel' },
     h('h2', {}, 'View'),
     mapChoice,
-    choice<'1' | '-1'>('Season', [{ value: '1', label: 'Northern summer' }, { value: '-1', label: 'Northern winter' }], '1', (v) => { look.season = v === '1' ? 1 : -1; tools.refresh(); map.redraw(); }),
+    seasonChoice,
     climateLegend,
   );
 
@@ -722,6 +732,29 @@ export function showWorld(app: App, start: World): () => void {
       ),
     );
   };
+  // The Peoples tab: the first peoples, placed and run on (Phase 6).
+  peoples = createPeoples({
+    world: () => world,
+    library: () => world.library ?? loadSharedLibrary(app.store),
+    climate: () => climate.climate,
+    surface: () => world.surface,
+    redraw: () => map.redraw(),
+    changed,
+    setSeason(season) {
+      if (look.season === season) return;
+      look.season = season;
+      seasonChoice.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-checked', (i === 0) === (season === 1) ? 'true' : 'false'));
+      tools.refresh();
+      map.redraw();
+    },
+    climateBusy: () => climateBusy,
+    openLibrary: () => {
+      save();
+      app.library(world);
+    },
+  });
+  map.el.append(peoples.bar);
+  if (climate.climate) peoples.climateChanged();
   const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
     { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
     { id: 'terrain', name: 'Terrain', groups: ['Relief', 'Volcanic', 'Mountain zones'], extra: [] },
@@ -729,6 +762,7 @@ export function showWorld(app: App, start: World): () => void {
     { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
     { id: 'geo', name: 'Geography', groups: ['Geography'], extra: [geoPanel] },
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
+    { id: 'peoples', name: 'Peoples', groups: [], extra: [peoples.panel] },
   ];
   const tabBody = h('div', { class: 'tab-body' });
   const tabButtons = TABS.map((t) =>
@@ -738,6 +772,7 @@ export function showWorld(app: App, start: World): () => void {
     const t = TABS.find((x) => x.id === id) ?? TABS[0];
     if (t.id === 'world') renderWorldTab();
     if (t.id === 'geo') renderGeoPanel();
+    peoples?.setActive(t.id === 'peoples');
     tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
     if (t.groups.length) tools.showGroups(t.groups);
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
@@ -801,6 +836,7 @@ export function showWorld(app: App, start: World): () => void {
     window.clearInterval(autosave);
     clearTimeout(noticeTimer);
     climate.dispose();
+    peoples?.dispose();
     map.dispose();
     window.removeEventListener('beforeunload', beforeUnload);
     window.removeEventListener('keydown', keydown);

@@ -8,6 +8,7 @@ import type { Library } from '../src/core/library';
 import { buildEnv, type Env } from '../src/sim/env';
 import { addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
 import { DAYS_PER_YEAR, dateText } from '../src/sim/state';
+import { packSim, unpackSim } from '../src/sim/pack';
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -116,5 +117,22 @@ describe('the first peoples', () => {
     for (const t of sim.tribes) {
       if (!sim.sorties.some((s) => s.tribe === t.id)) expect(t.away).toBe(0);
     }
+  });
+  it('saves and comes back the same, small enough to keep', () => {
+    const sim = newSim(env, 21);
+    placeStart(sim, env, lib, [{ race: humanId(), tribes: 8 }], cl.zone);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 5);
+    const text = JSON.stringify(packSim(sim, env));
+    expect(text.length).toBeLessThan(400_000);
+    const back = unpackSim(JSON.parse(text), env)!;
+    expect(back).not.toBeNull();
+    expect(back.day).toBe(sim.day);
+    expect(back.tribes).toEqual(sim.tribes);
+    expect([...back.owner]).toEqual([...sim.owner]);
+    const id = env.beastInfo[0].id;
+    for (let k = 0; k < env.n; k += 97) expect(back.beasts[id][k]).toBeCloseTo(sim.beasts[id][k], 2);
+    // And it runs on the same from there.
+    stepDays(back, env, lib, 30);
+    expect(back.day).toBe(sim.day + 30);
   });
 });

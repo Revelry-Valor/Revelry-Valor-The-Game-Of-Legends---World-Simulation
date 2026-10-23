@@ -1,3 +1,4 @@
+import type { PackedSim } from '../sim/pack';
 import { centreLatitude, kmPerDegree, southLatitude, validateSettings, type WorldSettings } from './settings';
 import { emptySurface, shiftSurface, type Surface } from './paint';
 import type { Library } from './library';
@@ -56,6 +57,8 @@ export interface World {
   reference?: ReferenceImage | null;
   /** This world's copy of the library (peoples, beasts, traits, resources); the shared one until it has its own. */
   library?: Library;
+  /** The simulation of its peoples (Phase 6), packed for saving. */
+  sim?: PackedSim | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -103,7 +103,22 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface): Env {
     lat[k] = cl.lat[(k / w) | 0];
     if (!cl.land[k]) continue;
     mzone[k] = mountainZone(cl.height[k]);
-    if (cl.distSea[k] <= step * 1.2) coast[k] = 1;
+    // Coast: sea right next to it (the map's own edge is not a coast).
+    const i0 = k % w;
+    const j0 = (k / w) | 0;
+    for (let dj = -1; dj <= 1 && !coast[k]; dj++) for (let di = -1; di <= 1; di++) {
+      const j = j0 + dj;
+      let i = i0 + di;
+      if (j < 0 || j >= h) continue;
+      if (i < 0 || i >= w) {
+        if (!cl.wrapKm) continue;
+        i = (i + w) % w;
+      }
+      if (!cl.land[j * w + i]) {
+        coast[k] = 1;
+        break;
+      }
+    }
     const cover = cl.cover.main[k] >= 0 ? COVER_BRUSHES[cl.cover.main[k]] : 'grassland';
     const cf = COVER_FOOD[cover] ?? 0.8;
     for (const [s, se] of [[0, cl.summer], [1, cl.winter]] as const) {

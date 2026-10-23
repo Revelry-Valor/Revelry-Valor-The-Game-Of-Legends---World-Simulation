@@ -81,6 +81,7 @@ export function parseWorld(text: string): World {
     surface: readSurface(w.surface),
     ...(reference ? { reference } : {}),
     ...(w.library ? { library: upgradeLibrary(w.library) } : {}),
+    ...(w.sim && typeof w.sim === 'object' && (w.sim as { v?: number }).v === 1 ? { sim: w.sim } : {}),
     createdAt: typeof w.createdAt === 'number' ? w.createdAt : now,
     updatedAt: typeof w.updatedAt === 'number' ? w.updatedAt : now,
   };

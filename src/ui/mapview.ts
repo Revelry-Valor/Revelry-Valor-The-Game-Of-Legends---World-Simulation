@@ -77,6 +77,21 @@ export interface MapViewOptions {
   /** Stretching keeps the picture's shape. */
   referenceKeepShape?(): boolean;
   setReference?(ref: ReferenceImage, done: boolean): void;
+  overlay?(): MapOverlay | null;
+}
+
+/** Something drawn over the map and worked with the pointer (the peoples of the simulation). */
+export interface MapOverlay {
+  /** Draw it; `at` turns a place (km) on the map's copy `c` into screen points. */
+  draw(g: CanvasRenderingContext2D, at: (x: number, y: number, c: number) => [number, number], scale: number, copies: number[]): void;
+  /** A press on the map: true if the overlay takes it (then drags and the release go to it too). */
+  down?(x: number, y: number, pxKm: number): boolean;
+  drag?(x: number, y: number): void;
+  up?(x: number, y: number): void;
+  /** What it has at a place, for the readout. */
+  describe?(x: number, y: number): string | null;
+  /** While shown, pressing the map never paints (it pans instead). */
+  noPaint?: boolean;
 }
 
 export interface MapView {
@@ -168,6 +183,11 @@ export function createMapView(o: MapViewOptions): MapView {
     if (look.view === 'pressure' || look.view === 'air' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
     if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
     for (const gl of ['divide', 'join'] as const) if (o.tool().tool === gl || (look.view === 'geo' && (o.tool().tool === 'divide' || o.tool().tool === 'join'))) drawSketches(g, r, x0, span, copies, gl);
+    const ov = o.overlay?.();
+    if (ov) {
+      const yTop = toScreen(0, 0, r)[1];
+      ov.draw(g, (x, y, c) => [x0 + c * span + x * view.scale, yTop + y * view.scale], view.scale, copies);
+    }
     const labels = look.labels ?? 'all';
     if (cl?.geo && labels !== 'off') drawLabels(g, r, cl, x0, span, copies, labels);
     if (o.tool().tool === 'name') drawNamePins(g, r);
@@ -1463,6 +1483,20 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     const r = rect();
     const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
+    const ov = o.overlay?.();
+    if (ov && e.button === 0 && !spaceDown) {
+      if (ov.down?.(wrapX(x), y, 1 / view.scale)) {
+        overlayDrag = e.pointerId;
+        schedule();
+        return;
+      }
+      if (ov.noPaint) {
+        panning = true;
+        canvas.classList.add('panning');
+        schedule();
+        return;
+      }
+    }
     if (e.button === 1 || e.button === 2 || spaceDown || o.tool().tool === 'pan' || !startStroke(e, x, y)) {
       panning = true;
       canvas.classList.add('panning');
@@ -1470,8 +1504,21 @@ export function createMapView(o: MapViewOptions): MapView {
     schedule();
   });
 
+  /** A place on the map itself (wrapped copies fold back onto it). */
+  const wrapX = (x: number) => {
+    const s = o.world().settings;
+    return s.edges === 'wrap' ? ((x % s.widthKm) + s.widthKm) % s.widthKm : x;
+  };
+  let overlayDrag = -1;
   const release = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
+    if (overlayDrag === e.pointerId) {
+      const r = rect();
+      const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
+      overlayDrag = -1;
+      o.overlay?.()?.up?.(wrapX(x), y);
+      schedule();
+    }
     pinch = 0;
     if (drawing && drawing.pointer === e.pointerId) finishStroke();
     if (dragging?.pointer === e.pointerId) dragging = null;
@@ -1526,6 +1573,7 @@ export function createMapView(o: MapViewOptions): MapView {
     if (highDrag?.pointer === e.pointerId) dragHigh(x, y);
     if (refDrag?.pointer === e.pointerId) dragReference(x, y, false);
     if (drawing?.pointer === e.pointerId) extendStroke(x, y);
+    if (overlayDrag === e.pointerId) o.overlay?.()?.drag?.(wrapX(x), y);
     schedule();
     if (!readoutPending) {
       readoutPending = true;
@@ -1607,6 +1655,8 @@ export function createMapView(o: MapViewOptions): MapView {
         if (where.length) parts.unshift(where.join(', '));
       }
     }
+    const people = o.overlay?.()?.describe?.(xw, y);
+    if (people) parts.unshift(people);
     return `${formatLatitude(latitudeAt(s, y))} · ${formatDistance(xw)} from the west edge · ${parts.join(' · ')}`;
   };
 
