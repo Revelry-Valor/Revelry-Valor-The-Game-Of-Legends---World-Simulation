@@ -11,6 +11,7 @@ import { DAYS_PER_YEAR, dateText } from '../src/sim/state';
 import { packSim, unpackSim } from '../src/sim/pack';
 import { cropYear, isFood, newEconomy } from '../src/sim/economy';
 import { updatePrices } from '../src/sim/trade';
+import { bestWay, knows, pathCells, pathSpeed } from '../src/sim/ways';
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -336,5 +337,89 @@ describe('markets and trade', () => {
     expect(back.caravans).toEqual(sim.caravans);
     expect(back.routes).toEqual(sim.routes);
     expect(Math.max(...back.traffic)).toBeCloseTo(Math.max(...sim.traffic), 0);
+  }, 60000);
+});
+
+describe('trails, roads and railways', () => {
+  /** Two trading cities, one with grain and no salt, the other with salt (as in the trade tests). */
+  const pair = (seed: number, extra: Record<string, number> = {}, techs: string[] = []) => {
+    const sim = newSim(env, seed);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 300)!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6150, yAt(-12), 300)!;
+    a.economy = newEconomy(300, 1, 20);
+    a.economy.stores = { grain: 9000, ...extra };
+    b.economy = newEconomy(300, 1, 20);
+    b.economy.stores = { provisions: 6000, salt: 600 };
+    a.techs = techs;
+    const cellAt = (x: number, y: number) => Math.round((y - env.y0) / env.step) * env.w + ((Math.round((x - env.x0) / env.step) % env.w) + env.w) % env.w;
+    const path = pathCells(env, a.x, a.y, b.x, b.y, cellAt);
+    return { sim, a, b, path };
+  };
+  it('knows only the technologies every people starts with, until it learns more', () => {
+    const { a } = pair(61);
+    expect(knows(lib, a, 'barter')).toBe(true);
+    expect(knows(lib, a, 'roads')).toBe(false);
+    expect(bestWay(lib, a).tier).toBe(1);
+    a.techs = ['roads'];
+    expect(bestWay(lib, a).tier).toBe(3);
+  });
+  it('wears trails where caravans go, and builds nothing more without the know-how', () => {
+    const { sim, path } = pair(63);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 4);
+    expect(path.some((k) => sim.way[k] === 1)).toBe(true);
+    expect(Math.max(...sim.way)).toBeLessThanOrEqual(1);
+  }, 60000);
+  it('trails fade when no one walks them', () => {
+    const { sim, path } = pair(65);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 4);
+    sim.settlements = [];
+    sim.caravans = [];
+    sim.routes = [];
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 30);
+    expect(path.every((k) => sim.way[k] === 0)).toBe(true);
+  }, 60000);
+  it('builds a paved road along a busy route when it knows how and has the stone, and travel is faster on it', () => {
+    const { sim, a, path } = pair(67, { stone: 400 }, ['roads']);
+    const before = pathSpeed(sim, path);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 3);
+    const road = path.filter((k) => sim.way[k] === 3);
+    expect(road.length).toBeGreaterThan(0);
+    expect(road.every((k) => sim.wayKeeper[k] === a.id)).toBe(true);
+    expect(pathSpeed(sim, path)).toBeGreaterThan(before);
+    expect(sim.events.some((e) => e.text.includes('began a paved road'))).toBe(true);
+  }, 60000);
+  it('lets a road fall back when its keeper can no longer keep it up', () => {
+    const { sim, a, path } = pair(69, { stone: 400 }, ['roads']);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 2);
+    const road = path.filter((k) => sim.way[k] === 3);
+    expect(road.length).toBeGreaterThan(0);
+    // No stone left, and no stone to be had round it.
+    a.techs = [];
+    for (let m = 0; m < 36; m++) {
+      for (const id of Object.keys(a.economy!.stores)) if (env.resInfo.find((r) => r.id === id)?.category === 'Stone') a.economy!.stores[id] = 0;
+      stepDays(sim, env, lib, 30);
+    }
+    expect(road.every((k) => sim.way[k] < 3)).toBe(true);
+    expect(sim.events.some((e) => e.text.includes('falling into disrepair'))).toBe(true);
+  }, 60000);
+  it('lays a railway with iron, wood and stone, and runs trains on it that burn coal', () => {
+    const { sim, a, path } = pair(71, { iron: 2000, hardwood: 1500, stone: 1500, coal: 400 }, ['railways']);
+    let trains = 0;
+    for (let m = 0; m < 12 * 6; m++) {
+      // Keep the materials coming (as mines and woods round it would).
+      for (const [id, v] of Object.entries({ iron: 2000, hardwood: 1500, stone: 1500 })) a.economy!.stores[id] = Math.max(a.economy!.stores[id] ?? 0, v);
+      a.economy!.stores.coal = Math.max(a.economy!.stores.coal ?? 0, 50);
+      stepDays(sim, env, lib, 30);
+      trains += sim.caravans.filter((v) => v.train).length;
+    }
+    expect(path.every((k) => sim.way[k] === 4)).toBe(true);
+    expect(trains).toBeGreaterThan(0);
+  }, 60000);
+  it('saves its ways', () => {
+    const { sim, path } = pair(73, { stone: 400 }, ['roads']);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 3);
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(path.map((k) => back.way[k])).toEqual(path.map((k) => sim.way[k]));
+    expect(path.map((k) => back.wayKeeper[k])).toEqual(path.map((k) => sim.wayKeeper[k]));
   }, 60000);
 });

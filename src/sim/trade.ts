@@ -3,6 +3,7 @@ import type { Env } from './env';
 import { isFood, NEEDS, resInfoOf } from './economy';
 import type { RaceInfo } from './sim';
 import type { Caravan, Settlement, SimState } from './state';
+import { allRail, knows, pathCells, pathSpeed, TRAIN_COAL_PER_100KM, WAYS } from './ways';
 
 /**
  * Markets and trade (REDESIGN.md 8.4h, Phase 7 step 2).
@@ -71,10 +72,13 @@ export function updatePrices(env: Env, st: Settlement, needPer: number): Record<
 /** How much of a good a settlement can spare: what is over a good stock to keep. */
 export function surplus(env: Env, st: Settlement, needPer: number, id: string): number {
   const S = st.economy?.stores ?? {};
-  const have = S[id] ?? 0;
-  if (have <= 0) return 0;
   const r = resInfoOf(env, id);
   if (!r) return 0;
+  // Materials kept back for its ways are not for trade.
+  const res = st.economy?.reserve ?? {};
+  const kept = (res[id] ?? 0) + (r.category === 'Wood' ? res.wood ?? 0 : 0) + (r.category === 'Stone' ? res.stone ?? 0 : 0);
+  const have = (S[id] ?? 0) - kept;
+  if (have <= 0) return 0;
   if (r.food) {
     let food = 0;
     for (const [q, v] of Object.entries(S)) if (isFood(env, q)) food += v;
@@ -165,23 +169,32 @@ export function tradeMonth(c: TradeContext): void {
     const k = c.cellAt(a.x, a.y);
     const animalsHere = k >= 0 && env.beastInfo.some((b) => b.haul && (env.beastK[b.id]?.[k] ?? 0) > 0.2);
     const speed = ra.speed * (animalsHere ? 0.9 : 0.8);
-    const reach = speed * 25;
+    // Wagons where it knows the wheel carry half as much again.
+    const wagons = knows(c.lib, a, 'carts') || knows(c.lib, a, 'wheel');
     const workers = Math.round(a.pop * ra.workShare) - (a.economy!.away ?? 0);
     const people = Math.max(3, Math.min(40, Math.round(workers * 0.08)));
     if (workers < people * 3) continue;
     const animals = animalsHere ? people * 2 : 0;
-    const capacity = people * CARRY_PERSON + animals * CARRY_ANIMAL;
-    let best: { b: Settlement; cargo: Record<string, number>; gain: number; worth: number } | null = null;
+    const baseCapacity = (people * CARRY_PERSON + animals * CARRY_ANIMAL) * (wagons ? 1.5 : 1);
+    let best: { b: Settlement; cargo: Record<string, number>; gain: number; worth: number; train: boolean; coal: number } | null = null;
     for (const b of live) {
       if (b === a) continue;
       const d = c.dist(a.x, a.y, b.x, b.y);
-      if (d > reach) continue;
+      if (d > speed * 6 * 25) continue;
+      // Days on the road, faster along trails, roads and railways; up to about 25 days away.
+      const cells = pathCells(env, a.x, a.y, b.x, b.y, c.cellAt);
+      const days = d / (speed * pathSpeed(sim, cells));
+      if (days > 25) continue;
+      // A train, where the whole way is railway and there is coal to burn there and back.
+      const coal = (2 * d * TRAIN_COAL_PER_100KM) / 100;
+      const train = allRail(sim, cells) && (a.economy!.stores.coal ?? 0) >= coal + 1;
+      const capacity = baseCapacity * (train ? 10 : 1);
       const w = willingness(c, a, b);
       if (w <= 0) continue;
       const rb = c.info(b);
       if (!rb) continue;
       const pB = b.economy!.prices ?? {};
-      const cost = 1.15 + 0.02 * (d / speed);
+      const cost = 1.15 + 0.02 * days;
       // What to take: its surplus, where the partner values it most against home.
       const goods = Object.keys(a.economy!.stores)
         .map((id) => ({ id, ratio: (pB[id] ?? 0) / (pA[id] ?? Infinity), spare: surplus(env, a, ra.need, id) }))
@@ -204,13 +217,14 @@ export function tradeMonth(c: TradeContext): void {
       let got = 0;
       for (const [id, u] of Object.entries(back)) got += u * (pA[id] ?? baseWorth(env, id));
       const gain = (got / cost - given) * w;
-      if (gain > 2 && (!best || gain > best.gain)) best = { b, cargo, gain, worth: given };
+      if (gain > 2 && (!best || gain > best.gain)) best = { b, cargo, gain, worth: given, train, coal };
     }
     if (!best) continue;
     // Off it goes.
     for (const [id, u] of Object.entries(best.cargo)) a.economy!.stores[id] -= u;
+    if (best.train) a.economy!.stores.coal -= best.coal;
     a.economy!.away = (a.economy!.away ?? 0) + people;
-    const cv: Caravan = { id: sim.nextId++, from: a.id, to: best.b.id, clan: a.clan, x: a.x, y: a.y, leg: 'out', cargo: best.cargo, people, animals, speed, worth: best.worth, started: sim.day };
+    const cv: Caravan = { id: sim.nextId++, from: a.id, to: best.b.id, clan: a.clan, x: a.x, y: a.y, leg: 'out', cargo: best.cargo, people, animals, speed, worth: best.worth, started: sim.day, ...(best.train ? { train: true } : {}) };
     sim.caravans.push(cv);
     traded(a, sim.day).out += best.worth;
     traded(a, sim.day).caravans++;
@@ -243,14 +257,16 @@ export function caravansDay(c: TradeContext): void {
     const k = c.cellAt(cv.x, cv.y);
     if (k >= 0) sim.traffic[k] += (cv.people + cv.animals) / 10;
     const d = c.dist(cv.x, cv.y, goal.x, goal.y);
-    if (d > cv.speed) {
+    // Faster along the way it is on.
+    const step = cv.speed * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
+    if (d > step) {
       let dx = goal.x - cv.x;
       if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
       const a0 = Math.atan2(goal.y - cv.y, dx);
       let moved = false;
       for (const turn of [0, 0.5, -0.5, 1, -1, 1.5, -1.5]) {
-        const nx = cv.x + Math.cos(a0 + turn) * cv.speed;
-        const ny = cv.y + Math.sin(a0 + turn) * cv.speed;
+        const nx = cv.x + Math.cos(a0 + turn) * step;
+        const ny = cv.y + Math.sin(a0 + turn) * step;
         if (c.passableAt(ri, nx, ny)) {
           cv.x = env.wrapKm ? ((nx % env.wrapKm) + env.wrapKm) % env.wrapKm : nx;
           cv.y = ny;
@@ -280,7 +296,7 @@ function arriveThere(c: TradeContext, cv: Caravan, home: Settlement, b: Settleme
   }
   updatePrices(env, b, rb.need);
   updatePrices(env, home, ra.need);
-  const back = barterReturn(env, home, b, rb.need, cv.cargo, cv.people * CARRY_PERSON + cv.animals * CARRY_ANIMAL);
+  const back = barterReturn(env, home, b, rb.need, cv.cargo, (cv.people * CARRY_PERSON + cv.animals * CARRY_ANIMAL) * (knows(c.lib, home, 'carts') || knows(c.lib, home, 'wheel') ? 1.5 : 1) * (cv.train ? 10 : 1));
   // Nothing to be had for it now (things changed on the road): no deal; the goods go home again.
   if (!Object.keys(back).length) {
     cv.leg = 'home';

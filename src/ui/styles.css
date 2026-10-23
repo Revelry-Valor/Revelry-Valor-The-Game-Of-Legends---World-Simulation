@@ -347,3 +347,11 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .econ-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
 .econ-list li { display: flex; justify-content: space-between; gap: 0.5rem; }
 .econ-list .num { font-variant-numeric: tabular-nums; }
+.way-key { display: flex; flex-direction: column; gap: 0.2rem; }
+.way-swatch { display: inline-block; width: 1.6em; height: 0.5em; margin-right: 0.4em; vertical-align: middle; border-radius: 2px; }
+.way-trail { border-top: 2px dashed #b08a5a; height: 0; }
+.way-track { background: #8c5a2b; }
+.way-road { background: #e2ddd2; border: 1px solid #28241e; }
+.way-rail { background: repeating-linear-gradient(90deg, #1c1c1c 0 4px, #f2f2f2 4px 6px); }
+.teach-row { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.teach-row select { max-width: 12rem; }

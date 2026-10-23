@@ -79,6 +79,8 @@ export interface Settlement {
   ruinedOn: number;
   /** Its economy (Phase 7): what it has in store and how its workers are split (both in units). */
   economy?: Economy;
+  /** Technologies it knows beyond those every people starts with (library ids; Phase 8 spreads them). */
+  techs?: string[];
 }
 
 /**
@@ -103,6 +105,8 @@ export interface Economy {
   comfort: number;
   /** Its market (step 2): what each good is worth here now, in the one currency (a unit of staple food at ease is about 1). */
   prices?: Record<string, number>;
+  /** Materials kept back for building and keeping up ways next year, by kind ('wood', 'stone' or a resource id); not traded away. */
+  reserve?: Record<string, number>;
   /** People away with a caravan (not working at home). */
   away?: number;
   /** Trade over the last year, in worth: sent out and brought in. */
@@ -126,6 +130,8 @@ export interface Caravan {
   /** Worth (at home prices) of what it set out with. */
   worth: number;
   started: number;
+  /** A train: the whole way is railway (faster, carries far more, burns coal). */
+  train?: boolean;
 }
 
 /** A trade route between two settlements: how often it is used and how much goes along it. */
@@ -135,6 +141,8 @@ export interface Route {
   trips: number;
   worth: number;
   last: number;
+  /** Trips at the start of this year (so the year's trips are trips − mark). */
+  mark?: number;
 }
 
 /** Bad blood: a race against another (for raiding its holy place), until a day. */
@@ -181,6 +189,10 @@ export interface SimState {
   routes: Route[];
   /** How much people, herds and caravans travel over each point (for trails and roads; fades slowly). */
   traffic: Float32Array;
+  /** The way at each point: 0 none, 1 trail, 2 cart track, 3 paved road, 4 railway (ways.ts). */
+  way: Uint8Array;
+  /** The settlement that built and keeps the way there (−1: none, for trails). */
+  wayKeeper: Int32Array;
   grudges: Grudge[];
   clans: Clan[];
   sorties: Sortie[];

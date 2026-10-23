@@ -2,6 +2,7 @@ import { raceMissing, type Library, type Race, type Species } from '../core/libr
 import { PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
+import { WAYS, waysYear } from './ways';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
@@ -175,7 +176,7 @@ function passable(env: Env, ri: RaceInfo, k: number): boolean {
 export function newSim(env: Env, seed: number): SimState {
   const beasts: Record<string, Float32Array> = {};
   for (const b of env.beastInfo) beasts[b.id] = Float32Array.from(env.beastK[b.id], (v) => v * 0.9);
-  return { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], caravans: [], routes: [], traffic: new Float32Array(env.n), clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
+  return { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], caravans: [], routes: [], traffic: new Float32Array(env.n), way: new Uint8Array(env.n), wayKeeper: new Int32Array(env.n).fill(-1), clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
 }
 
 /** The culture a race's people start with: the first that names the race (or its species) as its heritage. */
@@ -225,6 +226,8 @@ export function placeStart(sim: SimState, env: Env, lib: Library, setup: SetupRo
   sim.caravans = [];
   sim.routes = [];
   sim.traffic.fill(0);
+  sim.way.fill(0);
+  sim.wayKeeper.fill(-1);
   sim.clans = [];
   sim.sorties = [];
   sim.owner.fill(-1);
@@ -477,7 +480,7 @@ function daily(sim: SimState, env: Env, info: Info): void {
     const d = dist(env, t.x, t.y, t.target.x, t.target.y);
     const k = cellOf(env, t.x, t.y);
     const slow = k >= 0 ? [1, 0.8, 0.6, 0.4, 0.3][env.mzone[k]] : 1;
-    const stepKm = ri.speed * slow * (t.fed < 0.6 ? 0.7 : 1);
+    const stepKm = ri.speed * slow * (t.fed < 0.6 ? 0.7 : 1) * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
     if (d <= stepKm) {
       t.x = t.target.x;
       t.y = t.target.y;
@@ -843,6 +846,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   settlementsYearly(sim, env, lib, info);
+  // Trails from use; roads and railways built, kept up, or let go (ways.ts).
+  waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
   // Ways fade unless they are used; routes long unused are forgotten.
   for (let k = 0; k < sim.traffic.length; k++) sim.traffic[k] *= 0.85;
   sim.routes = sim.routes.filter((r) => sim.day - r.last < DAYS_PER_YEAR * 10 && sim.settlements.some((q) => q.id === r.a && !q.ruined) && sim.settlements.some((q) => q.id === r.b && !q.ruined));

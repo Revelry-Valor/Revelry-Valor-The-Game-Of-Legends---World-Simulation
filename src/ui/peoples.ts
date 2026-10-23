@@ -6,6 +6,7 @@ import { buildEnv, type Env } from '../sim/env';
 import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
+import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays } from '../sim/sim';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -66,6 +67,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let showBeast = '';
   let showRes = '';
   let showTrade = true;
+  let showWays = true;
   let resDirty = true;
   let resImg: HTMLCanvasElement | null = null;
   let follow = true;
@@ -348,6 +350,60 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           }
           g.setLineDash([]);
         }
+        // Ways: trails, cart tracks, paved roads and railways, joining neighbouring points that have them.
+        if (showWays) {
+          const W = e.w;
+          const segs: [number, number, number][] = [];
+          for (let k = 0; k < e.n; k++) {
+            const t = s.way[k];
+            if (!t) continue;
+            const i = k % W;
+            const j = (k / W) | 0;
+            for (const [di, dj] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
+              let ii = i + di;
+              const jj = j + dj;
+              if (jj < 0 || jj >= e.h) continue;
+              if (ii >= W) {
+                if (!e.wrapKm) continue;
+                ii -= W;
+              }
+              const m = jj * W + ii;
+              // Diagonals only where the straight neighbours don't already join them.
+              if (di && dj && (s.way[j * W + ((i + di) % W)] || s.way[jj * W + i])) continue;
+              if (s.way[m]) segs.push([k, m, Math.min(t, s.way[m])]);
+            }
+          }
+          const P = (k: number): [number, number] => at(e.x0 + (k % W) * e.step, e.y0 + ((k / W) | 0) * e.step, c);
+          for (const tier of [1, 2, 3, 4]) {
+            const mine = segs.filter((q) => q[2] === tier);
+            if (!mine.length) continue;
+            const line = (width: number, colour: string, dash: number[] = []) => {
+              g.strokeStyle = colour;
+              g.lineWidth = width;
+              g.setLineDash(dash);
+              g.beginPath();
+              for (const [a, b] of mine) {
+                const [ax, ay] = P(a);
+                let [bx, by] = P(b);
+                // Across the wrap: draw toward the near copy.
+                if (Math.abs(bx - ax) > e.step * scale * 2) bx = ax + Math.sign(bx - ax) * -e.step * scale;
+                g.moveTo(ax, ay);
+                g.lineTo(bx, by);
+              }
+              g.stroke();
+            };
+            if (tier === 1) line(1.5, 'rgba(176,138,90,0.9)', [3, 3]);
+            else if (tier === 2) line(2.5, '#8c5a2b');
+            else if (tier === 3) {
+              line(4.5, 'rgba(40,36,30,0.85)');
+              line(2.5, '#e2ddd2');
+            } else {
+              line(4, '#1c1c1c');
+              line(4, '#f2f2f2', [1.5, 5]);
+            }
+          }
+          g.setLineDash([]);
+        }
         // Trade routes: faint lines between trading settlements, bolder the more they are used; caravans on them.
         if (showTrade) {
           g.setLineDash([5, 4]);
@@ -367,7 +423,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.setLineDash([]);
           for (const cv of s.caravans) {
             const [sx, sy] = at(cv.x, cv.y, c);
-            g.fillStyle = '#c8913c';
+            g.fillStyle = cv.train ? '#222' : '#c8913c';
             g.strokeStyle = '#2a1a08';
             g.lineWidth = 1.5;
             g.fillRect(sx - 3.5, sy - 3.5, 7, 7);
@@ -563,13 +619,17 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const from = s.settlements.find((q) => q.id === cv.from)?.name ?? '?';
         const to = s.settlements.find((q) => q.id === cv.to)?.name ?? '?';
         const goods = Object.entries(cv.cargo).map(([id, u]) => `${Math.round(u)} ${resInfoOf(env!, id)?.name.toLowerCase() ?? id}`).join(', ');
-        out.push(`Caravan of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
+        out.push(`${cv.train ? 'Train' : 'Caravan'} of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
         break;
       }
       const k = cellOf(x, y);
       if (k >= 0 && env!.land[k]) {
         const o = s.owner[k];
         if (o >= 0) out.push(`Land of clan ${clanOf(o)?.name ?? '(gone)'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 ? `, being taken by clan ${clanOf(s.rival[k])?.name ?? '?'}` : ''}`);
+        if (s.way[k]) {
+          const keeper = s.settlements.find((q) => q.id === s.wayKeeper[k]);
+          out.push(`${WAYS[s.way[k]].name}${keeper ? ` (kept by ${keeper.name})` : s.way[k] === 1 ? ' (worn by use)' : ''}`);
+        }
         if (showRes) {
           const r = env!.resInfo.find((q) => q.id === showRes);
           if (r) out.push(env!.res[r.id][k] > 0.01 ? `${r.name} here (${Math.round(Math.min(1, env!.res[r.id][k]) * 100)}%)` : `No ${r.name.toLowerCase()} here`);
@@ -629,6 +689,46 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       h('div', {}, `Needs beyond food (${NEEDS.map((n) => n.name.toLowerCase()).join(', ')}): ${Math.round(e.comfort * 100)}% met.`),
       ...marketPart(st),
       h('div', { class: 'muted' }, 'Units: one unit of a food feeds one person for a month.'),
+    );
+  };
+  /** What a settlement knows of building ways, what it could build and what that costs, and what it keeps. */
+  const waysCard = (st: Settlement): HTMLElement => {
+    const L = lib();
+    const s = sim!;
+    const e = env!;
+    const mi = e.step * 0.621;
+    const best = bestWay(L, st);
+    const techName = (id: string) => L.techs.find((t) => t.id === id)?.name ?? id;
+    const kindName = (k: string) => (k === 'wood' ? 'wood' : k === 'stone' ? 'stone' : resInfoOf(e, k)?.name.toLowerCase() ?? k);
+    const costText = (c: Record<string, number>) => Object.entries(c).map(([k, v]) => `${(v * 1.609).toFixed(1)} ${kindName(k)}`).join(', ');
+    let kept = 0;
+    const upkeep: Record<string, number> = {};
+    for (let k = 0; k < e.n; k++) {
+      if (s.wayKeeper[k] !== st.id || s.way[k] < 2) continue;
+      kept++;
+      for (const [kind, v] of Object.entries(buildCost(s.way[k], best.tech))) upkeep[kind] = (upkeep[kind] ?? 0) + v * e.step * WAYS[s.way[k]].upkeep;
+    }
+    const wayTechs = ['wheel', 'carts', 'roads', 'railways', 'mana-rail'].filter((id) => L.techs.some((t) => t.id === id));
+    const learned = st.techs ?? [];
+    const teach = h('select', { 'aria-label': 'Technology to give' }, h('option', { value: '' }, 'Choose…'), ...L.techs.filter((t) => !t.start && !learned.includes(t.id)).sort((a, b) => (wayTechs.includes(b.id) ? 1 : 0) - (wayTechs.includes(a.id) ? 1 : 0) || a.name.localeCompare(b.name)).map((t) => h('option', { value: t.id }, `${t.name} (${t.field})`))) as HTMLSelectElement;
+    return h('div', { class: 'tribe-card small econ' },
+      h('div', { class: 'econ-head' }, 'Ways'),
+      h('div', {}, best.tier >= 2 ? `Can build: ${WAYS[best.tier].name.toLowerCase()} (${techName(best.tech)}), along its busy trade routes, a few stretches a year.` : 'Can build: trails only (worn by use). Better ways need know-how:'),
+      h('ul', { class: 'econ-list' }, ...WAYS.slice(2).map((w) => {
+        const tech = w.techs.find((t) => knows(L, st, t)) ?? w.techs[0];
+        const ok = w.techs.some((t) => knows(L, st, t));
+        return h('li', {}, h('span', {}, `${ok ? '✓' : '·'} ${w.name}`), h('span', { class: 'muted' }, `${techName(tech)}; per mile ${costText(buildCost(w.tier, tech))}; upkeep ${Math.round(w.upkeep * 100)}% a year`));
+      })),
+      h('div', {}, kept ? `Keeps about ${Math.round(kept * mi)} miles of built ways; upkeep a year: ${Object.entries(upkeep).map(([k, v]) => `${Math.round(v)} ${kindName(k)}`).join(', ')}. Unpaid, they fall back a tier.` : 'Keeps no built ways.'),
+      h('div', { class: 'econ-head' }, 'Knows'),
+      h('div', {}, learned.length ? learned.map(techName).join(', ') : 'Only what every people starts with.'),
+      h('div', { class: 'muted' }, 'Until technology spreads on its own (Phase 8), you can give a settlement a technology here.'),
+      h('div', { class: 'teach-row' }, teach, h('button', { type: 'button', class: 'ghost small', onclick: () => {
+        if (!teach.value) return;
+        st.techs = [...learned, teach.value];
+        d.changed();
+        render();
+      } }, 'Give'), learned.length ? h('button', { type: 'button', class: 'ghost small', onclick: () => { st.techs = learned.slice(0, -1); d.changed(); render(); } }, 'Take back the last') : null),
     );
   };
   /** The settlement's market: what is dear and cheap here, and its trade this past year. */
@@ -714,6 +814,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     );
     const display = h('div', { class: 'group' },
       choice<'on' | 'off'>('Clan lands', [{ value: 'on', label: 'Clan lands shown' }, { value: 'off', label: 'Hidden' }], showLand ? 'on' : 'off', (v) => { showLand = v === 'on'; d.redraw(); }),
+      choice<'on' | 'off'>('Ways', [{ value: 'on', label: 'Trails, roads and railways shown' }, { value: 'off', label: 'Hidden' }], showWays ? 'on' : 'off', (v) => { showWays = v === 'on'; d.redraw(); }),
+      h('div', { class: 'way-key small' }, ...WAYS.slice(1).map((w) => h('span', {}, h('span', { class: `way-swatch way-${w.id}` }), `${w.name} (×${w.speed} speed)`))),
       choice<'on' | 'off'>('Trade', [{ value: 'on', label: 'Trade routes and caravans shown' }, { value: 'off', label: 'Hidden' }], showTrade ? 'on' : 'off', (v) => { showTrade = v === 'on'; d.redraw(); }),
       h('div', { class: 'field' }, h('label', {}, 'Where beasts live'), beastSelect, h('small', {}, 'Yellow is few, red is many: as many as the land can carry, thinned where they are hunted.')),
       h('div', { class: 'field' }, h('label', {}, 'Where resources are'),
@@ -902,6 +1004,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,
         ),
         !st.ruined && st.economy && ri ? economyCard(st, ri.need) : null,
+        !st.ruined && st.economy ? waysCard(st) : null,
         !s.started
           ? h('div', { class: 'group' },
               numberField({ label: 'People', value: Math.round(st.pop), min: 30, max: 20000, step: 10, change: (v) => { st.pop = Math.max(30, Math.min(20000, Math.round(v))); if (ri) st.warband = Math.round(st.pop * ri.warShare * 0.6); const row = draft.get(st.race); if (row) row.cityPop = st.pop; d.changed(); } }),

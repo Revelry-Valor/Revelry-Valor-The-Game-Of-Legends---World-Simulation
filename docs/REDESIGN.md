@@ -1021,6 +1021,21 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Routes and worn ways:** each pair that trades becomes a route (trips and worth recorded; forgotten after ten years unused); every caravan and moving tribe wears the ways it walks (fading slowly), ready for trails and roads in step 3.
 - **Views:** each settlement's card shows what is dear and cheap there and its trade this year and partners; the Peoples tab shows caravans on the road, the busiest routes, and the goods whose prices differ most between markets (cheapest and dearest where); the map shows routes and caravans (hover a caravan to see its goods).
 
+**Built (Phase 7, step 3): the travel network.**
+- **Trails** form on their own where people, herds and caravans walk often (every caravan and moving tribe wears the ways it uses; wear fades about 15% a year), and grow over when no one walks them. Free; travel on them is 1.25× as fast.
+- **Built ways** need know-how, resources and upkeep, as agreed. A tier can be built only by a settlement that knows its technology (from the Library's tree), and costs resources per mile; each year the settlement that built it pays upkeep (5% of the building cost), or every way it keeps falls back a tier (to a trail, if still walked).
+  - **Cart track:** *The wheel*; wood. 1.5× as fast.
+  - **Paved road:** *Paved roads*; stone. 2× as fast.
+  - **Railway:** *Railways and trains* (iron, wood and stone) or *Mana rail* (mana crystals and stone). 6× as fast. Where the whole way between two settlements is railway, caravans run as **trains**: ten times the load, burning coal each run.
+  - Knowing *The wheel* or *Wagons and caravans* lets caravans carry half as much again.
+- **Where they are built:** along busy trade routes (two or more trips a year), a few stretches a year from each end that can, toward the other. Builders keep back next year's materials and upkeep rather than trade them away.
+- **Faster travel** on ways speeds tribes and caravans, and so lets caravans reach further (up to about 25 days on the road) and makes trade cheaper.
+- **Who knows what:** every people knows the Library's starting technologies; until Phase 8 spreads technology by itself, a settlement can be given one by hand (its card in the Peoples tab).
+- **Bridges** wait for nations (Phase 9), as agreed.
+- **Views:** the map draws trails (dashed), cart tracks, paved roads and railways (with sleepers), and trains; each settlement's card shows what it can build, each tier's technology, cost per mile and upkeep, the ways it keeps and their yearly upkeep, and what it knows.
+
+**Phase 7 is complete.**
+
 ### 8.8 Tree settlements
 - **At the base:** a settlement can form around the foot of the tree, on the surface.
 - **Inside:** some species are naturally hollow, and settlements can be built inside them.

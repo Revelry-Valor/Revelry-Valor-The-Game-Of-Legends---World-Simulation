@@ -20,6 +20,8 @@ export interface PackedSim {
   caravans?: SimState['caravans'];
   routes?: SimState['routes'];
   traffic?: number[];
+  way?: number[];
+  wayKeeper?: number[];
   clans: SimState['clans'];
   sorties: SimState['sorties'];
   events: SimState['events'];
@@ -83,6 +85,8 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     caravans: sim.caravans,
     routes: sim.routes,
     traffic: runs(Float32Array.from(sim.traffic, (v) => Math.round(v * 10) / 10)),
+    way: runs(sim.way),
+    wayKeeper: runs(sim.wayKeeper),
     clans: sim.clans,
     sorties: sim.sorties,
     events: sim.events,
@@ -104,6 +108,10 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
   if (!unruns(p.owner, n, owner) || !unruns(p.rival, n, rival) || !unruns(p.rivalUse, n, rivalUse)) return null;
   const traffic = new Float32Array(n);
   if (p.traffic) unruns(p.traffic, n, traffic);
+  const way = new Uint8Array(n);
+  const wayKeeper = new Int32Array(n).fill(-1);
+  if (p.way) unruns(p.way, n, way);
+  if (p.wayKeeper) unruns(p.wayKeeper, n, wayKeeper);
   const beasts: Record<string, Float32Array> = {};
   for (const b of env.beastInfo) {
     const K = env.beastK[b.id];
@@ -121,6 +129,8 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     caravans: Array.isArray(p.caravans) ? p.caravans : [],
     routes: Array.isArray(p.routes) ? p.routes : [],
     traffic,
+    way,
+    wayKeeper,
     clans: p.clans,
     sorties: Array.isArray(p.sorties) ? p.sorties : [],
     nextId: p.nextId | 0,

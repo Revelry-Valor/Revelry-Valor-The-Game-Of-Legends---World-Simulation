@@ -40,6 +40,8 @@ const halfGrowth = (g: number) => (g < 0.06 ? 0 : Math.min(1.3, 0.35 + 0.65 * g)
 export function resInfoOf(env: Env, id: string): ResInfo | undefined {
   return env.resInfo.find((r) => r.id === id) ?? EXTRA_FOODS.find((r) => r.id === id);
 }
+/** Most of one good (not food) a settlement keeps: enough to stockpile for building. */
+export const storeCap = (pop: number) => Math.max(50, pop * 2);
 export const isFood = (env: Env, id: string) => resInfoOf(env, id)?.food ?? false;
 
 /** A new settlement's economy, with food enough for some months. */
@@ -251,7 +253,7 @@ export function economyMonth(c: MonthContext): number {
     const value = (r: ResInfo) => (r.category === 'Metal' || r.category === 'Gem' || r.category === 'Luxury' ? 2 : 1);
     const offers = env.resInfo
       // Where nothing more can be kept, no one works at it; otherwise what fetches most here (the market's price) draws the most hands.
-      .filter((r) => !r.food && rateOf(r) > 0 && (R.avail[r.id] ?? 0) > 0.05 && (S[r.id] ?? 0) < Math.max(20, pop * 0.5) * 0.9)
+      .filter((r) => !r.food && rateOf(r) > 0 && (R.avail[r.id] ?? 0) > 0.05 && (S[r.id] ?? 0) < storeCap(pop) * 0.9)
       .map((r) => ({ r, w: R.avail[r.id] * rateOf(r) * (e.prices?.[r.id] ?? value(r)) }))
       .sort((a, b) => b.w - a.w)
       .slice(0, 5);
@@ -378,7 +380,7 @@ export function economyMonth(c: MonthContext): number {
   }
   for (const id of Object.keys(S)) {
     if (isFood(env, id)) continue;
-    const cap = Math.max(20, pop * 0.5);
+    const cap = storeCap(pop);
     if (S[id] > cap) S[id] = cap;
   }
   for (const id of Object.keys(S)) if (S[id] < 0.05) delete S[id];
