@@ -53,12 +53,50 @@ export interface Clan {
   parent: number;
 }
 
+/**
+ * A settlement: people who stay in one place. A dawn city is where a race first woke, holy to all
+ * of that race wherever they are; it grows, sends out tribes and founds villages, and can fall to
+ * ruin (still holy) and be rebuilt. Villages are the settlements it (or another) founds.
+ */
+export interface Settlement {
+  id: number;
+  name: string;
+  kind: 'dawn' | 'village';
+  clan: number;
+  species: string;
+  race: string;
+  culture: string;
+  x: number;
+  y: number;
+  pop: number;
+  fed: number;
+  /** Its fighters, who stay to guard it. */
+  warband: number;
+  /** The races it is holy to (a dawn city: the race that woke there, for good). */
+  holyTo: string[];
+  ruined: boolean;
+  founded: number;
+  ruinedOn: number;
+}
+
+/** Bad blood: a race against another (for raiding its holy place), until a day. */
+export interface Grudge {
+  race: string;
+  against: string;
+  until: number;
+}
+
+/** How a race begins: scattered tribes, a dawn city, or both. */
+export type StartKind = 'tribes' | 'dawn' | 'both';
+
 /** A warband away from its tribe: going to fight, or coming home. */
 export interface Sortie {
   id: number;
   tribe: number;
   clan: number;
   target: number;
+  /** What it is going to fight: a tribe, or a settlement (a raid). */
+  targetKind?: 'tribe' | 'settlement';
   strength: number;
   x: number;
   y: number;
@@ -80,6 +118,8 @@ export interface SimState {
   /** Set up (tribes being placed) or running. */
   started: boolean;
   tribes: Tribe[];
+  settlements: Settlement[];
+  grudges: Grudge[];
   clans: Clan[];
   sorties: Sortie[];
   nextId: number;
@@ -94,7 +134,15 @@ export interface SimState {
   beasts: Record<string, Float32Array>;
   events: SimEvent[];
   /** The races taking part and how many starting tribes each (for placing again). */
-  setup: { race: string; tribes: number }[];
+  setup: SetupRow[];
+}
+
+/** One race's start: how, how many tribes, and how many people in its dawn city. */
+export interface SetupRow {
+  race: string;
+  tribes: number;
+  start?: StartKind;
+  cityPop?: number;
 }
 
 export const yearOf = (day: number) => Math.floor(day / DAYS_PER_YEAR) + 1;

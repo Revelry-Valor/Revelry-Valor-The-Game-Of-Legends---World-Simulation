@@ -6,7 +6,7 @@ import { defaultSettings } from '../src/core/settings';
 import { KM_PER_DEGREE } from '../src/core/units';
 import type { Library } from '../src/core/library';
 import { buildEnv, type Env } from '../src/sim/env';
-import { addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
+import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
 import { DAYS_PER_YEAR, dateText } from '../src/sim/state';
 import { packSim, unpackSim } from '../src/sim/pack';
 
@@ -40,10 +40,14 @@ beforeAll(() => {
   const human = lib.species.find((s) => s.name === 'Human')!.races.find((r) => r.name === 'Human')!;
   human.lifespan = 70;
   human.fightingAge ??= 16;
+  const elf = lib.species.find((s) => s.name === 'Elf')!.races[0];
+  elf.lifespan = 300;
+  elf.fightingAge ??= 20;
   env = buildEnv(cl, lib, surface);
 }, 60000);
 
 const humanId = () => eligibleRaces(lib).find((r) => r.race.name === 'Human')!.race.id;
+const elfId = () => eligibleRaces(lib).find((r) => r.race.name === 'Elf')!.race.id;
 const cellOf = (x: number, y: number) => Math.round((y - cl.y0) / cl.step) * cl.w + Math.round((((x - cl.x0) / cl.step) % cl.w + cl.w) % cl.w);
 
 describe('the first peoples', () => {
@@ -134,5 +138,77 @@ describe('the first peoples', () => {
     // And it runs on the same from there.
     stepDays(back, env, lib, 30);
     expect(back.day).toBe(sim.day + 30);
+  });
+});
+
+describe('dawn cities', () => {
+  it('starts a race at its dawn city, holy to it, alone or with tribes around', () => {
+    const sim = newSim(env, 31);
+    placeStart(sim, env, lib, [{ race: humanId(), tribes: 4, start: 'both' }, { race: elfId(), tribes: 6, start: 'dawn', cityPop: 600 }], cl.zone);
+    const dawn = sim.settlements.filter((s) => s.kind === 'dawn');
+    expect(dawn.length).toBe(2);
+    const elfCity = dawn.find((s) => s.race === elfId())!;
+    expect(elfCity.holyTo).toEqual([elfId()]);
+    expect(elfCity.pop).toBe(600);
+    expect(env.land[cellOf(elfCity.x, elfCity.y)]).toBe(1);
+    expect(sim.owner[cellOf(elfCity.x, elfCity.y)]).toBe(elfCity.clan);
+    // Elves start only in their city; humans have tribes round theirs.
+    expect(sim.tribes.filter((t) => t.race === elfId()).length).toBe(0);
+    expect(sim.tribes.filter((t) => t.race === humanId()).length).toBe(4);
+    // Placing it again moves it: one dawn city per race.
+    addDawnCity(sim, env, lib, elfId(), elfCity.x + 100, elfCity.y);
+    expect(sim.settlements.filter((s) => s.kind === 'dawn' && s.race === elfId()).length).toBe(1);
+  });
+  it('grows, and its people spread out as villages and tribes', () => {
+    const sim = newSim(env, 33);
+    placeStart(sim, env, lib, [{ race: humanId(), tribes: 0, start: 'dawn', cityPop: 1000 }], cl.zone);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 40);
+    const city = sim.settlements.find((s) => s.kind === 'dawn')!;
+    expect(city.ruined).toBe(false);
+    expect(city.pop).toBeGreaterThan(300);
+    expect(sim.settlements.length + sim.tribes.length).toBeGreaterThan(2);
+  }, 60000);
+  it('is never raided by its own race; others who raid it earn the race’s grudge', () => {
+    const sim = newSim(env, 35);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(30), 120)!;
+    const kin = addTribe(sim, env, lib, humanId(), 6040, yAt(30), -1, 500)!;
+    const elves = addTribe(sim, env, lib, elfId(), 5960, yAt(30), -1, 500)!;
+    let raided = false;
+    for (let m = 0; m < 240 && !raided; m++) {
+      for (const t of [kin, elves]) {
+        t.summer = { x: t.x, y: t.y };
+        t.winter = { x: t.x, y: t.y };
+        t.fed = 0.5;
+      }
+      stepDays(sim, env, lib, 30);
+      expect(sim.sorties.some((s) => s.tribe === kin.id && s.targetKind === 'settlement' && s.target === city.id)).toBe(false);
+      raided = sim.events.some((e) => e.text.includes(city.name) && e.text.includes(elves.name));
+    }
+    expect(sim.events.some((e) => e.text.includes(city.name) && e.text.includes(elves.name))).toBe(true);
+    expect(sim.grudges.some((g) => g.race === humanId() && g.against === elfId())).toBe(true);
+  }, 60000);
+  it('falls to ruin, stays holy, and is built again', () => {
+    const sim = newSim(env, 37);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(30), 20)!;
+    stepDays(sim, env, lib, 30);
+    expect(city.ruined).toBe(true);
+    expect(city.holyTo).toEqual([humanId()]);
+    const t = addTribe(sim, env, lib, humanId(), 6020, yAt(30), -1, 300)!;
+    for (let y = 0; y < 25 && city.ruined; y++) {
+      t.summer = { x: 6020, y: yAt(30) };
+      t.winter = { x: 6020, y: yAt(30) };
+      stepDays(sim, env, lib, DAYS_PER_YEAR);
+    }
+    expect(city.ruined).toBe(false);
+    expect(city.pop).toBeGreaterThan(50);
+    expect(city.holyTo).toEqual([humanId()]);
+  }, 60000);
+  it('saves its settlements with the run', () => {
+    const sim = newSim(env, 39);
+    placeStart(sim, env, lib, [{ race: humanId(), tribes: 2, start: 'both' }], cl.zone);
+    stepDays(sim, env, lib, DAYS_PER_YEAR);
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(back.settlements).toEqual(sim.settlements);
+    expect(back.grudges).toEqual(sim.grudges);
   });
 });

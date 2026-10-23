@@ -4,8 +4,8 @@ import type { Surface } from '../core/paint';
 import type { World } from '../core/world';
 import { buildEnv, type Env } from '../sim/env';
 import { packSim, unpackSim, type PackedSim } from '../sim/pack';
-import { addTribe, clanLand, eligibleRaces, moveTribe, newSim, placeStart, raceInfo, removeTribe, stepDays } from '../sim/sim';
-import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type SimState, type Tribe } from '../sim/state';
+import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays } from '../sim/sim';
+import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
 import type { MapOverlay } from './mapview';
 
@@ -58,6 +58,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let selected: number | null = null;
   let mode: 'select' | 'add' = 'select';
   let addRace = '';
+  let addWhat: 'tribe' | 'dawn' = 'tribe';
   let addClan: 'new' | 'selected' = 'new';
   let showLand = true;
   let showBeast = '';
@@ -66,7 +67,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let speed = 30;
   let busy = false;
   let pxKm = 1;
-  const draft = new Map<string, number>();
+  const draft = new Map<string, SetupRow>();
+  /** Anyone left: tribes, or people in settlements. */
+  const alive = () => !!sim && (sim.tribes.length > 0 || sim.settlements.some((q) => !q.ruined));
 
   const lib = () => d.library();
   const cl = () => d.climate();
@@ -128,7 +131,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   const afterStep = () => {
     if (!sim) return;
     landDirty = beastDirty = true;
-    if (selected !== null && !sim.tribes.some((t) => t.id === selected)) selected = null;
+    if (selected !== null && !sim.tribes.some((t) => t.id === selected) && !sim.settlements.some((q) => q.id === selected)) selected = null;
     const season = northernSummer(sim.day) ? 1 : -1;
     if (follow && season !== lastSeason && !(playing && speed >= 360)) d.setSeason(season);
     lastSeason = season;
@@ -150,7 +153,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       acc -= n;
       stepDays(sim, env, lib(), n);
       afterStep();
-      if (!sim.tribes.length) {
+      if (!alive()) {
         playing = false;
         toast('No peoples are left.');
         updateBar();
@@ -160,7 +163,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     frame = requestAnimationFrame(tick);
   };
   const play = (on: boolean) => {
-    if (!ready() || !sim!.tribes.length) {
+    if (!ready() || !alive()) {
       playing = false;
       updateBar();
       return;
@@ -177,7 +180,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   };
   /** Run on a stretch of time, a month at a time so the screen keeps up. */
   const skip = (days: number) => {
-    if (!ready() || busy || !sim!.tribes.length) return;
+    if (!ready() || busy || !alive()) return;
     play(false);
     busy = true;
     let left = days;
@@ -189,7 +192,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         left -= n;
       }
       afterStep();
-      if (left > 0 && sim!.tribes.length) window.setTimeout(slice, 0);
+      if (left > 0 && alive()) window.setTimeout(slice, 0);
       else {
         busy = false;
         updateBar();
@@ -214,7 +217,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   });
   const bar = h('div', { class: 'sim-bar', hidden: true }, playBtn, speedSeg, ...skipBtns, dateEl);
   const updateBar = () => {
-    const has = ready() && !!sim!.tribes.length;
+    const has = ready() && alive();
     bar.hidden = !has && !active;
     playBtn.textContent = playing ? 'Pause' : 'Play';
     playBtn.disabled = !has || busy;
@@ -322,10 +325,47 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           }
           g.setLineDash([]);
         }
+        // Settlements: a house (a dawn city bigger, ringed in gold: holy); ruins grey and broken.
+        for (const st of s.settlements) {
+          const [sx, sy] = at(st.x, st.y, c);
+          const r = st.kind === 'dawn' ? 9 : 5 + Math.min(3, Math.sqrt(st.pop) / 10);
+          g.beginPath();
+          g.moveTo(sx - r, sy + r * 0.8);
+          g.lineTo(sx - r, sy - r * 0.2);
+          g.lineTo(sx, sy - r);
+          g.lineTo(sx + r, sy - r * 0.2);
+          g.lineTo(sx + r, sy + r * 0.8);
+          g.closePath();
+          if (st.ruined) {
+            g.setLineDash([3, 2]);
+            g.fillStyle = 'rgba(120,120,120,0.55)';
+          } else g.fillStyle = clanOf(st.clan)?.colour ?? '#888';
+          g.fill();
+          g.lineWidth = st.id === selected ? 3 : st.holyTo.length ? 2.5 : 1.5;
+          g.strokeStyle = st.id === selected ? '#ffffff' : st.holyTo.length ? '#f2c230' : 'rgba(0,0,0,0.8)';
+          g.stroke();
+          g.setLineDash([]);
+          if (!st.ruined && st.fed < 0.8) {
+            g.strokeStyle = '#ff4030';
+            g.lineWidth = 1.5;
+            g.beginPath();
+            g.arc(sx, sy, r + 4, 0, Math.PI * 2);
+            g.stroke();
+          }
+          if (st.kind === 'dawn' || scale > 0.12 || st.id === selected) {
+            const label = st.ruined ? `${st.name} (ruins)` : st.name;
+            g.font = st.kind === 'dawn' ? 'bold 12px system-ui, sans-serif' : '600 11px system-ui, sans-serif';
+            g.lineWidth = 3;
+            g.strokeStyle = 'rgba(0,0,0,0.75)';
+            g.fillStyle = st.holyTo.length ? '#ffe28a' : '#fff';
+            g.strokeText(label, sx + r + 4, sy + 4);
+            g.fillText(label, sx + r + 4, sy + 4);
+          }
+        }
         // Warbands away: a diamond, with a line to where they are going.
         for (const so of s.sorties) {
           const [sx, sy] = at(so.x, so.y, c);
-          const goal = s.tribes.find((t) => t.id === (so.leg === 'out' ? so.target : so.tribe));
+          const goal = so.leg === 'out' && so.targetKind === 'settlement' ? s.settlements.find((q) => q.id === so.target) : s.tribes.find((t) => t.id === (so.leg === 'out' ? so.target : so.tribe));
           if (goal) {
             const [gx, gy] = at(goal.x, goal.y, c);
             g.strokeStyle = so.leg === 'out' ? 'rgba(220,40,30,0.9)' : 'rgba(255,255,255,0.6)';
@@ -383,14 +423,25 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       if (!active || !ready()) return false;
       const s = sim!;
       const hit = tribeAt(x, y, pk);
-      if (mode === 'add' && !hit) {
+      const hitCity = hit ? null : settlementAt(x, y, pk);
+      if (mode === 'add' && !hit && !hitCity) {
         if (!addRace) {
           toast('Choose which race to add first.');
           return true;
         }
         const k = cellOf(x, y);
         if (k < 0 || !env!.land[k]) {
-          toast('Tribes are placed on land.');
+          toast(addWhat === 'dawn' ? 'A dawn city stands on land.' : 'Tribes are placed on land.');
+          return true;
+        }
+        if (addWhat === 'dawn') {
+          const st = addDawnCity(s, env!, lib(), addRace, x, y, draft.get(addRace)?.cityPop ?? 800);
+          if (st) {
+            selected = st.id;
+            landDirty = true;
+            d.changed();
+            render();
+          }
           return true;
         }
         const into = addClan === 'selected' ? s.tribes.find((t) => t.id === selected)?.clan ?? -1 : -1;
@@ -403,21 +454,40 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         }
         return true;
       }
-      selected = hit?.id ?? null;
+      selected = hit?.id ?? hitCity?.id ?? null;
       render();
       d.redraw();
       if (hit && !s.started) {
         dragging = hit;
         return true;
       }
-      return !!hit;
+      if (hitCity && !s.started) {
+        draggingCity = hitCity;
+        return true;
+      }
+      return !!(hit || hitCity);
     },
     drag(x, y) {
-      if (!dragging) return;
-      dragging.x = x;
-      dragging.y = y;
+      const m = dragging ?? draggingCity;
+      if (!m) return;
+      m.x = x;
+      m.y = y;
     },
     up(x, y) {
+      if (draggingCity && ready()) {
+        const st = draggingCity;
+        draggingCity = null;
+        const k = cellOf(x, y);
+        if (k >= 0 && env!.land[k]) moveSettlement(sim!, env!, lib(), st.id, x, y);
+        else {
+          toast('A dawn city stands on land.');
+          moveSettlement(sim!, env!, lib(), st.id, cityFrom.x, cityFrom.y);
+        }
+        landDirty = true;
+        d.changed();
+        render();
+        return;
+      }
       if (!dragging || !ready()) return;
       const k = cellOf(x, y);
       if (k >= 0 && env!.land[k]) moveTribe(sim!, env!, lib(), dragging.id, x, y);
@@ -435,6 +505,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const out: string[] = [];
       const t = tribeAt(x, y, pxKm);
       if (t) out.push(`${t.name} (clan ${clanOf(t.clan)?.name ?? '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
+      const st = t ? null : settlementAt(x, y, pxKm);
+      if (st) out.push(settlementLine(st));
       const k = cellOf(x, y);
       if (k >= 0 && env!.land[k]) {
         const o = s.owner[k];
@@ -448,6 +520,29 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     },
   };
   let dragging: Tribe | null = null;
+  let draggingCity: Settlement | null = null;
+  let cityFrom = { x: 0, y: 0 };
+  const settlementAt = (x: number, y: number, pk: number): Settlement | null => {
+    if (!sim || !env) return null;
+    let best: Settlement | null = null;
+    let bd = 14 * pk;
+    for (const st of sim.settlements) {
+      let dx = Math.abs(st.x - x);
+      if (env.wrapKm) dx = Math.min(dx, env.wrapKm - dx);
+      const dd = Math.hypot(dx, st.y - y);
+      if (dd < bd) {
+        bd = dd;
+        best = st;
+      }
+    }
+    if (best) cityFrom = { x: best.x, y: best.y };
+    return best;
+  };
+  const settlementLine = (st: Settlement) => {
+    const what = st.kind === 'dawn' ? 'dawn city' : 'village';
+    if (st.ruined) return `Ruins of ${st.name} (${what})${st.holyTo.length ? `, holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
+    return `${st.name} (${what}, clan ${clanOf(st.clan)?.name ?? '?'}): ${Math.round(st.pop)} people, ${Math.round(Math.min(1, st.fed) * 100)}% fed${st.holyTo.length ? `; holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
+  };
   const tribeAt = (x: number, y: number, pk: number): Tribe | null => {
     if (!sim || !env) return null;
     let best: Tribe | null = null;
@@ -512,25 +607,37 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         panel.replaceChildren(...parts.filter(Boolean) as HTMLElement[]);
         return;
       }
-      if (!draft.size) for (const r of s.setup.length ? s.setup : ok.map((o) => ({ race: o.race.id, tribes: 6 }))) draft.set(r.race, r.tribes);
+      if (!draft.size) for (const r of s.setup.length ? s.setup : ok.map((o) => ({ race: o.race.id, tribes: 6, start: 'tribes' as StartKind, cityPop: 800 }))) draft.set(r.race, { start: 'tribes', cityPop: 800, ...r });
       if (!addRace || !ok.some((o) => o.race.id === addRace)) addRace = ok[0].race.id;
       const rows = ok.map(({ race }) => {
-        const n = draft.get(race.id) ?? 0;
-        return h('tr', {},
-          h('td', {}, h('label', { class: 'field-row small' }, h('input', { type: 'checkbox', checked: n > 0, onchange: (e: Event) => { draft.set(race.id, (e.target as HTMLInputElement).checked ? 6 : 0); render(); } }), raceName(race.id))),
-          h('td', {}, h('input', { type: 'number', min: 0, max: 40, step: 1, value: String(n), 'aria-label': `Tribes of ${race.name}`, onchange: (e: Event) => { draft.set(race.id, Math.max(0, Math.min(40, Math.round(Number((e.target as HTMLInputElement).value) || 0)))); } })),
+        const row = draft.get(race.id) ?? { race: race.id, tribes: 0, start: 'tribes' as StartKind, cityPop: 800 };
+        draft.set(race.id, row);
+        const on = row.tribes > 0 || row.start !== 'tribes';
+        const num = (value: number, max: number, label: string, set: (v: number) => void, off = false) =>
+          h('input', { type: 'number', min: 0, max, step: 1, value: String(value), disabled: off, 'aria-label': label, onchange: (e: Event) => set(Math.max(0, Math.min(max, Math.round(Number((e.target as HTMLInputElement).value) || 0)))) });
+        const start = row.start ?? 'tribes';
+        return h('div', { class: 'race-row' },
+          h('label', { class: 'field-row small race-name' }, h('input', { type: 'checkbox', checked: on, onchange: (e: Event) => { const v = (e.target as HTMLInputElement).checked; row.tribes = v ? 6 : 0; if (!v) row.start = 'tribes'; render(); } }), raceName(race.id)),
+          on
+            ? h('div', { class: 'race-opts small' },
+                h('label', {}, 'Begins as ', h('select', { 'aria-label': `How the ${race.name} begin`, onchange: (e: Event) => { row.start = (e.target as HTMLSelectElement).value as StartKind; if (row.start !== 'dawn' && !row.tribes) row.tribes = 6; render(); } },
+                  ...([['tribes', 'Tribes'], ['dawn', 'Dawn city'], ['both', 'Dawn city and tribes']] as const).map(([v, l]) => h('option', { value: v, selected: start === v }, l)))),
+                start !== 'dawn' ? h('label', {}, num(row.tribes, 40, `Tribes of ${race.name}`, (v) => (row.tribes = v)), ' tribes') : null,
+                start !== 'tribes' ? h('label', {}, num(row.cityPop ?? 800, 20000, `People in the dawn city of the ${race.name}`, (v) => (row.cityPop = Math.max(30, v))), ' in the city') : null,
+              )
+            : null,
         );
       });
       parts.push(
-        h('p', { class: 'muted small' }, 'Choose who takes part and how many tribes each starts with. They are placed where their land suits them best; then drag a tribe to move it, or add and remove tribes. Press Play (above the map) to begin.'),
-        h('table', { class: 'race-pick small' }, h('thead', {}, h('tr', {}, h('th', {}, 'Race'), h('th', {}, 'Tribes'))), h('tbody', {}, ...rows)),
+        h('p', { class: 'muted small' }, 'Choose who takes part and how each begins: as scattered tribes, at its dawn city (where the race woke, holy to all of it wherever they go), or both. They are placed where the land suits them best; then drag tribes and dawn cities to move them, or add and remove tribes. Press Play (above the map) to begin.'),
+        h('div', { class: 'race-pick' }, ...rows),
         incomplete.length ? h('p', { class: 'muted small' }, `${incomplete.length} more races can take part once they are complete in the Library.`, ' ', h('button', { type: 'button', class: 'ghost small', onclick: d.openLibrary }, 'Library')) : null,
         h('button', { type: 'button', class: 'primary', onclick: () => {
           if (d.climateBusy()) {
             toast('The climate is still being worked out after your last change. Place them in a moment, once it is done.');
             return;
           }
-          const setup = [...draft].filter(([, n]) => n > 0).map(([race, tribes]) => ({ race, tribes }));
+          const setup = [...draft.values()].filter((r) => r.tribes > 0 || r.start !== 'tribes');
           if (!setup.length) {
             toast('Tick at least one race.');
             return;
@@ -541,41 +648,58 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           d.changed();
           render();
           d.redraw();
-          toast(s.tribes.length ? `Placed ${s.tribes.length} tribes in ${s.clans.length} clans.` : 'No land here suits them: paint some land first, or check the races’ climates in the Library.');
-        } }, s.tribes.length ? 'Place again automatically' : 'Place automatically'),
+          const cities = s.settlements.length;
+          toast(s.tribes.length || cities ? `Placed ${cities ? `${cities} dawn ${cities === 1 ? 'city' : 'cities'} and ` : ''}${s.tribes.length} tribes in ${s.clans.length} clans.` : 'No land here suits them: paint some land first, or check the races’ climates in the Library.');
+        } }, s.tribes.length || s.settlements.length ? 'Place again automatically' : 'Place automatically'),
         h('h3', {}, 'On the map'),
-        choice<'select' | 'add'>('Map tool', [{ value: 'select', label: 'Select & move' }, { value: 'add', label: 'Add a tribe' }], mode, (v) => { mode = v; render(); }),
+        choice<'select' | 'add'>('Map tool', [{ value: 'select', label: 'Select & move' }, { value: 'add', label: 'Add' }], mode, (v) => { mode = v; render(); }),
         mode === 'add'
           ? h('div', { class: 'group' },
+              choice<'tribe' | 'dawn'>('What', [{ value: 'tribe', label: 'A tribe' }, { value: 'dawn', label: 'The dawn city' }], addWhat, (v) => { addWhat = v; render(); }),
               h('div', { class: 'field' }, h('label', {}, 'Race'), h('select', { onchange: (e: Event) => { addRace = (e.target as HTMLSelectElement).value; } }, ...ok.map((o) => h('option', { value: o.race.id, selected: o.race.id === addRace }, raceName(o.race.id))))),
-              choice<'new' | 'selected'>('Clan', [{ value: 'new', label: 'A new clan' }, { value: 'selected', label: 'The selected tribe’s clan', disabled: selected === null }], addClan, (v) => { addClan = v; }),
-              h('p', { class: 'muted small' }, 'Click the map to place a tribe there.'),
+              addWhat === 'tribe'
+                ? choice<'new' | 'selected'>('Clan', [{ value: 'new', label: 'A new clan' }, { value: 'selected', label: 'The selected tribe’s clan', disabled: selected === null }], addClan, (v) => { addClan = v; })
+                : null,
+              h('p', { class: 'muted small' }, addWhat === 'dawn' ? 'Click the map to set the race’s dawn city there (each race has one: if it has one already, it moves).' : 'Click the map to place a tribe there.'),
             )
-          : h('p', { class: 'muted small' }, 'Click a tribe to see it; drag it to move it (its summer and winter grounds move with it).'),
+          : h('p', { class: 'muted small' }, 'Click a tribe or dawn city to see it; drag it to move it (a tribe’s summer and winter grounds move with it).'),
       );
     } else {
       // Running: how things stand.
-      const people = s.tribes.reduce((n, t) => n + t.pop, 0);
+      const living = s.settlements.filter((q) => !q.ruined);
+      const people = s.tribes.reduce((n, t) => n + t.pop, 0) + living.reduce((n, q) => n + q.pop, 0);
       const land = clanLand(s, env);
       parts.push(
-        h('p', { class: 'summary' }, `${dateText(s.day)}\n${s.tribes.length} tribes in ${s.clans.length} clans, ${Math.round(people).toLocaleString()} people`),
+        h('p', { class: 'summary' }, `${dateText(s.day)}\n${s.tribes.length} tribes and ${living.length} settlements in ${s.clans.length} clans, ${Math.round(people).toLocaleString()} people`),
       );
       const clanRows = [...s.clans]
-        .map((cn) => ({ cn, tribes: s.tribes.filter((t) => t.clan === cn.id) }))
+        .map((cn) => ({ cn, tribes: [...s.tribes.filter((t) => t.clan === cn.id), ...s.settlements.filter((q) => !q.ruined && q.clan === cn.id)] }))
         .sort((a, b) => b.tribes.reduce((n, t) => n + t.pop, 0) - a.tribes.reduce((n, t) => n + t.pop, 0))
         .map(({ cn, tribes }) =>
           h('tr', {},
-            h('td', {}, h('span', { class: 'swatch', style: `background:${cn.colour}` }), cn.name),
-            h('td', { title: raceName(cn.race) }, raceName(cn.race).replace(/ \(.*\)$/, '')),
-            h('td', { class: 'num' }, String(tribes.length)),
+            h('td', {}, h('span', { class: 'swatch', style: `background:${cn.colour}` }), cn.name, h('div', { class: 'muted' }, raceName(cn.race))),
+            h('td', { class: 'num' }, String(tribes.filter((q) => 'summer' in q).length)),
             h('td', { class: 'num' }, Math.round(tribes.reduce((n, t) => n + t.pop, 0)).toLocaleString()),
             h('td', { class: 'num' }, Math.round((land.get(cn.id) ?? 0) * SQ_MI).toLocaleString()),
           ),
         );
       parts.push(
         h('h3', {}, 'Clans'),
-        h('div', { class: 'table-scroll' }, h('table', { class: 'clan-table small' }, h('thead', {}, h('tr', {}, h('th', {}, 'Clan'), h('th', {}, 'Race'), h('th', {}, 'Tribes'), h('th', {}, 'People'), h('th', {}, 'Land (sq mi)'))), h('tbody', {}, ...clanRows))),
+        h('div', { class: 'table-scroll' }, h('table', { class: 'clan-table small' }, h('thead', {}, h('tr', {}, h('th', {}, 'Clan'), h('th', {}, 'Tribes'), h('th', {}, 'People'), h('th', {}, 'Land, sq mi'))), h('tbody', {}, ...clanRows))),
       );
+      if (s.settlements.length) {
+        const order = [...s.settlements].sort((a, b) => (a.kind === 'dawn' ? 0 : 1) - (b.kind === 'dawn' ? 0 : 1) || b.pop - a.pop);
+        parts.push(
+          h('h3', {}, 'Settlements'),
+          h('div', { class: 'table-scroll' }, h('table', { class: 'clan-table small' },
+            h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'People'))),
+            h('tbody', {}, ...order.map((q) => h('tr', { class: 'clickable', onclick: () => { selected = q.id; render(); d.redraw(); } },
+              h('td', {}, h('span', { class: 'swatch', style: `background:${q.ruined ? '#888' : clanOf(q.clan)?.colour ?? '#888'}` }), q.name, q.kind === 'dawn' ? h('span', { class: 'holy-tag' }, ' dawn city') : null, h('div', { class: 'muted' }, raceName(q.race))),
+              h('td', { class: 'num' }, q.ruined ? 'ruins' : Math.round(q.pop).toLocaleString()),
+            ))),
+          )),
+        );
+      }
     }
 
     // The selected tribe
@@ -596,6 +720,30 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           ? h('div', { class: 'group' },
               numberField({ label: 'People', value: Math.round(t.pop), min: 15, max: 2000, step: 5, change: (v) => { t.pop = Math.max(15, Math.min(2000, Math.round(v))); if (ri) t.warband = Math.round(t.pop * ri.warShare); d.changed(); } }),
               h('button', { type: 'button', class: 'ghost small danger', onclick: () => { removeTribe(s, t.id); selected = null; landDirty = true; d.changed(); render(); d.redraw(); } }, 'Remove this tribe'),
+            )
+          : null,
+      );
+    }
+    const st = s.settlements.find((q) => q.id === selected);
+    if (st) {
+      const ri = raceInfo(L, st.race, st.culture);
+      const clan = clanOf(st.clan);
+      parts.push(
+        h('h3', {}, st.name),
+        h('div', { class: 'tribe-card small' },
+          h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)}` : 'Village'),
+          st.holyTo.length ? h('div', { class: 'holy-tag' }, `Holy to all the ${st.holyTo.map(raceName).join(', ')}, wherever they are${st.ruined ? ', even in ruin' : ''}.`) : null,
+          st.ruined
+            ? h('div', {}, 'In ruins. Those who come to it may build it again (its own people most of all).')
+            : h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), `Clan ${clan?.name ?? '?'} · ${raceName(st.race)}`),
+          st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
+          s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
+          ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,
+        ),
+        !s.started
+          ? h('div', { class: 'group' },
+              numberField({ label: 'People', value: Math.round(st.pop), min: 30, max: 20000, step: 10, change: (v) => { st.pop = Math.max(30, Math.min(20000, Math.round(v))); if (ri) st.warband = Math.round(st.pop * ri.warShare * 0.6); const row = draft.get(st.race); if (row) row.cityPop = st.pop; d.changed(); } }),
+              h('button', { type: 'button', class: 'ghost small danger', onclick: () => { removeSettlement(s, st.id); selected = null; landDirty = true; d.changed(); render(); d.redraw(); } }, 'Remove this dawn city'),
             )
           : null,
       );
@@ -647,7 +795,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       d.redraw();
     },
     climateChanged,
-    pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.started) ? packSim(sim, env) : pending),
+    pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),
     dispose() {
       playing = false;
       cancelAnimationFrame(frame);

@@ -15,6 +15,8 @@ export interface PackedSim {
   w: number;
   h: number;
   tribes: SimState['tribes'];
+  settlements?: SimState['settlements'];
+  grudges?: SimState['grudges'];
   clans: SimState['clans'];
   sorties: SimState['sorties'];
   events: SimState['events'];
@@ -73,6 +75,8 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     w: sim.w,
     h: sim.h,
     tribes: sim.tribes,
+    settlements: sim.settlements,
+    grudges: sim.grudges,
     clans: sim.clans,
     sorties: sim.sorties,
     events: sim.events,
@@ -104,6 +108,8 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     seed: p.seed | 0 || 1,
     started: !!p.started,
     tribes: p.tribes,
+    settlements: Array.isArray(p.settlements) ? p.settlements : [],
+    grudges: Array.isArray(p.grudges) ? p.grudges : [],
     clans: p.clans,
     sorties: Array.isArray(p.sorties) ? p.sorties : [],
     nextId: p.nextId | 0,
