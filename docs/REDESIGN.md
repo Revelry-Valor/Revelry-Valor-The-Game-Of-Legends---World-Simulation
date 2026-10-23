@@ -996,6 +996,11 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.
 
+**Phase 7 decisions (agreed).** Built in three steps, each tried before the next: (1) settling, farming and production in units; (2) markets, barter and caravan trade; (3) the travel network, roads and bridges.
+- **Settling** (until technology arrives in Phase 8, which adds its own requirements on top): decided by a people's way of life and the land. Settled peoples settle soon on good ground; semi-nomadic ones when their land grows crowded or where it is rich (fresh water, good soil); nomadic ones rarely, and only at the richest places. Settling is by tribe: one tribe settling doesn't take its clan out of the tribal era.
+- **Roads grow from use:** trails form where people, herds and caravans travel often. Going past trails (better roads) needs the nation or settlements to know how to build them and to have the resources to keep them up; unkept roads fall back.
+- **Bridges are built by nations** when they want: a shorter way between their cities; trade to come through their lands; or as part of a pact on a border (an optional term of, for example, a trade agreement or a military defence pact) where both build a bridge between them. Such a pact can also include upgrading the roads on a route between the two capitals. (Nations come with Phase 9; until then rivers and canyons are crossed only at fords and openings.)
+
 ### 8.8 Tree settlements
 - **At the base:** a settlement can form around the foot of the tree, on the surface.
 - **Inside:** some species are naturally hollow, and settlements can be built inside them.
