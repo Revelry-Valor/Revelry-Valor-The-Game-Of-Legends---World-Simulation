@@ -308,3 +308,10 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .pair-row input[type='text']:not(.grow) { width: 12rem; }
 .pair-row { flex-wrap: nowrap; width: 100%; }
 .pair-row .grow { width: auto; }
+.fill-table { margin-top: 1rem; }
+.fill-table input[type='number'] { width: 6rem; }
+.fill-table select { font: inherit; padding: 0.2rem 0.4rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.fill-table td { vertical-align: middle; }
+.needs-cell { color: var(--danger); }
+.ready-cell { color: #3f7d3a; font-weight: 600; }
+.linkish { border: none; background: none; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; text-align: left; }

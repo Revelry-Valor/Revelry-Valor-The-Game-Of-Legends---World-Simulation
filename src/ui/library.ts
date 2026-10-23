@@ -812,6 +812,57 @@ export function showLibrary(app: App, world: World | null): () => void {
     ];
   };
 
+  /**
+   * Every race in one table, for filling in size, fighting age and lifespan quickly (the numbers
+   * most races still lack before the simulation can use them). Full stats are in each species.
+   */
+  const fillTable = () => {
+    const rows = lib.species.filter((sp) => !sp.setAside).flatMap((sp) =>
+      sp.races.map((r) => {
+        const status = h('td', { class: 'small' });
+        const showStatus = () => {
+          const m = raceMissing(r);
+          status.textContent = m.length ? `Needs ${m.join('; ')}` : 'Ready';
+          status.className = m.length ? 'small needs-cell' : 'small ready-cell';
+        };
+        showStatus();
+        const numCell = (get: () => number | null, set: (v: number | null) => void, label: string) => {
+          const input = h('input', { type: 'number', min: 0, step: 1, placeholder: '—', 'aria-label': `${r.name}: ${label}` }) as HTMLInputElement;
+          input.value = get() === null ? '' : String(get());
+          input.addEventListener('input', () => {
+            set(input.value.trim() === '' || !Number.isFinite(input.valueAsNumber) ? null : input.valueAsNumber);
+            showStatus();
+            changed();
+          });
+          return h('td', {}, input);
+        };
+        const size = h('select', { 'aria-label': `${r.name}: size` }, h('option', { value: '' }, '—'), ...SIZES.map((z) => h('option', { value: z }, z))) as HTMLSelectElement;
+        size.value = r.size ?? '';
+        size.addEventListener('change', () => {
+          r.size = (size.value || null) as Race['size'];
+          showStatus();
+          changed();
+        });
+        return h(
+          'tr',
+          {},
+          h('td', {}, h('button', { type: 'button', class: 'linkish', onclick: () => { selected = sp.id; raceSel = sp.races.indexOf(r); renderList(); renderEditor(); } }, sp.races.length > 1 ? `${sp.name}: ${r.name}` : r.name)),
+          h('td', {}, size),
+          numCell(() => r.fightingAge, (v) => (r.fightingAge = v), 'fighting age'),
+          numCell(() => r.lifespan, (v) => (r.lifespan = v), 'lifespan'),
+          status,
+        );
+      }),
+    );
+    return h(
+      'div',
+      { class: 'fill-table' },
+      h('h3', {}, 'Fill in quickly'),
+      h('p', { class: 'muted small' }, 'Size, fighting age and lifespan for every race. A race takes part in the simulation once it is “Ready”; races without stats need them filled in their species’ page (click the name).'),
+      h('table', { class: 'zone-legend' }, h('thead', {}, h('tr', {}, h('th', {}, 'Race'), h('th', {}, 'Size'), h('th', {}, 'Fighting age (years)'), h('th', {}, 'Lifespan (years)'), h('th', {}, ''))), h('tbody', {}, ...rows)),
+    );
+  };
+
   /** The technology tree at a glance: a column per field, each line by level. */
   const techTree = () => {
     const tiers = techTiers(lib.techs);
@@ -1098,6 +1149,7 @@ export function showLibrary(app: App, world: World | null): () => void {
           h('p', {}, counts),
           h('p', { class: 'muted' }, 'Pick something on the left to change it, or add something new. Everything saves as you type.'),
           needing.length ? h('div', {}, h('h3', {}, `Races that need stats (${needing.length})`), h('p', { class: 'small' }, needing.join(' · '))) : null,
+          tab === 'species' ? fillTable() : null,
         ),
       );
       return;
