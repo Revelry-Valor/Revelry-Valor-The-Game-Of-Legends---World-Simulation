@@ -101,6 +101,40 @@ export interface Economy {
   harvest: { units: number; year: number; day: number } | null;
   /** How well its needs beyond food (fuel, shelter, clothing, salt) were met last month, 0–1. */
   comfort: number;
+  /** Its market (step 2): what each good is worth here now, in the one currency (a unit of staple food at ease is about 1). */
+  prices?: Record<string, number>;
+  /** People away with a caravan (not working at home). */
+  away?: number;
+  /** Trade over the last year, in worth: sent out and brought in. */
+  traded?: { out: number; in: number; caravans: number; since: number };
+}
+
+/** A caravan: traders (and their pack animals) carrying goods to another settlement, bartering there, and coming home. */
+export interface Caravan {
+  id: number;
+  from: number;
+  to: number;
+  clan: number;
+  x: number;
+  y: number;
+  leg: 'out' | 'home';
+  /** Goods carried, in units. */
+  cargo: Record<string, number>;
+  people: number;
+  animals: number;
+  speed: number;
+  /** Worth (at home prices) of what it set out with. */
+  worth: number;
+  started: number;
+}
+
+/** A trade route between two settlements: how often it is used and how much goes along it. */
+export interface Route {
+  a: number;
+  b: number;
+  trips: number;
+  worth: number;
+  last: number;
 }
 
 /** Bad blood: a race against another (for raiding its holy place), until a day. */
@@ -143,6 +177,10 @@ export interface SimState {
   started: boolean;
   tribes: Tribe[];
   settlements: Settlement[];
+  caravans: Caravan[];
+  routes: Route[];
+  /** How much people, herds and caravans travel over each point (for trails and roads; fades slowly). */
+  traffic: Float32Array;
   grudges: Grudge[];
   clans: Clan[];
   sorties: Sortie[];

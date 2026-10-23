@@ -9,7 +9,8 @@ import { buildEnv, type Env } from '../src/sim/env';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
 import { DAYS_PER_YEAR, dateText } from '../src/sim/state';
 import { packSim, unpackSim } from '../src/sim/pack';
-import { cropYear, isFood } from '../src/sim/economy';
+import { cropYear, isFood, newEconomy } from '../src/sim/economy';
+import { updatePrices } from '../src/sim/trade';
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -284,5 +285,56 @@ describe('settlements and their economy', () => {
     expect(city.pop).toBeGreaterThan(250);
     // It herds as well as farms.
     expect(Object.keys(city.economy!.jobs).some((k) => k.startsWith('herd:'))).toBe(true);
+  }, 60000);
+});
+
+describe('markets and trade', () => {
+  /** Two peoples' cities near each other, one with grain to spare and no salt, the other the other way round. */
+  const pair = (seed: number) => {
+    const sim = newSim(env, seed);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 300)!;
+    const other = addDawnCity(sim, env, lib, elfId(), 6150, yAt(-12), 300)!;
+    a.economy = newEconomy(300, 1, 20);
+    a.economy.stores = { grain: 9000 };
+    other.economy = newEconomy(300, 1, 20);
+    other.economy.stores = { [Object.keys(other.economy.stores)[0]]: 6000, salt: 600 };
+    return { sim, a, other };
+  };
+  it('prices goods dear where they are short and cheap where they are plentiful', () => {
+    const { a, other } = pair(51);
+    const pa = updatePrices(env, a, 1);
+    const pb = updatePrices(env, other, 1);
+    expect(pa.salt).toBeGreaterThan(pb.salt);
+    expect(pa.grain).toBeLessThan(pb.grain);
+  });
+  it('sends caravans that barter one surplus for the other, both sides gaining', () => {
+    const { sim, a, other } = pair(53);
+    let seen = 0;
+    for (let d = 0; d < 360 * 2; d += 10) {
+      stepDays(sim, env, lib, 10);
+      seen = Math.max(seen, sim.caravans.length);
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(a.economy!.stores.salt ?? 0).toBeGreaterThan(0);
+    expect(sim.routes.length).toBeGreaterThan(0);
+    expect(sim.events.some((e) => e.text.startsWith(`Traders from ${a.name}`) || e.text.startsWith(`Traders from ${other.name}`))).toBe(true);
+    // The way between them gets worn.
+    expect(Math.max(...sim.traffic)).toBeGreaterThan(0);
+    // Traders come home and go back to work.
+    expect(a.economy!.away ?? 0).toBeLessThanOrEqual(sim.caravans.filter((v) => v.from === a.id).reduce((n, v) => n + v.people, 0));
+  }, 60000);
+  it('does not trade with a people holding a grudge', () => {
+    const { sim, a, other } = pair(55);
+    sim.grudges.push({ race: other.race, against: a.race, until: 1e9 });
+    stepDays(sim, env, lib, 360);
+    expect(sim.routes.length).toBe(0);
+  }, 60000);
+  it('saves caravans, routes and the worn ways', () => {
+    const { sim } = pair(57);
+    stepDays(sim, env, lib, 200);
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(back.caravans).toEqual(sim.caravans);
+    expect(back.routes).toEqual(sim.routes);
+    expect(Math.max(...back.traffic)).toBeCloseTo(Math.max(...sim.traffic), 0);
   }, 60000);
 });

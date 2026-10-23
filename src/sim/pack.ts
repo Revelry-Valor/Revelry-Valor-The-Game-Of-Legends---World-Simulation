@@ -17,6 +17,9 @@ export interface PackedSim {
   tribes: SimState['tribes'];
   settlements?: SimState['settlements'];
   grudges?: SimState['grudges'];
+  caravans?: SimState['caravans'];
+  routes?: SimState['routes'];
+  traffic?: number[];
   clans: SimState['clans'];
   sorties: SimState['sorties'];
   events: SimState['events'];
@@ -77,6 +80,9 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     tribes: sim.tribes,
     settlements: sim.settlements,
     grudges: sim.grudges,
+    caravans: sim.caravans,
+    routes: sim.routes,
+    traffic: runs(Float32Array.from(sim.traffic, (v) => Math.round(v * 10) / 10)),
     clans: sim.clans,
     sorties: sim.sorties,
     events: sim.events,
@@ -96,6 +102,8 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
   const rival = new Int32Array(n);
   const rivalUse = new Float32Array(n);
   if (!unruns(p.owner, n, owner) || !unruns(p.rival, n, rival) || !unruns(p.rivalUse, n, rivalUse)) return null;
+  const traffic = new Float32Array(n);
+  if (p.traffic) unruns(p.traffic, n, traffic);
   const beasts: Record<string, Float32Array> = {};
   for (const b of env.beastInfo) {
     const K = env.beastK[b.id];
@@ -110,6 +118,9 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     tribes: p.tribes,
     settlements: Array.isArray(p.settlements) ? p.settlements : [],
     grudges: Array.isArray(p.grudges) ? p.grudges : [],
+    caravans: Array.isArray(p.caravans) ? p.caravans : [],
+    routes: Array.isArray(p.routes) ? p.routes : [],
+    traffic,
     clans: p.clans,
     sorties: Array.isArray(p.sorties) ? p.sorties : [],
     nextId: p.nextId | 0,

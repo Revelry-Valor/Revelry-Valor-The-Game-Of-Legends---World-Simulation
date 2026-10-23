@@ -1,6 +1,7 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
+import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
@@ -174,7 +175,7 @@ function passable(env: Env, ri: RaceInfo, k: number): boolean {
 export function newSim(env: Env, seed: number): SimState {
   const beasts: Record<string, Float32Array> = {};
   for (const b of env.beastInfo) beasts[b.id] = Float32Array.from(env.beastK[b.id], (v) => v * 0.9);
-  return { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
+  return { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], caravans: [], routes: [], traffic: new Float32Array(env.n), clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
 }
 
 /** The culture a race's people start with: the first that names the race (or its species) as its heritage. */
@@ -221,6 +222,9 @@ export function placeStart(sim: SimState, env: Env, lib: Library, setup: SetupRo
   sim.tribes = [];
   sim.settlements = [];
   sim.grudges = [];
+  sim.caravans = [];
+  sim.routes = [];
+  sim.traffic.fill(0);
   sim.clans = [];
   sim.sorties = [];
   sim.owner.fill(-1);
@@ -442,6 +446,7 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
   for (let d = 0; d < days; d++) {
     sim.started = true;
     daily(sim, env, info);
+    caravansDay(tradeContext(sim, env, lib, info));
     sim.day++;
     if (sim.day % DAYS_PER_MONTH === 0) monthly(sim, env, lib, info);
     if (sim.day % DAYS_PER_YEAR === 0) yearly(sim, env, lib, info);
@@ -449,6 +454,20 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
 }
 
 type Info = (t: { race: string; culture: string }) => RaceInfo | null;
+
+function tradeContext(sim: SimState, env: Env, lib: Library, info: Info): TradeContext {
+  return {
+    sim,
+    env,
+    lib,
+    info,
+    dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+    passableAt: (ri, x, y) => passable(env, ri, cellOf(env, x, y)),
+    cellAt: (x, y) => cellOf(env, x, y),
+    rand: () => rand(sim),
+    log: (text, x, y) => log(sim, text, x, y),
+  };
+}
 
 function daily(sim: SimState, env: Env, info: Info): void {
   for (const t of sim.tribes) {
@@ -482,8 +501,9 @@ function daily(sim: SimState, env: Env, info: Info): void {
       }
       if (!moved) t.target = null;
     }
-    // Land walked through is claimed if no one holds it.
+    // Land walked through is claimed if no one holds it; and the way gets worn.
     const c = cellOf(env, t.x, t.y);
+    if (c >= 0 && t.target) sim.traffic[c] += t.pop / 200;
     if (c >= 0 && env.land[c] && sim.owner[c] < 0) sim.owner[c] = t.clan;
   }
   // Warbands on the move.
@@ -752,6 +772,8 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   sim.grudges = sim.grudges.filter((g) => g.until > sim.day);
+  // Markets and caravans (trade.ts).
+  tradeMonth(tradeContext(sim, env, lib, info));
 
   // The starved and the slain: tiny remnants join kin nearby, or are lost.
   for (const t of [...sim.tribes]) {
@@ -821,6 +843,9 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   settlementsYearly(sim, env, lib, info);
+  // Ways fade unless they are used; routes long unused are forgotten.
+  for (let k = 0; k < sim.traffic.length; k++) sim.traffic[k] *= 0.85;
+  sim.routes = sim.routes.filter((r) => sim.day - r.last < DAYS_PER_YEAR * 10 && sim.settlements.some((q) => q.id === r.a && !q.ruined) && sim.settlements.some((q) => q.id === r.b && !q.ruined));
   // Clans with no tribes or settlements are gone (their land stays claimed until others use it).
   const live = new Set([...sim.tribes.map((t) => t.clan), ...sim.settlements.filter((s) => !s.ruined).map((s) => s.clan)]);
   for (const c of sim.clans.filter((q) => !live.has(q.id))) log(sim, `Clan ${c.name} is no more.`);

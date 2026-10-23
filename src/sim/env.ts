@@ -44,6 +44,8 @@ export interface BeastInfo {
   catchRate: number;
   /** Monthly regrowth rate. */
   regrow: number;
+  /** Carries loads (pack animals for caravans). */
+  haul: boolean;
 }
 
 /** A resource as the simulation uses it. */
@@ -188,7 +190,7 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface): Env {
       K[k] = cm * vm * zm * diet;
     }
     beastK[b.id] = K;
-    beastInfo.push({ id: b.id, name: b.name, water, meat: meatOf(b), catchRate: 1 / Math.max(1, b.hunting ?? 2), regrow: b.traits.includes('fertile') ? 0.14 : 0.08 });
+    beastInfo.push({ id: b.id, name: b.name, water, meat: meatOf(b), catchRate: 1 / Math.max(1, b.hunting ?? 2), regrow: b.traits.includes('fertile') ? 0.14 : 0.08, haul: b.uses.includes('Hauling') });
   }
   // Volcanic ground: round painted volcanoes and along lava flows.
   const volcanic = new Uint8Array(n);

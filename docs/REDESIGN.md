@@ -1012,6 +1012,15 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Famine** comes when the stores run out (people below 60% of their food): people die and the place shrinks toward what its land can feed. Needs beyond food met or not make people a little more or less likely to have children.
 - The Peoples tab shows each settlement's work, its food in store (and how many months it lasts), the crop growing and the last harvest (and what kind of year it was), its other stores, and how far its needs are met.
 
+**Built (Phase 7, step 2): markets, barter and caravan trade.**
+- **Markets:** every settlement prices every good in the one currency, by how much it keeps against how much it wants (food against about six months of eating; fuel, clothing, stone and salt against six months of need; other goods against a year of what people want): dear in shortage (up to four times its usual worth), cheap in plenty (down to about a third). Usual worth comes from a good's kind and rarity (a unit of staple food about 1; metals, gems, luxuries far more).
+- **Barter first:** goods change hands only where both sides gain. A settlement sends a caravan when a partner within about 25 days' walk values its surplus more than it does and has something to give back that it values more; at the partner it barters (the partner keeps a little over), and if nothing is to be had on arrival the goods go home again. Coin waits for minting (technology) and governments.
+- **Caravans:** a few of its workers (who don't work at home while away), with pack animals where beasts that haul live round it (carrying three times as much); they walk there and back round what blocks the way.
+- **Who trades:** a clan freely; other peoples as their species' attitude allows (welcoming, indifferent, wary); never with a people holding a grudge, nor between clans fighting.
+- **Markets steer work:** spare hands go to what fetches most at home, and to nothing that can't be kept.
+- **Routes and worn ways:** each pair that trades becomes a route (trips and worth recorded; forgotten after ten years unused); every caravan and moving tribe wears the ways it walks (fading slowly), ready for trails and roads in step 3.
+- **Views:** each settlement's card shows what is dear and cheap there and its trade this year and partners; the Peoples tab shows caravans on the road, the busiest routes, and the goods whose prices differ most between markets (cheapest and dearest where); the map shows routes and caravans (hover a caravan to see its goods).
+
 ### 8.8 Tree settlements
 - **At the base:** a settlement can form around the foot of the tree, on the surface.
 - **Inside:** some species are naturally hollow, and settlements can be built inside them.

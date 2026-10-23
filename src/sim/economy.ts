@@ -131,7 +131,8 @@ export function economyMonth(c: MonthContext): number {
   const R = reachOf(env, st, c.r, c.cellsNear);
   const pop = st.pop;
   const need = pop * c.need;
-  const W = Math.max(1, Math.round(pop * c.workShare));
+  // Those away with a caravan don't work at home.
+  const W = Math.max(1, Math.round(pop * c.workShare) - (e.away ?? 0));
   const S = e.stores;
   const foodStock = Object.entries(S).reduce((n, [id, v]) => n + (isFood(env, id) ? v : 0), 0);
   // ---- Food jobs: aim to eat, and to build up stores toward four months.
@@ -249,8 +250,9 @@ export function economyMonth(c: MonthContext): number {
     // The rest: the best things the land offers, valuables a little ahead (for trade, later).
     const value = (r: ResInfo) => (r.category === 'Metal' || r.category === 'Gem' || r.category === 'Luxury' ? 2 : 1);
     const offers = env.resInfo
-      .filter((r) => !r.food && rateOf(r) > 0 && (R.avail[r.id] ?? 0) > 0.05)
-      .map((r) => ({ r, w: R.avail[r.id] * value(r) }))
+      // Where nothing more can be kept, no one works at it; otherwise what fetches most here (the market's price) draws the most hands.
+      .filter((r) => !r.food && rateOf(r) > 0 && (R.avail[r.id] ?? 0) > 0.05 && (S[r.id] ?? 0) < Math.max(20, pop * 0.5) * 0.9)
+      .map((r) => ({ r, w: R.avail[r.id] * rateOf(r) * (e.prices?.[r.id] ?? value(r)) }))
       .sort((a, b) => b.w - a.w)
       .slice(0, 5);
     const total = offers.reduce((n, o) => n + o.w, 0);

@@ -5,6 +5,7 @@ import type { World } from '../core/world';
 import { buildEnv, type Env } from '../sim/env';
 import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
+import { baseWorth } from '../sim/trade';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays } from '../sim/sim';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -64,6 +65,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let showLand = true;
   let showBeast = '';
   let showRes = '';
+  let showTrade = true;
   let resDirty = true;
   let resImg: HTMLCanvasElement | null = null;
   let follow = true;
@@ -346,6 +348,32 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           }
           g.setLineDash([]);
         }
+        // Trade routes: faint lines between trading settlements, bolder the more they are used; caravans on them.
+        if (showTrade) {
+          g.setLineDash([5, 4]);
+          for (const r of s.routes) {
+            const a = s.settlements.find((q) => q.id === r.a);
+            const b = s.settlements.find((q) => q.id === r.b);
+            if (!a || !b) continue;
+            const [ax, ay] = at(a.x, a.y, c);
+            const [bx, by] = at(b.x, b.y, c);
+            g.strokeStyle = `rgba(255,214,110,${Math.min(0.95, 0.5 + r.trips / 30)})`;
+            g.lineWidth = 2 + Math.min(3, r.trips / 10);
+            g.beginPath();
+            g.moveTo(ax, ay);
+            g.lineTo(bx, by);
+            g.stroke();
+          }
+          g.setLineDash([]);
+          for (const cv of s.caravans) {
+            const [sx, sy] = at(cv.x, cv.y, c);
+            g.fillStyle = '#c8913c';
+            g.strokeStyle = '#2a1a08';
+            g.lineWidth = 1.5;
+            g.fillRect(sx - 3.5, sy - 3.5, 7, 7);
+            g.strokeRect(sx - 3.5, sy - 3.5, 7, 7);
+          }
+        }
         // Settlements: a house (a dawn city bigger, ringed in gold: holy); ruins grey and broken.
         for (const st of s.settlements) {
           const [sx, sy] = at(st.x, st.y, c);
@@ -528,6 +556,16 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       if (t) out.push(`${t.name} (clan ${clanOf(t.clan)?.name ?? '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
       const st = t ? null : settlementAt(x, y, pxKm);
       if (st) out.push(settlementLine(st));
+      if (showTrade) for (const cv of s.caravans) {
+        let dx = Math.abs(cv.x - x);
+        if (env!.wrapKm) dx = Math.min(dx, env!.wrapKm - dx);
+        if (Math.hypot(dx, cv.y - y) > 8 * pxKm) continue;
+        const from = s.settlements.find((q) => q.id === cv.from)?.name ?? '?';
+        const to = s.settlements.find((q) => q.id === cv.to)?.name ?? '?';
+        const goods = Object.entries(cv.cargo).map(([id, u]) => `${Math.round(u)} ${resInfoOf(env!, id)?.name.toLowerCase() ?? id}`).join(', ');
+        out.push(`Caravan of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
+        break;
+      }
       const k = cellOf(x, y);
       if (k >= 0 && env!.land[k]) {
         const o = s.owner[k];
@@ -589,8 +627,38 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       h('div', { class: 'econ-head' }, 'Other stores'),
       other.length ? h('ul', { class: 'econ-list' }, ...other.map(([id, v]) => h('li', {}, h('span', {}, name(id)), h('span', { class: 'num' }, u(v))))) : h('div', { class: 'muted' }, 'Nothing else kept.'),
       h('div', {}, `Needs beyond food (${NEEDS.map((n) => n.name.toLowerCase()).join(', ')}): ${Math.round(e.comfort * 100)}% met.`),
+      ...marketPart(st),
       h('div', { class: 'muted' }, 'Units: one unit of a food feeds one person for a month.'),
     );
+  };
+  /** The settlement's market: what is dear and cheap here, and its trade this past year. */
+  const marketPart = (st: Settlement): HTMLElement[] => {
+    const e = st.economy!;
+    const p = e.prices ?? {};
+    const name = (id: string) => resInfoOf(env!, id)?.name ?? id;
+    const rel = (id: string) => p[id] / baseWorth(env!, id);
+    const dear = Object.keys(p).filter((id) => rel(id) >= 1.6).sort((a, b) => rel(b) - rel(a)).slice(0, 5);
+    const cheap = Object.keys(e.stores).filter((id) => p[id] && rel(id) <= 0.7).sort((a, b) => rel(a) - rel(b)).slice(0, 5);
+    const fmt = (v: number) => (v >= 10 ? Math.round(v).toLocaleString() : v.toFixed(1));
+    const row = (id: string) => h('li', {}, h('span', {}, name(id)), h('span', { class: 'num' }, `${fmt(p[id])} (×${rel(id).toFixed(1)})`));
+    const partners = sim!.routes
+      .filter((r) => r.a === st.id || r.b === st.id)
+      .sort((a, b) => b.trips - a.trips)
+      .slice(0, 4)
+      .map((r) => `${sim!.settlements.find((q) => q.id === (r.a === st.id ? r.b : r.a))?.name ?? '?'} (${r.trips} trips)`);
+    const t = e.traded;
+    return [
+      h('div', { class: 'econ-head' }, 'Market'),
+      Object.keys(p).length
+        ? h('div', { class: 'muted' }, 'Prices in the one currency (a unit of food at ease is about 1); ×: against its usual worth.')
+        : h('div', { class: 'muted' }, 'Prices are set at the turn of the month.'),
+      dear.length ? h('div', {}, 'Dear here (wanted):') : null,
+      dear.length ? h('ul', { class: 'econ-list' }, ...dear.map(row)) : null,
+      cheap.length ? h('div', {}, 'Cheap here (to spare):') : null,
+      cheap.length ? h('ul', { class: 'econ-list' }, ...cheap.map(row)) : null,
+      h('div', {}, t && t.caravans + t.in + t.out > 0 ? `Trade this year: ${t.caravans} caravan${t.caravans === 1 ? '' : 's'} sent; worth ${fmt(t.out)} out, ${fmt(t.in)} in (by barter).` : 'No trade this year.'),
+      partners.length ? h('div', { class: 'muted' }, `Trades with: ${partners.join(', ')}.`) : null,
+    ].filter(Boolean) as HTMLElement[];
   };
   const settlementLine = (st: Settlement) => {
     const what = st.kind === 'dawn' ? 'dawn city' : 'village';
@@ -646,6 +714,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     );
     const display = h('div', { class: 'group' },
       choice<'on' | 'off'>('Clan lands', [{ value: 'on', label: 'Clan lands shown' }, { value: 'off', label: 'Hidden' }], showLand ? 'on' : 'off', (v) => { showLand = v === 'on'; d.redraw(); }),
+      choice<'on' | 'off'>('Trade', [{ value: 'on', label: 'Trade routes and caravans shown' }, { value: 'off', label: 'Hidden' }], showTrade ? 'on' : 'off', (v) => { showTrade = v === 'on'; d.redraw(); }),
       h('div', { class: 'field' }, h('label', {}, 'Where beasts live'), beastSelect, h('small', {}, 'Yellow is few, red is many: as many as the land can carry, thinned where they are hunted.')),
       h('div', { class: 'field' }, h('label', {}, 'Where resources are'),
         h('select', { 'aria-label': 'Resource to show', onchange: (e: Event) => { showRes = (e.target as HTMLSelectElement).value; resDirty = true; d.redraw(); } },
@@ -761,6 +830,37 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           )),
         );
       }
+    }
+
+    // Trade, the world over.
+    if (s.started && (s.routes.length || s.caravans.length)) {
+      const top = [...s.routes].sort((a, b) => b.trips - a.trips).slice(0, 6);
+      const nm = (id: number) => s.settlements.find((q) => q.id === id)?.name ?? '?';
+      // Goods whose price differs most between markets: what trade moves.
+      const live = s.settlements.filter((q) => !q.ruined && q.economy?.prices);
+      const goods = env.resInfo
+        .map((r) => {
+          const ps = live.map((q) => ({ q, v: q.economy!.prices![r.id] })).filter((o) => o.v > 0);
+          if (ps.length < 2) return null;
+          ps.sort((a, b) => a.v - b.v);
+          const avg = ps.reduce((n, o) => n + o.v, 0) / ps.length;
+          return { r, avg, lo: ps[0], hi: ps[ps.length - 1], spread: ps[ps.length - 1].v / ps[0].v };
+        })
+        .filter((g): g is NonNullable<typeof g> => !!g && g.spread > 1.5 && live.some((q) => (q.economy!.stores[g.r.id] ?? 0) > 1))
+        .sort((a, b) => b.spread - a.spread)
+        .slice(0, 8);
+      const fmt = (v: number) => (v >= 10 ? Math.round(v).toLocaleString() : v.toFixed(1));
+      parts.push(
+        h('h3', {}, 'Trade'),
+        h('p', { class: 'small' }, `${s.caravans.length} caravan${s.caravans.length === 1 ? '' : 's'} on the road; ${s.routes.length} trade route${s.routes.length === 1 ? '' : 's'}. Caravans go up to about 25 days' walk; both sides must gain (barter).`),
+        top.length ? h('div', { class: 'small econ-head' }, 'Busiest routes') : null,
+        top.length ? h('ul', { class: 'econ-list small' }, ...top.map((r) => h('li', {}, h('span', {}, `${nm(r.a)} ↔ ${nm(r.b)}`), h('span', { class: 'num' }, `${r.trips} trips`)))) : null,
+        goods.length ? h('div', { class: 'small econ-head' }, 'Prices across the markets') : null,
+        goods.length
+          ? h('table', { class: 'clan-table small' }, h('thead', {}, h('tr', {}, h('th', {}, 'Good'), h('th', {}, 'Cheapest'), h('th', {}, 'Dearest'))),
+              h('tbody', {}, ...goods.map((g) => h('tr', {}, h('td', {}, g.r.name, h('div', { class: 'muted' }, `avg ${fmt(g.avg)}`)), h('td', { class: 'num' }, fmt(g.lo.v), h('div', { class: 'muted' }, g.lo.q.name)), h('td', { class: 'num' }, fmt(g.hi.v), h('div', { class: 'muted' }, g.hi.q.name))))))
+          : null,
+      );
     }
 
     // The selected tribe
