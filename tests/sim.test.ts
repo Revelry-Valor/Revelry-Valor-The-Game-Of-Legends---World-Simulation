@@ -9,6 +9,7 @@ import { buildEnv, type Env } from '../src/sim/env';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
 import { DAYS_PER_YEAR, dateText } from '../src/sim/state';
 import { packSim, unpackSim } from '../src/sim/pack';
+import { cropYear, isFood } from '../src/sim/economy';
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -74,7 +75,8 @@ describe('the first peoples', () => {
     expect(moved).toBeGreaterThan(0);
     stepDays(sim, env, lib, DAYS_PER_YEAR * 20 - 200);
     expect(dateText(sim.day)).toBe('Day 1, month 1, year 21');
-    const pop = sim.tribes.reduce((n, t) => n + t.pop, 0);
+    // People in tribes, and in the settlements some of them have founded.
+    const pop = sim.tribes.reduce((n, t) => n + t.pop, 0) + sim.settlements.reduce((n, q) => n + q.pop, 0);
     expect(pop).toBeGreaterThan(pop0 * 0.3);
     expect(pop).toBeLessThan(pop0 * 30);
     for (const t of sim.tribes) {
@@ -211,4 +213,76 @@ describe('dawn cities', () => {
     expect(back.settlements).toEqual(sim.settlements);
     expect(back.grudges).toEqual(sim.grudges);
   });
+});
+
+describe('settlements and their economy', () => {
+  it('finds each resource where the library says: crops on farmland, ores in patches in the hills, fish on coasts', () => {
+    const land = [...env.land.keys()].filter((k) => env.land[k]);
+    const where = (id: string) => land.filter((k) => env.res[id][k] > 0);
+    expect(where('grain').length).toBeGreaterThan(50);
+    const copper = where('copper');
+    expect(copper.every((k) => env.mzone[k] >= 1)).toBe(true);
+    const hills = land.filter((k) => env.mzone[k] >= 1);
+    expect(copper.length).toBeGreaterThan(0);
+    expect(copper.length).toBeLessThan(hills.length * 0.6);
+    expect(where('fish').every((k) => env.coast[k] || env.fresh[k])).toBe(true);
+    expect(env.resInfo.find((r) => r.id === 'fish')!.spoil).toBeGreaterThan(env.resInfo.find((r) => r.id === 'grain')!.spoil);
+  });
+  it('has mostly ordinary years, now and then a poor harvest or a failed one', () => {
+    const ys = Array.from({ length: 2000 }, (_, i) => cropYear(env, 6000, yAt(40), i));
+    const failed = ys.filter((v) => v < 0.6).length / ys.length;
+    const poor = ys.filter((v) => v < 0.9).length / ys.length;
+    expect(failed).toBeGreaterThan(0.02);
+    expect(failed).toBeLessThan(0.07);
+    expect(poor).toBeLessThan(0.2);
+  });
+  it('settles tribes by their way of life: settled peoples soon, nomads rarely', () => {
+    const race = lib.species.find((s) => s.name === 'Human')!.races.find((r) => r.name === 'Human')!;
+    const before = race.lifestyle;
+    const run = (life: string) => {
+      race.lifestyle = life;
+      const sim = newSim(env, 41);
+      placeStart(sim, env, lib, [{ race: race.id, tribes: 8 }], cl.zone);
+      stepDays(sim, env, lib, DAYS_PER_YEAR * 15);
+      return sim.events.filter((e) => e.text.includes('settled down')).length;
+    };
+    const settled = run('Settled');
+    const nomads = run('Nomadic');
+    race.lifestyle = before;
+    expect(settled).toBeGreaterThanOrEqual(5);
+    expect(nomads).toBeLessThan(settled);
+    expect(nomads).toBeLessThanOrEqual(2);
+  }, 60000);
+  it('farms, brings in harvests, keeps stores and feeds its people', () => {
+    const sim = newSim(env, 43);
+    // Good farmland: humid temperate lowland with grain, green in summer.
+    const k = [...env.land.keys()].find((q) => env.land[q] && [7, 8, 9, 10].includes(cl.zone[q]) && env.mzone[q] === 0 && env.res.grain[q] >= 0.4 && env.plant[0][q] > 0.1)!;
+    expect(k).toBeDefined();
+    const city = addDawnCity(sim, env, lib, humanId(), env.x0 + (k % env.w) * env.step, env.y0 + Math.floor(k / env.w) * env.step, 600)!;
+    let fedMonths = 0;
+    for (let m = 0; m < 120; m++) {
+      stepDays(sim, env, lib, 30);
+      if (city.fed >= 0.95) fedMonths++;
+    }
+    const e = city.economy!;
+    expect(fedMonths).toBeGreaterThan(110);
+    expect(e.harvest).not.toBeNull();
+    expect(e.harvest!.units).toBeGreaterThan(0);
+    expect(Object.values(e.jobs).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
+    // Farmers set for the year (in the fields through the growing season).
+    expect(e.farmers).toBeGreaterThan(0);
+    expect(Object.entries(e.stores).some(([id, v]) => isFood(env, id) && v > 0)).toBe(true);
+    // Its needs beyond food are met from the land round it.
+    expect(e.comfort).toBeGreaterThan(0.5);
+  }, 60000);
+  it('on poor dry land, shrinks toward what the land can feed instead of dying out', () => {
+    const sim = newSim(env, 45);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(40), 600)!;
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 10);
+    expect(city.ruined).toBe(false);
+    expect(city.pop).toBeLessThan(600);
+    expect(city.pop).toBeGreaterThan(250);
+    // It herds as well as farms.
+    expect(Object.keys(city.economy!.jobs).some((k) => k.startsWith('herd:'))).toBe(true);
+  }, 60000);
 });

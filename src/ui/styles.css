@@ -343,3 +343,7 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .race-opts input[type='number'] { width: 4.5rem; }
 .race-opts select { max-width: 11rem; }
 .peoples .clan-table th:nth-child(n+2) { text-align: right; }
+.econ .econ-head { font-weight: 700; margin-top: 0.35rem; }
+.econ-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.econ-list li { display: flex; justify-content: space-between; gap: 0.5rem; }
+.econ-list .num { font-variant-numeric: tabular-nums; }

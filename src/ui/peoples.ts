@@ -4,6 +4,7 @@ import type { Surface } from '../core/paint';
 import type { World } from '../core/world';
 import { buildEnv, type Env } from '../sim/env';
 import { packSim, unpackSim, type PackedSim } from '../sim/pack';
+import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays } from '../sim/sim';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -62,6 +63,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let addClan: 'new' | 'selected' = 'new';
   let showLand = true;
   let showBeast = '';
+  let showRes = '';
+  let resDirty = true;
+  let resImg: HTMLCanvasElement | null = null;
   let follow = true;
   let playing = false;
   let speed = 30;
@@ -276,6 +280,18 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       }
     });
   };
+  const drawRes = (id: string) => {
+    const A = env!.res[id];
+    return fieldImage((data) => {
+      if (!A) return;
+      for (let k = 0; k < env!.n; k++) {
+        const v = Math.min(1, A[k]);
+        if (v <= 0.01) continue;
+        // Pale green (a little) to deep blue-green (plenty).
+        data.set([150 - 130 * v, 210 - 60 * v, 120 + 40 * v, 60 + 150 * v], k * 4);
+      }
+    });
+  };
   const overlay: MapOverlay = {
     get noPaint() {
       return active;
@@ -294,6 +310,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         }
         g.restore();
       };
+      if (showRes) {
+        if (resDirty || !resImg) resImg = drawRes(showRes);
+        resDirty = false;
+        blit(resImg);
+      }
       if (showBeast) {
         if (beastDirty || !beastImg) beastImg = drawBeast(showBeast);
         beastDirty = false;
@@ -511,6 +532,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       if (k >= 0 && env!.land[k]) {
         const o = s.owner[k];
         if (o >= 0) out.push(`Land of clan ${clanOf(o)?.name ?? '(gone)'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 ? `, being taken by clan ${clanOf(s.rival[k])?.name ?? '?'}` : ''}`);
+        if (showRes) {
+          const r = env!.resInfo.find((q) => q.id === showRes);
+          if (r) out.push(env!.res[r.id][k] > 0.01 ? `${r.name} here (${Math.round(Math.min(1, env!.res[r.id][k]) * 100)}%)` : `No ${r.name.toLowerCase()} here`);
+        }
         if (showBeast) {
           const b = env!.beastInfo.find((q) => q.id === showBeast);
           if (b) out.push(`${b.name}: ${Math.round((s.beasts[b.id][k] / Math.max(1e-6, env!.beastK[b.id][k] || 1)) * 100)}% of what the land carries`);
@@ -537,6 +562,35 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     }
     if (best) cityFrom = { x: best.x, y: best.y };
     return best;
+  };
+  const VERB: Record<string, string> = { Logged: 'Logging', Mined: 'Mining', Quarried: 'Quarrying', Gathered: 'Gathering', Farmed: 'Growing', Fished: 'Fishing', Herded: 'Herding', Hunted: 'Hunting', Crafted: 'Making' };
+  /** A settlement's work, stores and harvest (units: one feeds one person for a month). */
+  const economyCard = (st: Settlement, needPer: number): HTMLElement => {
+    const e = st.economy!;
+    const name = (id: string) => resInfoOf(env!, id)?.name ?? id;
+    const jobName = (key: string) =>
+      key.startsWith('farm:') ? `Farming ${name(key.slice(5)).toLowerCase()}` : key.startsWith('herd:') ? 'Herding' : key.startsWith('fish:') ? 'Fishing' : key === 'gather' ? 'Gathering wild food' : key === 'hunt' ? 'Hunting' : `${VERB[resInfoOf(env!, key)?.source ?? ''] ?? 'Working'} ${name(key).toLowerCase()}`;
+    const jobs = Object.entries(e.jobs).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    const need = st.pop * needPer;
+    const food = Object.entries(e.stores).filter(([id]) => isFood(env!, id)).sort((a, b) => b[1] - a[1]);
+    const foodUnits = food.reduce((n, [, v]) => n + v, 0);
+    const other = Object.entries(e.stores).filter(([id]) => !isFood(env!, id)).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const yearWord = (y: number) => (y < 0.6 ? 'a failed harvest' : y < 0.9 ? 'a poor year' : y > 1.15 ? 'a good year' : 'an ordinary year');
+    const u = (v: number) => Math.round(v).toLocaleString();
+    return h('div', { class: 'tribe-card small econ' },
+      h('div', { class: 'econ-head' }, 'Work'),
+      jobs.length ? h('ul', { class: 'econ-list' }, ...jobs.map(([k, n]) => h('li', {}, h('span', {}, jobName(k)), h('span', { class: 'num' }, `${n}`)))) : h('div', { class: 'muted' }, 'Idle.'),
+      (e.farmers ?? 0) > 0 && !jobs.some(([k]) => k.startsWith('farm:')) ? h('div', { class: 'muted' }, `${e.farmers} farmers work the fields in the growing season.`) : null,
+      h('div', { class: 'econ-head' }, 'Food'),
+      h('div', {}, `${u(foodUnits)} units in store: ${foodUnits >= need ? `about ${Math.floor(foodUnits / Math.max(1, need))} months` : 'less than a month'} of food.`),
+      food.length ? h('ul', { class: 'econ-list' }, ...food.slice(0, 6).map(([id, v]) => h('li', {}, h('span', {}, name(id)), h('span', { class: 'num' }, u(v))))) : null,
+      e.crop > 0 ? h('div', {}, `Growing: ${name(e.cropId).toLowerCase()}, about ${u(e.crop)} units so far.`) : null,
+      e.harvest ? h('div', {}, `Last harvest: ${u(e.harvest.units)} units of ${name(e.cropId || '').toLowerCase() || 'crops'}, ${yearWord(e.harvest.year)} (Y${yearOf(e.harvest.day)}).`) : null,
+      h('div', { class: 'econ-head' }, 'Other stores'),
+      other.length ? h('ul', { class: 'econ-list' }, ...other.map(([id, v]) => h('li', {}, h('span', {}, name(id)), h('span', { class: 'num' }, u(v))))) : h('div', { class: 'muted' }, 'Nothing else kept.'),
+      h('div', {}, `Needs beyond food (${NEEDS.map((n) => n.name.toLowerCase()).join(', ')}): ${Math.round(e.comfort * 100)}% met.`),
+      h('div', { class: 'muted' }, 'Units: one unit of a food feeds one person for a month.'),
+    );
   };
   const settlementLine = (st: Settlement) => {
     const what = st.kind === 'dawn' ? 'dawn city' : 'village';
@@ -593,6 +647,13 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const display = h('div', { class: 'group' },
       choice<'on' | 'off'>('Clan lands', [{ value: 'on', label: 'Clan lands shown' }, { value: 'off', label: 'Hidden' }], showLand ? 'on' : 'off', (v) => { showLand = v === 'on'; d.redraw(); }),
       h('div', { class: 'field' }, h('label', {}, 'Where beasts live'), beastSelect, h('small', {}, 'Yellow is few, red is many: as many as the land can carry, thinned where they are hunted.')),
+      h('div', { class: 'field' }, h('label', {}, 'Where resources are'),
+        h('select', { 'aria-label': 'Resource to show', onchange: (e: Event) => { showRes = (e.target as HTMLSelectElement).value; resDirty = true; d.redraw(); } },
+          h('option', { value: '' }, 'No resources'),
+          ...[...env.resInfo].sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)).map((r) => h('option', { value: r.id, selected: r.id === showRes }, `${r.category}: ${r.name}`)),
+        ),
+        h('small', {}, 'Green where it is found; deeper where the land is better for it (or the deposit richer). From the Library’s resources: their climates, ground cover and terrain.'),
+      ),
       h('label', { class: 'field-row small' }, h('input', { type: 'checkbox', checked: follow, onchange: (e: Event) => { follow = (e.target as HTMLInputElement).checked; } }), 'Map follows the season'),
     );
 
@@ -740,6 +801,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,
         ),
+        !st.ruined && st.economy && ri ? economyCard(st, ri.need) : null,
         !s.started
           ? h('div', { class: 'group' },
               numberField({ label: 'People', value: Math.round(st.pop), min: 30, max: 20000, step: 10, change: (v) => { st.pop = Math.max(30, Math.min(20000, Math.round(v))); if (ri) st.warband = Math.round(st.pop * ri.warShare * 0.6); const row = draft.get(st.race); if (row) row.cityPop = st.pop; d.changed(); } }),

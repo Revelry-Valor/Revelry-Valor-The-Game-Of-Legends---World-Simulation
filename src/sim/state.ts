@@ -77,6 +77,30 @@ export interface Settlement {
   ruined: boolean;
   founded: number;
   ruinedOn: number;
+  /** Its economy (Phase 7): what it has in store and how its workers are split (both in units). */
+  economy?: Economy;
+}
+
+/**
+ * A settlement's economy, counted in units: one unit of a food feeds one (Medium) person for a
+ * month; one unit of anything else meets one person's need of it for a month.
+ */
+export interface Economy {
+  /** What is kept, by resource id. */
+  stores: Record<string, number>;
+  /** Workers by job: 'farm:<crop>', 'fish:<id>', 'herd:<id>', 'gather', 'hunt', or a resource id for the rest. */
+  jobs: Record<string, number>;
+  /** What was made last month, by resource id. */
+  made: Record<string, number>;
+  /** The crop growing this season (units, harvested at summer's end) and what it is. */
+  crop: number;
+  cropId: string;
+  /** Farmers set at sowing for the year (they stay in the fields all season). */
+  farmers?: number;
+  /** The last harvest: units brought in, and how good the year was (1 = usual). */
+  harvest: { units: number; year: number; day: number } | null;
+  /** How well its needs beyond food (fuel, shelter, clothing, salt) were met last month, 0–1. */
+  comfort: number;
 }
 
 /** Bad blood: a race against another (for raiding its holy place), until a day. */

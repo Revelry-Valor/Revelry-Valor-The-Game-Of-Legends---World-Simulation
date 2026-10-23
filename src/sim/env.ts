@@ -1,6 +1,6 @@
 import type { Climate } from '../core/climate';
 import { COVER_BRUSHES } from '../core/paint';
-import type { Beast, Library } from '../core/library';
+import type { Beast, Library, Resource } from '../core/library';
 import { freshWaters } from '../core/geography';
 import type { Surface } from '../core/paint';
 
@@ -46,6 +46,21 @@ export interface BeastInfo {
   regrow: number;
 }
 
+/** A resource as the simulation uses it. */
+export interface ResInfo {
+  id: string;
+  name: string;
+  category: string;
+  source: string;
+  rarity: string;
+  /** Food: eaten, one unit feeding one (Medium) person for a month. */
+  food: boolean;
+  /** Share of a store lost each month if kept (fresh fish rots fast, grain keeps). */
+  spoil: number;
+  /** Found as deposits (ores, stone, gems) in some places, rather than wherever the land suits. */
+  deposit: boolean;
+}
+
 export interface Env {
   w: number;
   h: number;
@@ -69,6 +84,11 @@ export interface Env {
   /** Where each beast can live (0–1), and how it is hunted. */
   beastK: Record<string, Float32Array>;
   beastInfo: BeastInfo[];
+  /** On a volcano or lava flow. */
+  volcanic: Uint8Array;
+  /** Where each resource is (0–1: how good the land is for it, or how rich the deposit). */
+  res: Record<string, Float32Array>;
+  resInfo: ResInfo[];
 }
 
 const smooth = (a: number, b: number, x: number) => {
@@ -170,7 +190,87 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface): Env {
     beastK[b.id] = K;
     beastInfo.push({ id: b.id, name: b.name, water, meat: meatOf(b), catchRate: 1 / Math.max(1, b.hunting ?? 2), regrow: b.traits.includes('fertile') ? 0.14 : 0.08 });
   }
-  return { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo };
+  // Volcanic ground: round painted volcanoes and along lava flows.
+  const volcanic = new Uint8Array(n);
+  for (const st of surface.strokes) {
+    if ((st.brush !== 'volcano' && st.brush !== 'lava') || st.erase) continue;
+    const r = Math.max(step * 0.6, st.size * (st.brush === 'volcano' ? 1.2 : 2));
+    for (let q = 0; q < st.pts.length; q += 2) {
+      const span = Math.ceil(r / step);
+      const ci = Math.round((st.pts[q] - cl.x0) / step);
+      const cj = Math.round((st.pts[q + 1] - cl.y0) / step);
+      for (let dj = -span; dj <= span; dj++) for (let di = -span; di <= span; di++) {
+        if (Math.hypot(di, dj) * step > r) continue;
+        const k = cellAt(cl.x0 + (ci + di) * step, cl.y0 + (cj + dj) * step);
+        if (k >= 0 && cl.land[k]) volcanic[k] = 1;
+      }
+    }
+  }
+  const { res, resInfo } = resources(cl, lib.resources, { mzone, coast, fresh, volcanic });
+  return { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, res, resInfo };
+}
+
+const RARITY_WEIGHT: Record<string, number> = { Common: 1, Uncommon: 0.6, Rare: 0.3, 'Very rare': 0.12 };
+/** Of all the land that suits a deposit, the share that has one. */
+const DEPOSIT_CHANCE: Record<string, number> = { Common: 0.45, Uncommon: 0.2, Rare: 0.08, 'Very rare': 0.03 };
+const SPOIL: Record<string, number> = { fish: 0.25, shellfish: 0.3, game: 0.12, livestock: 0.08, fruit: 0.15, roots: 0.04, grain: 0.01, rice: 0.01, nuts: 0.02, honey: 0, sugar: 0.01, olives: 0.02, grapes: 0.2, fungus: 0.1 };
+const DEPOSIT_CATEGORIES = new Set(['Metal', 'Gem', 'Mineral', 'Stone']);
+/** A steady pseudo-random number for a place and a name (deposits stay where they are). */
+function hash01(a: number, b: number, s: string): number {
+  let x = (a * 374761393 + b * 668265263) | 0;
+  for (let i = 0; i < s.length; i++) x = Math.imul(x ^ s.charCodeAt(i), 2246822519);
+  x = Math.imul(x ^ (x >>> 13), 3266489917);
+  return ((x ^ (x >>> 16)) >>> 0) / 4294967296;
+}
+
+/** Where each of the library's resources is found, from its climates, ground covers and kinds of terrain. */
+function resources(cl: Climate, list: Resource[], g: { mzone: Uint8Array; coast: Uint8Array; fresh: Uint8Array; volcanic: Uint8Array }): { res: Record<string, Float32Array>; resInfo: ResInfo[] } {
+  const n = cl.w * cl.h;
+  const res: Record<string, Float32Array> = {};
+  const resInfo: ResInfo[] = [];
+  for (const r of list) {
+    const deposit = DEPOSIT_CATEGORIES.has(r.category) && (r.source === 'Mined' || r.source === 'Quarried' || r.source === 'Gathered');
+    const food = r.category === 'Food';
+    resInfo.push({ id: r.id, name: r.name, category: r.category, source: r.source, rarity: r.rarity, food, spoil: SPOIL[r.id] ?? (food ? 0.04 : 0.002), deposit });
+    const A = new Float32Array(n);
+    const weight = RARITY_WEIGHT[r.rarity] ?? 1;
+    const chance = DEPOSIT_CHANCE[r.rarity] ?? 0.3;
+    // Rift and underdark resources come with those layers.
+    const terrains = r.terrain.filter((t) => t !== 'Underdark' && t !== 'Rift');
+    if (r.terrain.length && !terrains.length) {
+      res[r.id] = A;
+      continue;
+    }
+    for (let k = 0; k < n; k++) {
+      if (!cl.land[k]) continue;
+      const mz = g.mzone[k];
+      const fits = (t: string) =>
+        t === 'Lowland' ? mz === 0 : t === 'Hills' ? mz === 1 || mz === 2 : t === 'Mountains' ? mz >= 3 : t === 'Coast' || t === 'Sea' ? g.coast[k] === 1 : t === 'Rivers and lakes' ? g.fresh[k] === 1 : t === 'Volcanic' ? g.volcanic[k] === 1 : false;
+      if (terrains.length && !terrains.some(fits)) continue;
+      const zone = cl.zone[k];
+      if (r.climates.length && !r.climates.includes(zone)) continue;
+      const cover = cl.cover.main[k] >= 0 ? COVER_BRUSHES[cl.cover.main[k]] : '';
+      // Farmed crops can be grown on cleared land of other covers; wild things need their own.
+      const coverFit = !r.covers.length || r.covers.includes(cover) ? 1 : r.source === 'Farmed' || r.source === 'Herded' ? 0.45 : r.source === 'Mined' || r.source === 'Quarried' ? 1 : 0.15;
+      if (deposit) {
+        // Deposits in patches about four points across: in some places, rich; elsewhere none.
+        const i = k % cl.w;
+        const j = (k / cl.w) | 0;
+        const pi = Math.floor(i / 4);
+        const pj = Math.floor(j / 4);
+        if (hash01(pi, pj, r.id) >= chance) continue;
+        A[k] = (0.5 + 0.5 * hash01(i, j, r.id)) * coverFit;
+        continue;
+      }
+      let v = weight * coverFit;
+      if (r.source === 'Fished') v *= g.coast[k] ? 1 + 0.6 * Math.max(cl.summer.upwell[k] ?? 0, cl.winter.upwell[k] ?? 0) : 0.6;
+      if (r.source === 'Farmed' && g.fresh[k]) v *= 1.25;
+      if (r.source === 'Farmed' && g.volcanic[k]) v *= 1.2;
+      A[k] = Math.min(1.5, v);
+    }
+    res[r.id] = A;
+  }
+  return { res, resInfo };
 }
 
 /** How much meat a beast gives at full density, if it is hunted for food at all. */

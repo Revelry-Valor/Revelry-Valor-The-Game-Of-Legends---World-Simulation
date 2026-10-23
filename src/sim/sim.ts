@@ -1,5 +1,6 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { PLANT_K, type Env } from './env';
+import { economyMonth, newEconomy } from './economy';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
@@ -28,6 +29,8 @@ export interface RaceInfo {
   deaths: number;
   /** Share of the people in the warband, and how strong each fighter is (Human = 1). */
   warShare: number;
+  /** Share of the people who work (the able adults). */
+  workShare: number;
   might: number;
   /** Where it can go: high mountains, over water. */
   mountains: boolean;
@@ -70,6 +73,7 @@ export function raceInfo(lib: Library, raceId: string, cultureId = ''): RaceInfo
       births: (0.128 * O) / Y * (traits.has('fertile') ? 1.4 : 1),
       deaths: 1 / (0.4 * L),
       warShare: adultShare * martial,
+      workShare: Math.max(0.3, Math.min(0.7, adultShare * 1.2)),
       might: fight * (0.8 + 0.2 * ((st.willpower ?? 6) / 6)),
       mountains: traits.has('mountain-born') || p.movement.includes('Mountain-adapted') || (st.climbing ?? 0) >= 20 || (st.flying ?? 0) > 0,
       flies: (st.flying ?? 0) > 0,
@@ -293,6 +297,7 @@ export function addDawnCity(sim: SimState, env: Env, lib: Library, raceId: strin
   const clan = newClan(sim, lib, ri.species.id, raceId, startCulture(lib, ri.species, ri.race));
   const st: Settlement = { id: sim.nextId++, name: makeName(sim, lib, clan.culture), kind: 'dawn', clan: clan.id, species: ri.species.id, race: raceId, culture: clan.culture, x, y, pop, fed: 1, warband: 0, holyTo: [raceId], ruined: false, founded: sim.day, ruinedOn: -1 };
   st.warband = Math.round(pop * ri.warShare * 0.6);
+  st.economy = newEconomy(pop, ri.need, foundingMonths(env, x, y, sim.day));
   sim.settlements.push(st);
   claimAround(sim, env, st.x, st.y, settleRange(ri, st), st.clan);
   return st;
@@ -339,7 +344,26 @@ export function moveTribe(sim: SimState, env: Env, lib: Library, id: number, x: 
 
 /** Is it summer where the tribe is? */
 function localSummer(env: Env, t: Tribe, day: number): boolean {
-  const k = cellOf(env, t.x, t.y);
+  return localSummerAt(env, t.x, t.y, day);
+}
+/** Food a new settlement brings, in months: enough to reach its first full harvest (a season half gone brings in little). */
+function foundingMonths(env: Env, x: number, y: number, day: number): number {
+  const m = monthsToHarvest(env, x, y, day);
+  return (localSummerAt(env, x, y, day) && m < 5 ? m + 12 : m) + 1;
+}
+/** Months left in the local half of the year (summer or winter), 1–6. */
+function monthsLeft(env: Env, x: number, y: number, day: number): number {
+  const now = localSummerAt(env, x, y, day);
+  for (let m = 1; m <= 6; m++) if (localSummerAt(env, x, y, day + m * DAYS_PER_MONTH) !== now) return m;
+  return 6;
+}
+/** Months until summer's end here (the harvest), 1–12. */
+function monthsToHarvest(env: Env, x: number, y: number, day: number): number {
+  for (let m = 1; m <= 12; m++) if (localSummerAt(env, x, y, day + (m - 1) * DAYS_PER_MONTH) && !localSummerAt(env, x, y, day + m * DAYS_PER_MONTH)) return m;
+  return 12;
+}
+function localSummerAt(env: Env, x: number, y: number, day: number): boolean {
+  const k = cellOf(env, x, y);
   const south = k >= 0 && env.lat[k] < 0;
   return northernSummer(day) !== south;
 }
@@ -707,11 +731,12 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     if (!ri) continue;
     const R = settleRange(ri, st);
     const cells = cellsNear(env, st.x, st.y, R).filter((c) => env.land[c]);
-    const need = st.pop * ri.need;
-    const got = forage(sim, env, left, cells, R, need, 0.85, 1.6);
-    st.fed = need > 0 ? got / need : 1;
+    // Its economy: jobs, harvests, stores, eating (economy.ts).
+    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare, r: R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
+    if (st.fed < 0.6 && !sim.events.some((e) => e.text.startsWith(`Famine in ${st.name}`) && sim.day - e.day < DAYS_PER_YEAR)) log(sim, `Famine in ${st.name}: its stores are gone${st.economy?.harvest && st.economy.harvest.year < 0.8 ? ' after a bad harvest' : ''}.`, st.x, st.y);
     const f = Math.min(1.2, st.fed);
-    const births = (ri.births / 12) * 1.1 * Math.min(1, f) * (f >= 1 ? 1.3 : 1);
+    const comfort = st.economy?.comfort ?? 1;
+    const births = (ri.births / 12) * 1.1 * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * (0.85 + 0.15 * comfort);
     const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5) / 12 : 0);
     st.pop = Math.max(0, st.pop + st.pop * (births - deaths));
     st.warband = Math.round(st.pop * ri.warShare * 0.6);
@@ -761,6 +786,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   for (const t of [...sim.tribes]) {
     const ri = info(t);
     if (!ri) continue;
+    // Settling down, by way of life and the land.
+    if (trySettle(sim, env, t, ri)) continue;
     // Grounds looked at again each year.
     chooseGrounds(sim, env, lib, t);
     // Too many for one tribe: a part breaks away to find land of its own.
@@ -814,6 +841,30 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
 }
 
 /**
+ * A tribe settling down (Phase 7; technology adds its own needs in Phase 8): settled peoples soon,
+ * on good ground; semi-nomadic ones where their land is crowded or rich; nomads rarely, and only
+ * at the richest places. It settles at its winter grounds, keeping its name and clan.
+ */
+function trySettle(sim: SimState, env: Env, t: Tribe, ri: RaceInfo): boolean {
+  if (t.pop < 60 || t.fed < 0.9 || t.away > 0) return false;
+  const k = cellOf(env, t.winter.x, t.winter.y);
+  if (k < 0 || !env.land[k] || !passable(env, ri, k)) return false;
+  if (sim.settlements.some((s) => !s.ruined && dist(env, s.x, s.y, t.winter.x, t.winter.y) < ri.range * 3)) return false;
+  const score = liveScore(env, ri, k);
+  const rich = score >= 1.4 ? 1 : score >= 1.05 ? 0.5 : 0;
+  let crowd = 0;
+  for (const o of sim.tribes) if (o !== t && dist(env, o.x, o.y, t.x, t.y) < ri.range * 3) crowd += o.pop / 300;
+  const p = ri.lifestyle === 'Settled' ? (score >= 0.8 ? 0.3 : 0.05) : ri.lifestyle === 'Nomadic' ? (rich === 1 ? 0.01 : 0) : 0.02 + 0.08 * rich + 0.06 * Math.min(1, crowd);
+  if (rand(sim) >= p) return false;
+  const v: Settlement = { id: sim.nextId++, name: t.name, kind: 'village', clan: t.clan, species: t.species, race: t.race, culture: t.culture, x: t.winter.x, y: t.winter.y, pop: t.pop, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(t.pop, ri.need, foundingMonths(env, t.winter.x, t.winter.y, sim.day)) };
+  sim.settlements.push(v);
+  sim.tribes = sim.tribes.filter((q) => q !== t);
+  sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
+  log(sim, `${t.name} settled down at its winter grounds (clan ${sim.clans.find((c) => c.id === t.clan)?.name ?? '?'}).`, v.x, v.y);
+  return true;
+}
+
+/**
  * Settlements over the year: a full one sends people out (a new tribe, or a village nearby, by the
  * race's way of life); ruins are rebuilt by those who come to them, the race they are holy to most of all.
  */
@@ -845,7 +896,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     if (!clan) continue;
     if (village && spot && spot.s > 0) {
       st.pop -= n;
-      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: spot.x, y: spot.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1 };
+      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: spot.x, y: spot.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, spot.x, spot.y, sim.day)) };
       sim.settlements.push(v);
       log(sim, `People of ${st.name} founded the village of ${v.name}.`, v.x, v.y);
     } else {
@@ -872,7 +923,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       if (!ri || t.fed < 0.9 || t.pop < 60 || dist(env, t.x, t.y, st.x, st.y) > ri.range * 2.5) continue;
       const p = st.holyTo.includes(t.race) ? 0.35 : ri.lifestyle === 'Settled' ? 0.12 : 0.04;
       if (rand(sim) >= p) continue;
-      Object.assign(st, { ruined: false, pop: t.pop, clan: t.clan, species: t.species, race: t.race, culture: t.culture, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6) });
+      Object.assign(st, { ruined: false, pop: t.pop, clan: t.clan, species: t.species, race: t.race, culture: t.culture, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), economy: newEconomy(t.pop, ri.need, foundingMonths(env, st.x, st.y, sim.day)) });
       sim.tribes = sim.tribes.filter((q) => q !== t);
       sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
       log(sim, `${t.name} settled in the ruins of ${st.name} and built it again.`, st.x, st.y);
