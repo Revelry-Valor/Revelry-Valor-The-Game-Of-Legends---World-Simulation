@@ -28,6 +28,8 @@ export interface TechContext {
   /** What a culture does to learning: finding things alone, learning from others, forgetting; and whether its way of life pushes a technology. */
   culture?: (id: string) => { discover: number; learn: number; forget: number };
   pushes?: (cultureId: string, techId: string) => boolean;
+  /** Acceptance between two cultures (−1 … 1): people learn more readily from those they accept. */
+  acceptance?: (a: string, b: string) => number;
 }
 
 const startTech = (lib: Library, id: string) => lib.techs.find((t) => t.id === id)?.start ?? false;
@@ -213,7 +215,7 @@ export function chanceOf(c: TechContext, t: Tech, h: Holder, near: Holder[], tie
   const discover = toHand(c, t, h) ? (base * practice(c, t, h) * need(t, h) * iq * writing * cf.discover * pushed) / (Math.pow(d, 1.3) * Math.max(1, tier)) : 0;
   // Contact: those near who know it teach it, kin and trading partners best.
   let teachers = 0;
-  for (const o of near) if (o.techs.includes(t.id)) teachers += o.clan === h.clan ? 1.5 : 0.8;
+  for (const o of near) if (o.techs.includes(t.id)) teachers += o.clan === h.clan ? 1.5 : o.culture === h.culture ? 1 : 0.8 * (1 + 0.5 * (c.acceptance?.(h.culture, o.culture) ?? 0));
   const learn = teachers > 0 && toHand(c, t, h) ? (0.18 * Math.min(4, teachers) * iq * cf.learn) / Math.pow(d, 0.7) : 0;
   return { discover, learn };
 }

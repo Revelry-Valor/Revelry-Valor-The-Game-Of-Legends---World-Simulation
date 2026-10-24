@@ -10,6 +10,7 @@ import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays, techOutlook } from '../sim/sim';
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
+import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import type { LiveCulture } from '../sim/state';
 import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
@@ -72,6 +73,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let showRes = '';
   let showTrade = true;
   let showWays = true;
+  let landsBy: 'clan' | 'culture' = 'clan';
   let resDirty = true;
   let resImg: HTMLCanvasElement | null = null;
   let follow = true;
@@ -256,7 +258,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   const drawLand = () => {
     const s = sim!;
     const e = env!;
-    const colours = new Map(s.clans.map((c) => [c.id, hex(c.colour)]));
+    // Each clan's colour, or its culture's.
+    const colours = new Map(s.clans.map((c) => {
+      const cu = landsBy === 'culture' ? cultureOf(s, c.culture) : undefined;
+      return [c.id, hex(cu ? cultureColour(s, cu) : c.colour)];
+    }));
     return fieldImage((data) => {
       for (let k = 0; k < e.n; k++) {
         const o = s.owner[k];
@@ -734,6 +740,19 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const cu = cultureOf(sim!, id);
     return cu ? h('div', {}, `Culture: ${cu.name}${cu.source ? '' : ' (folk)'}`) : null;
   };
+  /** How a culture sees the others it knows (acceptance). */
+  const acceptancePart = (cu: LiveCulture): HTMLElement[] => {
+    const s = sim!;
+    const known = (s.cultures ?? []).filter((o) => o !== cu && s.relations?.[cu.id < o.id ? `${cu.id}|${o.id}` : `${o.id}|${cu.id}`] && (s.settlements.some((q) => !q.ruined && q.culture === o.id) || s.tribes.some((t) => t.culture === o.id)));
+    if (!known.length) return [];
+    return [
+      h('div', { class: 'econ-head' }, 'How it sees others'),
+      h('ul', { class: 'econ-list' }, ...known.map((o) => {
+        const v = acceptance(s, cu.id, o.id);
+        return h('li', {}, h('span', {}, `The ${o.name}`), h('span', { class: 'muted' }, `${acceptanceWord(v)} (${v >= 0 ? '+' : ''}${v.toFixed(2)})`));
+      })),
+    ];
+  };
   /** A culture: pillars, traditions (with their degree, and whether they are rising or fading), behaviours, and its people. */
   const cultureCard = (cu: LiveCulture): HTMLElement => {
     const L = lib();
@@ -747,9 +766,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const trend = (p: number) => (p > 0.25 ? ' · deepening' : p < -0.25 ? ' · fading' : '');
     const sample = cu.sounds.split(/\s+/).filter(Boolean).slice(0, 6).join(' ');
     return h('details', { class: 'culture-card small' },
-      h('summary', {}, h('strong', {}, cu.name), ` · ${Math.round(people).toLocaleString()} people`, h('span', { class: 'muted' }, ` · ${places} settlements, ${roaming} tribes`)),
+      h('summary', {}, h('span', { class: 'swatch', style: `background:${cultureColour(s, cu)}` }), h('strong', {}, cu.name), ` · ${Math.round(people).toLocaleString()} people`, h('span', { class: 'muted' }, ` · ${places} settlements, ${roaming} tribes`)),
       h('div', { class: 'tribe-card econ' },
-        h('div', {}, cu.source ? 'From the Library.' : 'A folk culture, grown from its homeland and way of life.'),
+        h('div', {}, cu.source ? 'From the Library.' : cu.blend ? `A blend of the ${cu.blend.map((id) => cultureOf(s, id)?.name ?? '?').join(' and the ')}, born year ${yearOf(cu.founded)}.` : cu.parent ? `Grew apart from the ${cultureOf(s, cu.parent)?.name ?? '?'} in year ${yearOf(cu.founded)}.` : 'A folk culture, grown from its homeland and way of life.'),
         h('div', {}, `Heritage: ${cu.races.map(raceName).join(', ')}`),
         h('div', {}, `Ethos: ${cu.ethos || '—'} · Who fights: ${cu.martial || '—'} · Ways of life: ${cu.lifestyles.join(', ') || 'none settled on'}`),
         sample ? h('div', { class: 'muted' }, `Its sounds: ${sample}`) : null,
@@ -762,6 +781,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           : h('div', { class: 'muted' }, 'None yet.'),
         forming.length ? h('div', { class: 'muted' }, `Taking root: ${forming.map((t) => trad(t.id)?.name ?? t.id).join(', ')}.`) : null,
         cu.specialties.length ? h('div', {}, `Specialties: ${cu.specialties.map((q) => q.name).join(', ')}`) : null,
+        ...acceptancePart(cu),
         h('div', { class: 'econ-head' }, 'Learned behaviours'),
         h('div', {}, cu.behaviours.map((b) => L.behaviours.find((q) => q.id === b)?.name ?? b).join(', ') || 'None yet.'),
         h('div', { class: 'muted' }, 'Traditions are earned by living a certain way for generations (about twenty years a degree) and fade when that life ends; behaviours spread by practice and from neighbours.'),
@@ -910,6 +930,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     );
     const display = h('div', { class: 'group' },
       choice<'on' | 'off'>('Clan lands', [{ value: 'on', label: 'Clan lands shown' }, { value: 'off', label: 'Hidden' }], showLand ? 'on' : 'off', (v) => { showLand = v === 'on'; d.redraw(); }),
+      choice<'clan' | 'culture'>('Colour lands by', [{ value: 'clan', label: 'Clan' }, { value: 'culture', label: 'Culture' }], landsBy, (v) => { landsBy = v; landDirty = true; d.redraw(); render(); }),
       choice<'on' | 'off'>('Ways', [{ value: 'on', label: 'Trails, roads and railways shown' }, { value: 'off', label: 'Hidden' }], showWays ? 'on' : 'off', (v) => { showWays = v === 'on'; d.redraw(); }),
       h('div', { class: 'way-key small' }, ...WAYS.slice(1).map((w) => h('span', {}, h('span', { class: `way-swatch way-${w.id}` }), `${w.name} (×${w.speed} speed)`))),
       choice<'on' | 'off'>('Trade', [{ value: 'on', label: 'Trade routes and caravans shown' }, { value: 'off', label: 'Hidden' }], showTrade ? 'on' : 'off', (v) => { showTrade = v === 'on'; d.redraw(); }),
@@ -1124,6 +1145,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             ? h('div', {}, 'In ruins. Those who come to it may build it again (its own people most of all).')
             : h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), `Clan ${clan?.name ?? '?'} · ${raceName(st.race)}`),
           st.ruined ? null : cultureLine(st.culture),
+          !st.ruined && st.cultureShift ? h('div', { class: 'muted' }, `Being drawn into the ways of the ${cultureOf(s, st.cultureShift.to)?.name ?? '?'} (${Math.round(st.cultureShift.progress * 100)}%).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,

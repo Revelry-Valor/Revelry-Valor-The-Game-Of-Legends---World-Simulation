@@ -13,6 +13,7 @@ import { cropYear, isFood, newEconomy } from '../src/sim/economy';
 import { updatePrices } from '../src/sim/trade';
 import { bestWay, knows, pathCells, pathSpeed } from '../src/sim/ways';
 import { armsMight, clanKnows } from '../src/sim/tech';
+import { acceptance, noteBetween } from '../src/sim/cultureChange';
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -533,4 +534,71 @@ describe('technology', () => {
     expect(clanKnows(lib, clan, 'spears')).toBe(true);
     expect(clanKnows(lib, clan, 'iron-arms')).toBe(false);
   });
+});
+
+describe('culture change', () => {
+  const farming = ['agriculture', 'husbandry', 'fishing'];
+  it('comes to accept those it trades with, and to distrust those it fights', () => {
+    const sim = newSim(env, 201);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 500, farming)!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6150, yAt(-12), 500, farming)!;
+    const start = acceptance(sim, a.culture, b.culture);
+    for (let y = 0; y < 6; y++) {
+      for (let i = 0; i < 10; i++) noteBetween(sim, a.culture, b.culture, 'trades');
+      stepDays(sim, env, lib, DAYS_PER_YEAR);
+    }
+    const traded = acceptance(sim, a.culture, b.culture);
+    expect(traded).toBeGreaterThan(start + 0.1);
+    for (let y = 0; y < 3; y++) {
+      for (let i = 0; i < 8; i++) noteBetween(sim, a.culture, b.culture, 'fights');
+      stepDays(sim, env, lib, DAYS_PER_YEAR);
+    }
+    expect(acceptance(sim, a.culture, b.culture)).toBeLessThan(traded - 0.2);
+  }, 120000);
+  it('draws a small settlement into the culture of the big one beside it', () => {
+    const sim = newSim(env, 203);
+    const big = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 2500, farming)!;
+    const small = addDawnCity(sim, env, lib, elfId(), 6070, yAt(-12), 150, farming)!;
+    for (let y = 0; y < 40 && small.culture !== big.culture; y++) stepDays(sim, env, lib, DAYS_PER_YEAR);
+    expect(small.ruined || small.culture === big.culture).toBe(true);
+    if (!small.ruined) expect(sim.events.some((e) => e.text.includes(`${small.name} has taken on the ways`))).toBe(true);
+  }, 120000);
+  it('lets a clan far from its heartland, with no ties back, grow a culture of its own', () => {
+    const sim = newSim(env, 205);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 800, farming)!;
+    const far = addTribe(sim, env, lib, humanId(), 6000, yAt(-20), -1, 300)!;
+    expect(far.culture).toBe(city.culture);
+    const parent = city.culture;
+    for (let y = 0; y < 75; y++) {
+      for (const t of sim.tribes) if (t.clan === far.clan) {
+        t.summer = { x: 6000, y: yAt(-20) };
+        t.winter = { x: 6000, y: yAt(-20) };
+        t.pop = Math.max(t.pop, 200);
+      }
+      const clan = sim.clans.find((c) => c.id === far.clan);
+      if (clan) clan.techs = [];
+      stepDays(sim, env, lib, DAYS_PER_YEAR);
+    }
+    const kin = sim.tribes.filter((t) => t.clan === far.clan);
+    expect(kin.length).toBeGreaterThan(0);
+    const now = sim.cultures!.find((c) => c.id === kin[0].culture)!;
+    expect(now.id).not.toBe(parent);
+    expect(now.parent).toBe(parent);
+  }, 180000);
+  it('blends two cultures long living side by side and close to each other', () => {
+    const sim = newSim(env, 207);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 600, farming)!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6080, yAt(-12), 600, farming)!;
+    const before = [a.culture, b.culture];
+    for (let y = 0; y < 50; y++) {
+      // They come to hold each other close.
+      for (let i = 0; i < 10; i++) noteBetween(sim, a.culture, b.culture, 'trades');
+      stepDays(sim, env, lib, DAYS_PER_YEAR);
+      if (sim.cultures!.some((c) => c.blend)) break;
+    }
+    const blend = sim.cultures!.find((c) => c.blend);
+    expect(blend).toBeDefined();
+    expect(blend!.blend!.sort()).toEqual([...before].sort());
+    expect([a.culture, b.culture]).toContain(blend!.id);
+  }, 180000);
 });

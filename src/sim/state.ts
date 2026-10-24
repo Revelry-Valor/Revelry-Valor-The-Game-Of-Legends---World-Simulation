@@ -53,6 +53,8 @@ export interface Clan {
   parent: number;
   /** What its tribes know beyond survival (library tech ids). */
   techs?: string[];
+  /** Years it has lived far from its culture's heartland with no ties back (toward a culture of its own). */
+  drift?: number;
 }
 
 /**
@@ -87,6 +89,8 @@ export interface Settlement {
   archiveBurnedUntil?: number;
   /** Fights and famines lately (for the need that drives discovery). */
   hardship?: { famine: number; war: number };
+  /** Drawn toward another culture (a big neighbour's, or the many small ones round it): how far along (0–1). */
+  cultureShift?: { to: string; progress: number };
 }
 
 /**
@@ -176,8 +180,11 @@ export interface LiveCulture {
   specialties: { name: string; description: string }[];
   behaviours: string[];
   founded: number;
-  /** The culture it grew from, if any. */
+  /** The culture it grew from, if any (or the two it blended from). */
   parent: string;
+  blend?: string[];
+  /** Its colour on the map of cultures. */
+  colour?: string;
   /** This year's doings, for the traditions they earn. */
   stats?: { fights: number; raids: number; foreignTrade: number; famines: number; lastFight: number };
 }
@@ -224,6 +231,8 @@ export interface SimState {
   settlements: Settlement[];
   /** The cultures alive in the world (clans, tribes and settlements name theirs by id). */
   cultures?: LiveCulture[];
+  /** Between each pair of cultures ("a|b", ids in order): acceptance (−1 hostile … 1 close), this year's fights and trade, and years lived side by side. */
+  relations?: Record<string, { acc: number; fights: number; trades: number; together: number }>;
   caravans: Caravan[];
   routes: Route[];
   /** How much people, herds and caravans travel over each point (for trails and roads; fades slowly). */

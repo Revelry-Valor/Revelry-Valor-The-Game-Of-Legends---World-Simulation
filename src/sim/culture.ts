@@ -3,6 +3,7 @@ import { COVER_BRUSHES } from '../core/paint';
 import type { Env } from './env';
 import type { LiveCulture, SimState } from './state';
 import { clanKnows, knows } from './tech';
+import { acceptance } from './cultureChange';
 
 /**
  * Living cultures (REDESIGN.md 8.4e, Phase 8 step 2).
@@ -384,7 +385,8 @@ export function cultureYear(c: CultureContext): void {
       if (!b.requires.every((r) => cult.behaviours.includes(r) || !lib.behaviours.some((q) => q.id === r))) continue;
       if (!b.needsTech.every((t) => pr.anyKnows(t) || !lib.techs.some((q) => q.id === t))) continue;
       const practice = behaviourPractice(b.id, pr);
-      const teachers = others.filter((o) => o.behaviours.includes(b.id)).length;
+      // Neighbours teach, the more readily the more they are accepted.
+      const teachers = others.filter((o) => o.behaviours.includes(b.id)).reduce((n, o) => n + Math.max(0.1, 0.6 + 0.4 * acceptance(sim, cult.id, o.id)), 0);
       const rate = 0.05 * practice + (teachers ? 0.12 * Math.min(3, teachers) * cultureFx(sim, cult.id).learn : 0);
       if (rate > 0 && c.rand() < 1 - Math.exp(-rate)) {
         cult.behaviours.push(b.id);

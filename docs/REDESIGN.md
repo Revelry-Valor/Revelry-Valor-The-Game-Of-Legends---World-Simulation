@@ -845,6 +845,17 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - A folk culture's ways of life follow how its people live (settled, roaming, seafaring).
 - **Views:** a Cultures section in the Peoples tab (each culture's people, heritage, ethos, who fights, ways of life, sounds, traditions with their degree and whether deepening or fading, what is taking root, specialties and behaviours); each settlement and tribe shows its culture; setup shows which culture each race will live by.
 
+**Built (Phase 8, step 3): culture change.**
+- **Acceptance** between each pair of cultures (−1 hostile … 1 close) starts from shared heritage (a parent or blended culture closest, then the same race, then the same species) and moves each year toward what their dealings make it: up with contact and trade, down with fights, raids and grudges; xenophobes warm slowly, the hospitable quickly, and trust is lost faster than it is won. It eases or sharpens how readily they fight each other, trade, and learn each other's technologies and behaviours.
+- **Big settlement pull:** a small settlement within about 75 miles of one at least three times its size, of another culture, is drawn into the big one's culture over about twenty years (faster where they accept each other); unless the small ones of its culture round the big one are together the stronger, when the big one is drawn toward theirs. A clan's culture follows most of its people.
+- **Divergence:** a clan living more than about 300 miles from its culture's heartland (its biggest settlement) with no trade ties back, for sixty years, grows a culture of its own (once the culture is sixty years old): its parent's traditions (locked ones now only encouraged), behaviours and sounds, a new name; it starts close to its parent. A single city can diverge.
+- **Hybrids:** two cultures with close acceptance (0.6 or more) living side by side (within about 90 miles) for forty years blend where they mix into a new culture: heritage, sounds and behaviours of both, the strongest traditions of each (up to six), the bigger one's ethos and martial custom.
+- **Story cultures** keep their locked and encouraged traditions as made (step 2).
+- **Still to come with nations (Phase 9):** rulers enforcing their culture (as far as their reach), and a nation's main culture pulling the others in it.
+- **Views:** the map can colour lands by culture instead of clan; each culture's card shows where it came from (grown apart from, or a blend of) and how it sees each culture it knows; a settlement shows when it is being drawn into another culture's ways.
+
+**Phase 8 is complete.**
+
 ### 8.4g Religion
 **Faith structure** (CK3-inspired, like culture)
 - **Identity:** name, symbols, followers (cultures and races).

@@ -5,6 +5,7 @@ import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
 import { cultureFx, cultureOf, cultureYear, ensureCulture, note, pushes } from './culture';
+import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
@@ -480,6 +481,7 @@ function techContext(sim: SimState, env: Env, lib: Library): TechContext {
     rand: () => rand(sim),
     log: (text, x, y) => log(sim, text, x, y),
     culture: (id) => cultureFx(sim, id),
+    acceptance: (a, b) => acceptance(sim, a, b),
     pushes: (cultureId, techId) => pushes(sim, lib, cultureId, techId),
   };
 }
@@ -583,6 +585,7 @@ function battle(sim: SimState, env: Env, s: Sortie, enemy: Tribe, info: Info, li
   const attack = s.strength * (ra?.might ?? 1) * armsOf(s.clan) * fightOf(home?.culture) * (0.6 + 0.8 * rand(sim));
   const defend = Math.max(1, defenders) * (rd?.might ?? 1) * armsOf(enemy.clan) * fightOf(enemy.culture) * 1.1 * (0.6 + 0.8 * rand(sim));
   const win = attack > defend;
+  if (home) noteBetween(sim, home.culture, enemy.culture, 'fights');
   const loseA = Math.round(s.strength * (win ? 0.05 + 0.1 * rand(sim) : 0.25 + 0.2 * rand(sim)));
   const loseD = Math.round(defenders * (win ? 0.25 + 0.2 * rand(sim) : 0.05 + 0.1 * rand(sim)));
   s.strength = Math.max(0, s.strength - loseA);
@@ -622,6 +625,7 @@ function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info, li
   const attack = s.strength * (ra?.might ?? 1) * armsMight((id) => clanKnows(lib, sim.clans.find((c) => c.id === s.clan), id)) * (home ? cultureFx(sim, home.culture).fight : 1) * (0.6 + 0.8 * rand(sim));
   // Defending their own homes, behind whatever they have built (walls, with fortification).
   const defend = defenders * (rd?.might ?? 1) * armsMight(has) * wallsMight(has) * cultureFx(sim, st.culture).fight * 1.35 * (0.6 + 0.8 * rand(sim));
+  if (home) noteBetween(sim, home.culture, st.culture, 'fights');
   st.hardship = { famine: st.hardship?.famine ?? 0, war: (st.hardship?.war ?? 0) + 1 };
   const win = attack > defend;
   const loseA = Math.round(s.strength * (win ? 0.05 + 0.1 * rand(sim) : 0.25 + 0.2 * rand(sim)));
@@ -860,6 +864,8 @@ function hostility(sim: SimState, lib: Library, t: Tribe, e: { species: string; 
   if (sim.grudges.some((g) => g.race === t.race && g.against === e.race)) h *= 2.5;
   // Its culture: xenophobes are quicker to fight other races, the hospitable slower.
   if (t.race !== e.race) h *= cultureFx(sim, t.culture).otherRace;
+  // Acceptance between their cultures eases (or sharpens) it.
+  if (t.culture !== e.culture) h *= 1 - 0.5 * acceptance(sim, t.culture, e.culture);
   return h;
 }
 
@@ -915,6 +921,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     if (clan && !clan.culture) clan.culture = g.culture;
   }
   cultureYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
+  // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
+  cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // Trails from use; roads and railways built, kept up, or let go (ways.ts).
   waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
   // Ways fade unless they are used; routes long unused are forgotten.
