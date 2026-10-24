@@ -361,3 +361,5 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .start-know summary { cursor: pointer; }
 .start-know .know-field { margin-top: 0.3rem; }
 .start-know .field-row { font-size: 0.85rem; }
+.culture-card summary { cursor: pointer; padding: 0.2rem 0; }
+.culture-card .tribe-card { margin-top: 0.3rem; }

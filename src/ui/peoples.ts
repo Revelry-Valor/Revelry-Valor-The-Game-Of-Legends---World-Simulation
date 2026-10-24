@@ -9,6 +9,8 @@ import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays, techOutlook } from '../sim/sim';
 import { hasArchive, keepers } from '../sim/tech';
+import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
+import type { LiveCulture } from '../sim/state';
 import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -721,6 +723,51 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       h('div', {}, kept ? `Keeps about ${Math.round(kept * mi)} miles of built ways; upkeep a year: ${Object.entries(upkeep).map(([k, v]) => `${Math.round(v)} ${kindName(k)}`).join(', ')}. Unpaid, they fall back a tier.` : 'Keeps no built ways.'),
     );
   };
+  /** Which culture a race will live by: its Library culture, or a folk culture grown from its homeland. */
+  const startCultureText = (raceId: string): string => {
+    const L = lib();
+    const sp = L.species.find((q) => q.races.some((r) => r.id === raceId));
+    const made = L.cultures.find((c) => c.races.includes(raceId)) ?? (sp ? L.cultures.find((c) => c.species.includes(sp.id)) : undefined);
+    return made ? `Culture: ${made.name} (from the Library).` : 'Culture: a folk culture will grow from its homeland and way of life (make one in the Library to choose it yourself).';
+  };
+  const cultureLine = (id: string): HTMLElement | null => {
+    const cu = cultureOf(sim!, id);
+    return cu ? h('div', {}, `Culture: ${cu.name}${cu.source ? '' : ' (folk)'}`) : null;
+  };
+  /** A culture: pillars, traditions (with their degree, and whether they are rising or fading), behaviours, and its people. */
+  const cultureCard = (cu: LiveCulture): HTMLElement => {
+    const L = lib();
+    const s = sim!;
+    const people = s.settlements.filter((q) => !q.ruined && q.culture === cu.id).reduce((n, q) => n + q.pop, 0) + s.tribes.filter((t) => t.culture === cu.id).reduce((n, t) => n + t.pop, 0);
+    const places = s.settlements.filter((q) => !q.ruined && q.culture === cu.id).length;
+    const roaming = s.tribes.filter((t) => t.culture === cu.id).length;
+    const trad = (id: string) => L.traditions.find((t) => t.id === id);
+    const held = cu.traditions.filter((t) => t.level >= 0);
+    const forming = cu.traditions.filter((t) => t.level < 0 && t.progress > 0.2);
+    const trend = (p: number) => (p > 0.25 ? ' · deepening' : p < -0.25 ? ' · fading' : '');
+    const sample = cu.sounds.split(/\s+/).filter(Boolean).slice(0, 6).join(' ');
+    return h('details', { class: 'culture-card small' },
+      h('summary', {}, h('strong', {}, cu.name), ` · ${Math.round(people).toLocaleString()} people`, h('span', { class: 'muted' }, ` · ${places} settlements, ${roaming} tribes`)),
+      h('div', { class: 'tribe-card econ' },
+        h('div', {}, cu.source ? 'From the Library.' : 'A folk culture, grown from its homeland and way of life.'),
+        h('div', {}, `Heritage: ${cu.races.map(raceName).join(', ')}`),
+        h('div', {}, `Ethos: ${cu.ethos || '—'} · Who fights: ${cu.martial || '—'} · Ways of life: ${cu.lifestyles.join(', ') || 'none settled on'}`),
+        sample ? h('div', { class: 'muted' }, `Its sounds: ${sample}`) : null,
+        h('div', { class: 'econ-head' }, `Traditions (${held.length} of about ${MAX_TRADITIONS})`),
+        held.length
+          ? h('ul', { class: 'econ-list' }, ...held.map((t) => {
+              const tr = trad(t.id);
+              return h('li', { title: tr?.description ?? '' }, h('span', {}, tr?.name ?? t.id, t.hold ? h('span', { class: 'muted' }, ` (${t.hold.toLowerCase()})`) : null), h('span', { class: 'muted' }, `${tr?.levels[t.level]?.name ?? ''}${trend(t.progress)}`));
+            }))
+          : h('div', { class: 'muted' }, 'None yet.'),
+        forming.length ? h('div', { class: 'muted' }, `Taking root: ${forming.map((t) => trad(t.id)?.name ?? t.id).join(', ')}.`) : null,
+        cu.specialties.length ? h('div', {}, `Specialties: ${cu.specialties.map((q) => q.name).join(', ')}`) : null,
+        h('div', { class: 'econ-head' }, 'Learned behaviours'),
+        h('div', {}, cu.behaviours.map((b) => L.behaviours.find((q) => q.id === b)?.name ?? b).join(', ') || 'None yet.'),
+        h('div', { class: 'muted' }, 'Traditions are earned by living a certain way for generations (about twenty years a degree) and fade when that life ends; behaviours spread by practice and from neighbours.'),
+      ),
+    );
+  };
   /** A race's starting knowledge beyond survival: a fold of checkboxes by field. */
   const startKnowledge = (row: SetupRow): HTMLElement => {
     const L = lib();
@@ -906,6 +953,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
                 start !== 'dawn' ? h('label', {}, num(row.tribes, 40, `Tribes of ${race.name}`, (v) => (row.tribes = v)), ' tribes') : null,
                 start !== 'tribes' ? h('label', {}, num(row.cityPop ?? 800, 20000, `People in the dawn city of the ${race.name}`, (v) => (row.cityPop = Math.max(30, v))), ' in the city') : null,
                 startKnowledge(row),
+                h('div', { class: 'muted' }, startCultureText(race.id)),
               )
             : null,
         );
@@ -1015,6 +1063,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       );
     }
 
+    // Cultures: each with its pillars, traditions, behaviours and people.
+    const living = (s.cultures ?? []).filter((cu) => s.settlements.some((q) => !q.ruined && q.culture === cu.id) || s.tribes.some((t) => t.culture === cu.id));
+    if (living.length) parts.push(h('h3', {}, 'Cultures'), ...living.map((cu) => cultureCard(cu)));
+
     // Technology, the world over: what is known anywhere, how widely, and who came to it first.
     if (s.started) {
       const holders = [...s.settlements.filter((q) => !q.ruined).map((q) => q.techs ?? []), ...s.clans.filter((c) => s.tribes.some((t) => t.clan === c.id)).map((c) => c.techs ?? [])];
@@ -1044,6 +1096,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         h('h3', {}, t.name),
         h('div', { class: 'tribe-card small' },
           h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), `Clan ${clan?.name ?? '?'} · ${raceName(t.race)}`),
+          cultureLine(t.culture),
           h('div', {}, `${Math.round(t.pop)} people · warband ${Math.round(t.warband)}${t.away ? ` (${Math.round(t.away)} away fighting)` : ''}`),
           s.started ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, t.fed) * 100)}% of need${t.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri ? h('div', { class: 'muted' }, `Walks about ${Math.round(ri.speed * 0.621)} miles a day; forages and hunts about ${Math.round(ri.range * 0.621)} miles around. ${ri.lifestyle}.`) : null,
@@ -1070,6 +1123,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           st.ruined
             ? h('div', {}, 'In ruins. Those who come to it may build it again (its own people most of all).')
             : h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), `Clan ${clan?.name ?? '?'} · ${raceName(st.race)}`),
+          st.ruined ? null : cultureLine(st.culture),
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,

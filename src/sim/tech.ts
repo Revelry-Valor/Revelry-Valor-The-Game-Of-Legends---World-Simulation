@@ -25,6 +25,9 @@ export interface TechContext {
   dist: (ax: number, ay: number, bx: number, by: number) => number;
   rand: () => number;
   log: (text: string, x?: number, y?: number) => void;
+  /** What a culture does to learning: finding things alone, learning from others, forgetting; and whether its way of life pushes a technology. */
+  culture?: (id: string) => { discover: number; learn: number; forget: number };
+  pushes?: (cultureId: string, techId: string) => boolean;
 }
 
 const startTech = (lib: Library, id: string) => lib.techs.find((t) => t.id === id)?.start ?? false;
@@ -109,18 +112,19 @@ interface Holder {
   /** The settlement (for jobs, stores, hardship), if it is one. */
   st?: Settlement;
   clan: number;
+  culture: string;
 }
 
 function holders(sim: SimState): Holder[] {
   const out: Holder[] = [];
-  for (const st of sim.settlements) if (!st.ruined) out.push({ kind: 'settlement', id: st.id, name: st.name, race: st.race, x: st.x, y: st.y, pop: st.pop, techs: (st.techs ??= []), st, clan: st.clan });
+  for (const st of sim.settlements) if (!st.ruined) out.push({ kind: 'settlement', id: st.id, name: st.name, race: st.race, x: st.x, y: st.y, pop: st.pop, techs: (st.techs ??= []), st, clan: st.clan, culture: st.culture });
   for (const c of sim.clans) {
     const tribes = sim.tribes.filter((t) => t.clan === c.id);
     if (!tribes.length) continue;
     const pop = tribes.reduce((n, t) => n + t.pop, 0);
     const x = tribes[0].x;
     const y = tribes[0].y;
-    out.push({ kind: 'clan', id: c.id, name: `clan ${c.name}`, race: c.race, x, y, pop, techs: (c.techs ??= []), clan: c.id });
+    out.push({ kind: 'clan', id: c.id, name: `clan ${c.name}`, race: c.race, x, y, pop, techs: (c.techs ??= []), clan: c.id, culture: c.culture });
   }
   return out;
 }
@@ -203,11 +207,14 @@ export function chanceOf(c: TechContext, t: Tech, h: Holder, near: Holder[], tie
   // Finding something new is slow, slower the deeper it lies in the tree: what feeds and clothes
   // a people comes within generations, learning and great works over centuries.
   const base = t.field === 'Food and land' || (t.field === 'Materials and crafts' && tier <= 2) ? 0.03 : 0.006;
-  const discover = toHand(c, t, h) ? (base * practice(c, t, h) * need(t, h) * iq * writing) / (Math.pow(d, 1.3) * Math.max(1, tier)) : 0;
+  const cf = c.culture?.(h.culture) ?? { discover: 1, learn: 1, forget: 1 };
+  // A way of life that leans on a technology (its learned behaviours) finds it twice as readily.
+  const pushed = c.pushes?.(h.culture, t.id) ? 2 : 1;
+  const discover = toHand(c, t, h) ? (base * practice(c, t, h) * need(t, h) * iq * writing * cf.discover * pushed) / (Math.pow(d, 1.3) * Math.max(1, tier)) : 0;
   // Contact: those near who know it teach it, kin and trading partners best.
   let teachers = 0;
   for (const o of near) if (o.techs.includes(t.id)) teachers += o.clan === h.clan ? 1.5 : 0.8;
-  const learn = teachers > 0 && toHand(c, t, h) ? (0.18 * Math.min(4, teachers) * iq) / Math.pow(d, 0.7) : 0;
+  const learn = teachers > 0 && toHand(c, t, h) ? (0.18 * Math.min(4, teachers) * iq * cf.learn) / Math.pow(d, 0.7) : 0;
   return { discover, learn };
 }
 
@@ -240,7 +247,7 @@ export function techYear(c: TechContext): void {
   } };
   const all = holders(sim);
   const tiers = techTiers(lib.techs);
-  const firstEver = new Set(all.flatMap((h) => h.techs));
+  const firstEver = new Set([...Object.keys(sim.firsts ?? {}), ...all.flatMap((h) => h.techs)]);
   const gained: [Holder, Tech, boolean][] = [];
   for (const h of all) {
     const known = new Set([...h.techs, ...lib.techs.filter((t) => t.start).map((t) => t.id)]);
@@ -256,7 +263,7 @@ export function techYear(c: TechContext): void {
     for (const id of [...h.techs].sort((a, b) => (tiers.get(b) ?? 0) - (tiers.get(a) ?? 0))) {
       const tier = tiers.get(id) ?? 1;
       if (h.pop >= keepers(tier) || near.some((o) => o.techs.includes(id))) continue;
-      if (c.rand() < 0.15) {
+      if (c.rand() < 0.15 * (c.culture?.(h.culture).forget ?? 1)) {
         h.techs.splice(h.techs.indexOf(id), 1);
         c.log(`${cap(h.name)} has forgotten ${lib.techs.find((q) => q.id === id)?.name ?? id}: too few are left who know it.`, h.x, h.y);
       }

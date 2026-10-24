@@ -4,6 +4,7 @@ import { isFood, NEEDS, resInfoOf } from './economy';
 import type { RaceInfo } from './sim';
 import type { Caravan, Settlement, SimState } from './state';
 import { allRail, knows, pathCells, pathSpeed, TRAIN_COAL_PER_100KM, WAYS } from './ways';
+import { cultureFx, note } from './culture';
 
 /**
  * Markets and trade (REDESIGN.md 8.4h, Phase 7 step 2).
@@ -155,6 +156,8 @@ export function willingness(c: TradeContext, a: Settlement, b: Settlement): numb
   let w = att === 'Welcoming' ? 1 : att === 'Indifferent' ? 0.7 : 0.4;
   if (a.species === b.species) w = Math.max(w, 0.8);
   if (a.culture && a.culture === b.culture) w = Math.min(1, w * 1.2);
+  // Its culture: traders and the hospitable deal readily with other peoples; xenophobes and the closed hardly.
+  else w = Math.min(1, w * cultureFx(sim, a.culture).trade);
   return w;
 }
 
@@ -389,6 +392,10 @@ function arriveThere(c: TradeContext, cv: Caravan, home: Settlement, b: Settleme
     c.log(`Traders from ${home.name} reached ${b.name}${home.clan !== b.clan ? ` (clan ${ca ?? '?'} with clan ${cb ?? '?'})` : ''}: ${what(cv.cargo)} for ${what(back)}.`, b.x, b.y);
   }
   route.trips++;
+  if (home.culture !== b.culture) {
+    note(sim, home.culture, 'foreignTrade');
+    note(sim, b.culture, 'foreignTrade');
+  }
   route.worth += worthIn;
   route.last = sim.day;
   cv.cargo = back;

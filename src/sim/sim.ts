@@ -4,8 +4,9 @@ import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
+import { cultureFx, cultureOf, cultureYear, ensureCulture, note, pushes } from './culture';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
-import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
+import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
  * The first peoples (REDESIGN.md 8.3–8.4, Phase 6): tribes moving between summer and winter
@@ -52,7 +53,7 @@ export function eligibleRaces(lib: Library): { species: Species; race: Race }[] 
   return lib.species.filter((s) => !s.setAside).flatMap((s) => s.races.filter((r) => !raceMissing(r).length).map((race) => ({ species: s, race })));
 }
 
-export function raceInfo(lib: Library, raceId: string, cultureId = ''): RaceInfo | null {
+export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures: LiveCulture[] = []): RaceInfo | null {
   for (const species of lib.species) {
     const race = species.races.find((r) => r.id === raceId);
     if (!race) continue;
@@ -63,7 +64,7 @@ export function raceInfo(lib: Library, raceId: string, cultureId = ''): RaceInfo
     const traits = new Set([...species.traits.filter((t) => !race.removeTraits.includes(t)), ...race.addTraits]);
     const O = p.offspring ?? (race.size === 'Tiny' ? 3 : race.size === 'Small' ? 2 : 1);
     const Y = p.birthEveryYears ?? Math.max(1, Math.min(40, L / 25));
-    const culture = lib.cultures.find((c) => c.id === cultureId);
+    const culture = cultures.find((c) => c.id === cultureId) ?? lib.cultures.find((c) => c.id === cultureId);
     const martial = culture?.martial ? MARTIAL_SHARE[culture.martial] ?? 0.5 : 0.5;
     const adultShare = Math.max(0.2, Math.min(0.65, (0.6 * L - A) / (0.8 * L)));
     const speed = Math.max(st.speed ?? 30, st.flying ?? 0);
@@ -104,7 +105,7 @@ const SYLLABLES = ['ka', 'ra', 'mo', 'te', 'lu', 'an', 'or', 'vel', 'si', 'do', 
 
 /** A name in a culture's sounds (word parts with a dash join: "ka-", "-dor"), or plain syllables. */
 function makeName(sim: SimState, lib: Library, cultureId: string): string {
-  const sounds = lib.cultures.find((c) => c.id === cultureId)?.sounds ?? '';
+  const sounds = (sim.cultures?.find((c) => c.id === cultureId) ?? lib.cultures.find((c) => c.id === cultureId))?.sounds ?? '';
   const parts = sounds.split(/[\s,;]+/).filter(Boolean);
   const pre = parts.filter((p) => p.endsWith('-')).map((p) => p.slice(0, -1));
   const suf = parts.filter((p) => p.startsWith('-')).map((p) => p.slice(1));
@@ -197,11 +198,14 @@ export function addTribe(sim: SimState, env: Env, lib: Library, raceId: string, 
   const ri = raceInfo(lib, raceId);
   if (!ri) return null;
   let clan = sim.clans.find((c) => c.id === clanId);
-  if (!clan) clan = newClan(sim, lib, ri.species.id, raceId, startCulture(lib, ri.species, ri.race));
+  if (!clan) clan = newClan(sim, lib, ri.species.id, raceId, ensureCulture(sim, lib, env, ri.species, ri.race, x, y, () => rand(sim)));
   const t: Tribe = { id: sim.nextId++, name: makeName(sim, lib, clan.culture), clan: clan.id, species: ri.species.id, race: raceId, culture: clan.culture, x, y, target: null, summer: { x, y }, winter: { x, y }, pop, fed: 1, warband: 0, away: 0, founded: sim.day };
   t.warband = Math.round(pop * raceInfo(lib, raceId, clan.culture)!.warShare);
   sim.tribes.push(t);
   chooseGrounds(sim, env, lib, t);
+  // Off to the grounds for the season it is now.
+  const g = localSummer(env, t, sim.day) ? t.summer : t.winter;
+  if (g.x !== t.x || g.y !== t.y) t.target = { ...g };
   return t;
 }
 
@@ -306,7 +310,7 @@ export function addDawnCity(sim: SimState, env: Env, lib: Library, raceId: strin
     old.pop = pop;
     return old;
   }
-  const clan = newClan(sim, lib, ri.species.id, raceId, startCulture(lib, ri.species, ri.race));
+  const clan = newClan(sim, lib, ri.species.id, raceId, ensureCulture(sim, lib, env, ri.species, ri.race, x, y, () => rand(sim)));
   const st: Settlement = { id: sim.nextId++, name: makeName(sim, lib, clan.culture), kind: 'dawn', clan: clan.id, species: ri.species.id, race: raceId, culture: clan.culture, x, y, pop, fed: 1, warband: 0, holyTo: [raceId], ruined: false, founded: sim.day, ruinedOn: -1 };
   st.warband = Math.round(pop * ri.warShare * 0.6);
   st.economy = newEconomy(pop, ri.need, foundingMonths(env, x, y, sim.day));
@@ -450,7 +454,7 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
   const infos = new Map<string, RaceInfo | null>();
   const info = (t: { race: string; culture: string }) => {
     const key = `${t.race}|${t.culture}`;
-    if (!infos.has(key)) infos.set(key, raceInfo(lib, t.race, t.culture));
+    if (!infos.has(key)) infos.set(key, raceInfo(lib, t.race, t.culture, sim.cultures));
     return infos.get(key)!;
   };
   for (let d = 0; d < days; d++) {
@@ -475,6 +479,8 @@ function techContext(sim: SimState, env: Env, lib: Library): TechContext {
     dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
     rand: () => rand(sim),
     log: (text, x, y) => log(sim, text, x, y),
+    culture: (id) => cultureFx(sim, id),
+    pushes: (cultureId, techId) => pushes(sim, lib, cultureId, techId),
   };
 }
 /** What a settlement or clan may come to next, with yearly chances (for the Peoples tab). */
@@ -573,8 +579,9 @@ function battle(sim: SimState, env: Env, s: Sortie, enemy: Tribe, info: Info, li
   const defenders = Math.max(0, enemy.warband - enemy.away);
   // Their weapons: what their clans know.
   const armsOf = (clanId: number) => armsMight((id) => clanKnows(lib, sim.clans.find((c) => c.id === clanId), id));
-  const attack = s.strength * (ra?.might ?? 1) * armsOf(s.clan) * (0.6 + 0.8 * rand(sim));
-  const defend = Math.max(1, defenders) * (rd?.might ?? 1) * armsOf(enemy.clan) * 1.1 * (0.6 + 0.8 * rand(sim));
+  const fightOf = (culture?: string) => (culture ? cultureFx(sim, culture).fight : 1);
+  const attack = s.strength * (ra?.might ?? 1) * armsOf(s.clan) * fightOf(home?.culture) * (0.6 + 0.8 * rand(sim));
+  const defend = Math.max(1, defenders) * (rd?.might ?? 1) * armsOf(enemy.clan) * fightOf(enemy.culture) * 1.1 * (0.6 + 0.8 * rand(sim));
   const win = attack > defend;
   const loseA = Math.round(s.strength * (win ? 0.05 + 0.1 * rand(sim) : 0.25 + 0.2 * rand(sim)));
   const loseD = Math.round(defenders * (win ? 0.25 + 0.2 * rand(sim) : 0.05 + 0.1 * rand(sim)));
@@ -612,9 +619,9 @@ function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info, li
   const rd = info(st);
   const defenders = Math.max(1, st.warband);
   const has = (id: string) => knows(lib, st, id);
-  const attack = s.strength * (ra?.might ?? 1) * armsMight((id) => clanKnows(lib, sim.clans.find((c) => c.id === s.clan), id)) * (0.6 + 0.8 * rand(sim));
+  const attack = s.strength * (ra?.might ?? 1) * armsMight((id) => clanKnows(lib, sim.clans.find((c) => c.id === s.clan), id)) * (home ? cultureFx(sim, home.culture).fight : 1) * (0.6 + 0.8 * rand(sim));
   // Defending their own homes, behind whatever they have built (walls, with fortification).
-  const defend = defenders * (rd?.might ?? 1) * armsMight(has) * wallsMight(has) * 1.35 * (0.6 + 0.8 * rand(sim));
+  const defend = defenders * (rd?.might ?? 1) * armsMight(has) * wallsMight(has) * cultureFx(sim, st.culture).fight * 1.35 * (0.6 + 0.8 * rand(sim));
   st.hardship = { famine: st.hardship?.famine ?? 0, war: (st.hardship?.war ?? 0) + 1 };
   const win = attack > defend;
   const loseA = Math.round(s.strength * (win ? 0.05 + 0.1 * rand(sim) : 0.25 + 0.2 * rand(sim)));
@@ -652,7 +659,7 @@ function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info, li
 }
 
 /** Food from the land round a place: plants first, then game. Takes from the month's plant pool and the beasts. */
-function forage(sim: SimState, env: Env, left: Float32Array, cells: number[], range: number, need: number, plantPart: number, gardens: number): number {
+function forage(sim: SimState, env: Env, left: Float32Array, cells: number[], range: number, need: number, plantPart: number, gardens: number, hunt = 1): number {
   const area = Math.PI * range * range;
   const share = cells.length ? Math.min(1, area / (cells.length * env.cellArea)) : 0;
   let got = 0;
@@ -669,7 +676,7 @@ function forage(sim: SimState, env: Env, left: Float32Array, cells: number[], ra
       if (got >= need * 1.05) break;
       const stock = D[c] * b.meat * env.cellArea * share;
       if (stock <= 0) continue;
-      const take = Math.min(stock * 0.06 * b.catchRate, need * 1.05 - got);
+      const take = Math.min(stock * 0.06 * b.catchRate * hunt, need * 1.05 - got);
       got += take;
       D[c] = Math.max(0, D[c] - take / (b.meat * env.cellArea * Math.max(share, 1e-6)));
       markThinned(sim, b.id, c);
@@ -737,12 +744,13 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     // Food: plants first, then game.
     const need = t.pop * ri.need;
     const cells = cellsNear(env, t.x, t.y, ri.range).filter((c) => env.land[c]);
-    const got = forage(sim, env, left, cells, ri.range, need, 0.65, 1);
+    const cfx = cultureFx(sim, t.culture);
+    const got = forage(sim, env, left, cells, ri.range, need, 0.65, 1, cfx.hunt);
     t.fed = need > 0 ? got / need : 1;
     // People: births and deaths, with hunger.
     const f = Math.min(1.2, t.fed);
-    const births = (ri.births / 12) * Math.min(1, f) * (f >= 1 ? 1.3 : 1);
-    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5) / 12 : 0);
+    const births = (ri.births / 12) * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * cfx.births;
+    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * cfx.famine) / 12 : 0);
     const change = t.pop * (births - deaths);
     t.pop = Math.max(0, t.pop + change + (rand(sim) - 0.5) * 0.5);
     t.warband = Math.max(t.away, Math.round(t.pop * ri.warShare));
@@ -761,7 +769,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
         const re = info(e);
         const odds = (home * 0.8 * ri.might) / Math.max(1, (e.warband - e.away) * (re?.might ?? 1));
         if (odds < 0.7) continue;
-        const p = 0.035 * hostility(sim, lib, t, e, ri) * stress * Math.min(2, odds);
+        const p = 0.035 * hostility(sim, lib, t, e, ri) * stress * Math.min(2, odds) * cfx.war;
         if (!best || p > best.p) best = { e, p };
       }
       // Settlements nearby: raided for their food, but never a holy place of the tribe's own race.
@@ -772,17 +780,19 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
         const odds = (home * 0.8 * ri.might) / Math.max(1, st.warband * (rd?.might ?? 1) * 1.35);
         if (odds < 0.8) continue;
         const stress = Math.max(0.1, Math.min(1, 1.2 - t.fed)) + (cells.some((c) => sim.owner[c] === st.clan) ? 0.4 : 0);
-        const p = 0.025 * hostility(sim, lib, t, st, ri) * stress * Math.min(2, odds);
+        const p = 0.025 * hostility(sim, lib, t, st, ri) * stress * Math.min(2, odds) * cfx.raid;
         if (!raidOn || p > raidOn.p) raidOn = { st, p };
       }
       if (raidOn && (!best || raidOn.p > best.p) && rand(sim) < raidOn.p) {
         const strength = Math.round(home * 0.8);
         t.away += strength;
         sim.sorties.push({ id: sim.nextId++, tribe: t.id, clan: t.clan, target: raidOn.st.id, targetKind: 'settlement', strength, x: t.x, y: t.y, leg: 'out' });
+        note(sim, t.culture, 'raids');
       } else if (best && rand(sim) < best.p) {
         const strength = Math.round(home * 0.8);
         t.away += strength;
         sim.sorties.push({ id: sim.nextId++, tribe: t.id, clan: t.clan, target: best.e.id, targetKind: 'tribe', strength, x: t.x, y: t.y, leg: 'out' });
+        note(sim, t.culture, 'fights');
       }
     }
   }
@@ -794,13 +804,15 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const R = settleRange(ri, st);
     const cells = cellsNear(env, st.x, st.y, R).filter((c) => env.land[c]);
     // Its economy: jobs, harvests, stores, eating (economy.ts).
-    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare, r: R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
+    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare, r: R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
     if (st.fed < 0.8) st.hardship = { famine: (st.hardship?.famine ?? 0) + (1 - st.fed) / 6, war: st.hardship?.war ?? 0 };
+    if (st.fed < 0.6) note(sim, st.culture, 'famines');
     if (st.fed < 0.6 && !sim.events.some((e) => e.text.startsWith(`Famine in ${st.name}`) && sim.day - e.day < DAYS_PER_YEAR)) log(sim, `Famine in ${st.name}: its stores are gone${st.economy?.harvest && st.economy.harvest.year < 0.8 ? ' after a bad harvest' : ''}.`, st.x, st.y);
     const f = Math.min(1.2, st.fed);
     const comfort = st.economy?.comfort ?? 1;
-    const births = (ri.births / 12) * 1.1 * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * (0.85 + 0.15 * comfort);
-    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5) / 12 : 0);
+    const scfx = cultureFx(sim, st.culture);
+    const births = (ri.births / 12) * 1.1 * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * (0.85 + 0.15 * comfort) * scfx.births;
+    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * scfx.famine) / 12 : 0);
     st.pop = Math.max(0, st.pop + st.pop * (births - deaths));
     st.warband = Math.round(st.pop * ri.warShare * 0.6);
     useLand(sim, env, cells, st.clan, R * 1.5);
@@ -846,6 +858,8 @@ function hostility(sim: SimState, lib: Library, t: Tribe, e: { species: string; 
   if (tc && ec && (tc.parent === ec.id || ec.parent === tc.id)) h *= 0.3;
   // A grudge over a holy place.
   if (sim.grudges.some((g) => g.race === t.race && g.against === e.race)) h *= 2.5;
+  // Its culture: xenophobes are quicker to fight other races, the hospitable slower.
+  if (t.race !== e.race) h *= cultureFx(sim, t.culture).otherRace;
   return h;
 }
 
@@ -890,6 +904,17 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   settlementsYearly(sim, env, lib, info);
   // Discoveries, learning and forgetting (tech.ts).
   techYear(techContext(sim, env, lib));
+  // Cultures: peoples without one (older saves) grow their folk culture; then traditions and behaviours change (culture.ts).
+  for (const g of [...sim.tribes, ...sim.settlements.filter((q) => !q.ruined)]) {
+    if (g.culture && cultureOf(sim, g.culture)) continue;
+    const species = lib.species.find((q) => q.id === g.species);
+    const race = species?.races.find((r) => r.id === g.race);
+    if (!species || !race) continue;
+    g.culture = ensureCulture(sim, lib, env, species, race, g.x, g.y, () => rand(sim));
+    const clan = sim.clans.find((q) => q.id === g.clan);
+    if (clan && !clan.culture) clan.culture = g.culture;
+  }
+  cultureYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // Trails from use; roads and railways built, kept up, or let go (ways.ts).
   waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
   // Ways fade unless they are used; routes long unused are forgotten.

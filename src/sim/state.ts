@@ -151,6 +151,37 @@ export interface Route {
   mark?: number;
 }
 
+/**
+ * A culture living in the world (Phase 8 step 2): a Library culture brought to life, or a folk
+ * culture grown from its people's homeland and way of life. Its traditions are earned by living
+ * a certain way for generations and fade when that life ends; its learned behaviours spread by
+ * practice, need and contact.
+ */
+export interface LiveCulture {
+  id: string;
+  name: string;
+  /** The Library culture it comes from ('' for a folk culture). */
+  source: string;
+  /** Heritage: the species and races it began with. */
+  species: string[];
+  races: string[];
+  language: string;
+  /** Word parts for names ("ka-", "-dor"). */
+  sounds: string;
+  ethos: string;
+  martial: string;
+  lifestyles: string[];
+  /** Traditions at a level (index into the tradition's levels; −1 while it is only taking root), with progress toward the next change (−1 … 1). */
+  traditions: { id: string; level: number; hold: string; progress: number }[];
+  specialties: { name: string; description: string }[];
+  behaviours: string[];
+  founded: number;
+  /** The culture it grew from, if any. */
+  parent: string;
+  /** This year's doings, for the traditions they earn. */
+  stats?: { fights: number; raids: number; foreignTrade: number; famines: number; lastFight: number };
+}
+
 /** Bad blood: a race against another (for raiding its holy place), until a day. */
 export interface Grudge {
   race: string;
@@ -191,6 +222,8 @@ export interface SimState {
   started: boolean;
   tribes: Tribe[];
   settlements: Settlement[];
+  /** The cultures alive in the world (clans, tribes and settlements name theirs by id). */
+  cultures?: LiveCulture[];
   caravans: Caravan[];
   routes: Route[];
   /** How much people, herds and caravans travel over each point (for trails and roads; fades slowly). */
