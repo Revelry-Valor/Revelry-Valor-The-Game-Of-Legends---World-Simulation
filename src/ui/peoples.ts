@@ -7,7 +7,9 @@ import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
-import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays } from '../sim/sim';
+import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays, techOutlook } from '../sim/sim';
+import { hasArchive, keepers } from '../sim/tech';
+import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
 import type { MapOverlay } from './mapview';
@@ -708,9 +710,6 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       kept++;
       for (const [kind, v] of Object.entries(buildCost(s.way[k], best.tech))) upkeep[kind] = (upkeep[kind] ?? 0) + v * e.step * WAYS[s.way[k]].upkeep;
     }
-    const wayTechs = ['wheel', 'carts', 'roads', 'railways', 'mana-rail'].filter((id) => L.techs.some((t) => t.id === id));
-    const learned = st.techs ?? [];
-    const teach = h('select', { 'aria-label': 'Technology to give' }, h('option', { value: '' }, 'Choose…'), ...L.techs.filter((t) => !t.start && !learned.includes(t.id)).sort((a, b) => (wayTechs.includes(b.id) ? 1 : 0) - (wayTechs.includes(a.id) ? 1 : 0) || a.name.localeCompare(b.name)).map((t) => h('option', { value: t.id }, `${t.name} (${t.field})`))) as HTMLSelectElement;
     return h('div', { class: 'tribe-card small econ' },
       h('div', { class: 'econ-head' }, 'Ways'),
       h('div', {}, best.tier >= 2 ? `Can build: ${WAYS[best.tier].name.toLowerCase()} (${techName(best.tech)}), along its busy trade routes, a few stretches a year.` : 'Can build: trails only (worn by use). Better ways need know-how:'),
@@ -720,15 +719,65 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         return h('li', {}, h('span', {}, `${ok ? '✓' : '·'} ${w.name}`), h('span', { class: 'muted' }, `${techName(tech)}; per mile ${costText(buildCost(w.tier, tech))}; upkeep ${Math.round(w.upkeep * 100)}% a year`));
       })),
       h('div', {}, kept ? `Keeps about ${Math.round(kept * mi)} miles of built ways; upkeep a year: ${Object.entries(upkeep).map(([k, v]) => `${Math.round(v)} ${kindName(k)}`).join(', ')}. Unpaid, they fall back a tier.` : 'Keeps no built ways.'),
-      h('div', { class: 'econ-head' }, 'Knows'),
-      h('div', {}, learned.length ? learned.map(techName).join(', ') : 'Only what every people starts with.'),
-      h('div', { class: 'muted' }, 'Until technology spreads on its own (Phase 8), you can give a settlement a technology here.'),
-      h('div', { class: 'teach-row' }, teach, h('button', { type: 'button', class: 'ghost small', onclick: () => {
-        if (!teach.value) return;
-        st.techs = [...learned, teach.value];
-        d.changed();
-        render();
-      } }, 'Give'), learned.length ? h('button', { type: 'button', class: 'ghost small', onclick: () => { st.techs = learned.slice(0, -1); d.changed(); render(); } }, 'Take back the last') : null),
+    );
+  };
+  /** A race's starting knowledge beyond survival: a fold of checkboxes by field. */
+  const startKnowledge = (row: SetupRow): HTMLElement => {
+    const L = lib();
+    const chosen = new Set(row.techs ?? []);
+    const fields = [...new Set(L.techs.filter((t) => !t.start).map((t) => t.field))];
+    const summary = h('summary', {}, chosen.size ? `Knows beyond survival: ${chosen.size}` : 'Knows: survival only');
+    return h('details', { class: 'start-know' }, summary,
+      h('p', { class: 'muted' }, 'What its first tribes (and dawn city) know beyond gathering, hunting and simple fishing. Anything left out must be discovered or learned.'),
+      ...fields.map((f) => h('div', { class: 'know-field' }, h('div', { class: 'econ-head' }, f),
+        ...L.techs.filter((t) => !t.start && t.field === f).map((t) => h('label', { class: 'field-row' }, h('input', { type: 'checkbox', checked: chosen.has(t.id), onchange: (e: Event) => {
+          if ((e.target as HTMLInputElement).checked) chosen.add(t.id);
+          else chosen.delete(t.id);
+          row.techs = [...chosen];
+          summary.textContent = chosen.size ? `Knows beyond survival: ${chosen.size}` : 'Knows: survival only';
+        } }), t.name)))),
+    );
+  };
+  /** What a settlement (or a clan's tribes) knows, what it is likely to come to next, and (for trying things out) a way to give it a technology. */
+  const knowledgeCard = (who: { st?: Settlement; clan?: number }): HTMLElement => {
+    const L = lib();
+    const s = sim!;
+    const st = who.st;
+    const clan = s.clans.find((c) => c.id === (st ? st.clan : who.clan));
+    const learned = (st ? st.techs : clan?.techs) ?? [];
+    const techOf = (id: string) => L.techs.find((t) => t.id === id);
+    const byField = new Map<string, string[]>();
+    for (const id of learned) {
+      const t = techOf(id);
+      if (!t) continue;
+      byField.set(t.field, [...(byField.get(t.field) ?? []), t.name]);
+    }
+    const next = techOutlook(s, env!, L, st ? { settlement: st.id } : { clan: clan?.id ?? -1 });
+    const tiers = techTiers(L.techs);
+    const deepest = Math.max(0, ...learned.map((id) => tiers.get(id) ?? 1));
+    const archive = st ? hasArchive(L, st, s.day) : false;
+    const teach = h('select', { 'aria-label': 'Technology to give' }, h('option', { value: '' }, 'Choose…'), ...L.techs.filter((t) => !t.start && !learned.includes(t.id)).sort((a, b) => a.field.localeCompare(b.field) || a.name.localeCompare(b.name)).map((t) => h('option', { value: t.id }, `${t.field}: ${t.name}`))) as HTMLSelectElement;
+    const setTechs = (v: string[]) => {
+      if (st) st.techs = v;
+      else if (clan) clan.techs = v;
+      d.changed();
+      render();
+    };
+    const pct = (p: number) => (p >= 0.095 ? `${Math.round(p * 100)}%` : p >= 0.01 ? `${(p * 100).toFixed(1)}%` : 'under 1%');
+    return h('div', { class: 'tribe-card small econ' },
+      h('div', { class: 'econ-head' }, st ? 'Knowledge' : 'Knowledge (its clan’s)'),
+      learned.length
+        ? h('ul', { class: 'econ-list' }, ...[...byField].map(([f, names]) => h('li', { class: 'know-row' }, h('span', { class: 'muted' }, f), h('span', {}, names.join(', ')))))
+        : h('div', {}, 'Survival only: gathering, hunting and simple fishing.'),
+      st && deepest > 0
+        ? h('div', { class: 'muted' }, archive ? 'Its archive keeps what it knows from being forgotten.' : st.archiveBurnedUntil && st.archiveBurnedUntil > s.day ? 'Its archive was burned; what too few remember may be lost.' : `Its deepest knowledge needs about ${keepers(deepest)} people to keep alive without an archive, or neighbours who know it.`)
+        : null,
+      next.length ? h('div', {}, 'Likely next (chance a year):') : null,
+      next.length ? h('ul', { class: 'econ-list' }, ...next.map((n) => h('li', {}, h('span', {}, `${n.tech.name}`, h('span', { class: 'muted' }, n.how === 'learn' ? ' (from those who know it)' : ' (finding it)')), h('span', { class: 'num' }, pct(n.chance))))) : null,
+      h('div', { class: 'muted' }, 'To try things out, you can give a technology by hand.'),
+      h('div', { class: 'teach-row' }, teach,
+        h('button', { type: 'button', class: 'ghost small', onclick: () => { if (teach.value) setTechs([...learned, teach.value]); } }, 'Give'),
+        learned.length ? h('button', { type: 'button', class: 'ghost small', onclick: () => setTechs(learned.slice(0, -1)) }, 'Take back the last') : null),
     );
   };
   /** The settlement's market: what is dear and cheap here, and its trade this past year. */
@@ -856,6 +905,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
                   ...([['tribes', 'Tribes'], ['dawn', 'Dawn city'], ['both', 'Dawn city and tribes']] as const).map(([v, l]) => h('option', { value: v, selected: start === v }, l)))),
                 start !== 'dawn' ? h('label', {}, num(row.tribes, 40, `Tribes of ${race.name}`, (v) => (row.tribes = v)), ' tribes') : null,
                 start !== 'tribes' ? h('label', {}, num(row.cityPop ?? 800, 20000, `People in the dawn city of the ${race.name}`, (v) => (row.cityPop = Math.max(30, v))), ' in the city') : null,
+                startKnowledge(row),
               )
             : null,
         );
@@ -965,6 +1015,26 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       );
     }
 
+    // Technology, the world over: what is known anywhere, how widely, and who came to it first.
+    if (s.started) {
+      const holders = [...s.settlements.filter((q) => !q.ruined).map((q) => q.techs ?? []), ...s.clans.filter((c) => s.tribes.some((t) => t.clan === c.id)).map((c) => c.techs ?? [])];
+      const count = new Map<string, number>();
+      for (const list of holders) for (const id of list) count.set(id, (count.get(id) ?? 0) + 1);
+      const known = L.techs.filter((t) => count.has(t.id));
+      const fields = [...new Set(known.map((t) => t.field))];
+      parts.push(
+        h('h3', {}, 'Technology'),
+        h('p', { class: 'small' }, known.length ? `${known.length} of ${L.techs.filter((t) => !t.start).length} technologies are known somewhere, among ${holders.length} settlements and roaming clans.` : 'Nothing beyond survival is known yet: peoples will discover it by living (gathering leads to farming, hunting to herding…).'),
+        ...fields.map((f) => h('div', { class: 'small' },
+          h('div', { class: 'econ-head' }, f),
+          h('ul', { class: 'econ-list' }, ...known.filter((t) => t.field === f).map((t) => {
+            const first = s.firsts?.[t.id];
+            return h('li', { title: first ? `First: ${first.by}, year ${yearOf(first.day)}` : '' }, h('span', {}, t.name, first ? h('span', { class: 'muted' }, ` · first: ${first.by}, Y${yearOf(first.day)}`) : null), h('span', { class: 'num' }, `${count.get(t.id)} of ${holders.length}`));
+          })),
+        )),
+      );
+    }
+
     // The selected tribe
     const t = s.tribes.find((q) => q.id === selected);
     if (t) {
@@ -979,6 +1049,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           ri ? h('div', { class: 'muted' }, `Walks about ${Math.round(ri.speed * 0.621)} miles a day; forages and hunts about ${Math.round(ri.range * 0.621)} miles around. ${ri.lifestyle}.`) : null,
           h('div', { class: 'muted' }, 'Dashed lines: its summer (S) and winter (W) grounds.'),
         ),
+        knowledgeCard({ clan: t.clan }),
         !s.started
           ? h('div', { class: 'group' },
               numberField({ label: 'People', value: Math.round(t.pop), min: 15, max: 2000, step: 5, change: (v) => { t.pop = Math.max(15, Math.min(2000, Math.round(v))); if (ri) t.warband = Math.round(t.pop * ri.warShare); d.changed(); } }),
@@ -1004,6 +1075,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,
         ),
         !st.ruined && st.economy && ri ? economyCard(st, ri.need) : null,
+        !st.ruined ? knowledgeCard({ st }) : null,
         !st.ruined && st.economy ? waysCard(st) : null,
         !s.started
           ? h('div', { class: 'group' },

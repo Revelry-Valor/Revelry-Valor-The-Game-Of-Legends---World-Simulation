@@ -20,6 +20,7 @@ export interface PackedSim {
   caravans?: SimState['caravans'];
   routes?: SimState['routes'];
   traffic?: number[];
+  firsts?: SimState['firsts'];
   way?: number[];
   wayKeeper?: number[];
   clans: SimState['clans'];
@@ -83,6 +84,7 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     settlements: sim.settlements,
     grudges: sim.grudges,
     caravans: sim.caravans,
+    firsts: sim.firsts ?? {},
     routes: sim.routes,
     traffic: runs(Float32Array.from(sim.traffic, (v) => Math.round(v * 10) / 10)),
     way: runs(sim.way),
@@ -127,6 +129,7 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     settlements: Array.isArray(p.settlements) ? p.settlements : [],
     grudges: Array.isArray(p.grudges) ? p.grudges : [],
     caravans: Array.isArray(p.caravans) ? p.caravans : [],
+    firsts: p.firsts && typeof p.firsts === 'object' ? p.firsts : {},
     routes: Array.isArray(p.routes) ? p.routes : [],
     traffic,
     way,

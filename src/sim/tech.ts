@@ -263,9 +263,11 @@ export function techYear(c: TechContext): void {
       break;
     }
   }
+  const firsts = (sim.firsts ??= {});
   for (const [h, t, discovered] of gained) {
     if (h.techs.includes(t.id)) continue;
     h.techs.push(t.id);
+    if (!firsts[t.id]) firsts[t.id] = { day: sim.day, by: cap(h.name) };
     if (discovered) c.log(`${cap(h.name)} discovered ${t.name}${firstEver.has(t.id) ? '' : ', the first in the world'}.`, h.x, h.y);
     firstEver.add(t.id);
   }
@@ -276,3 +278,22 @@ export function techYear(c: TechContext): void {
   }
 }
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** What a settlement or clan may come to next, and the yearly chance of each (for the Peoples tab). */
+export function outlook(c: TechContext, who: { settlement?: number; clan?: number }, count = 5): { tech: Tech; chance: number; how: 'discover' | 'learn' }[] {
+  const { lib } = c;
+  const all = holders(c.sim);
+  const h = all.find((q) => (who.settlement !== undefined ? q.kind === 'settlement' && q.id === who.settlement : q.kind === 'clan' && q.id === who.clan));
+  if (!h) return [];
+  const tiers = techTiers(lib.techs);
+  const known = new Set([...h.techs, ...lib.techs.filter((t) => t.start).map((t) => t.id)]);
+  const near = contacts(c, h, all);
+  const out: { tech: Tech; chance: number; how: 'discover' | 'learn' }[] = [];
+  for (const t of lib.techs) {
+    if (known.has(t.id) || !t.requires.every((r) => known.has(r) || !lib.techs.some((q) => q.id === r))) continue;
+    const { discover, learn } = chanceOf(c, t, h, near, tiers.get(t.id) ?? 1);
+    const p = 1 - Math.exp(-(discover + learn));
+    if (p > 0.0005) out.push({ tech: t, chance: p, how: learn > discover ? 'learn' : 'discover' });
+  }
+  return out.sort((a, b) => b.chance - a.chance).slice(0, count);
+}

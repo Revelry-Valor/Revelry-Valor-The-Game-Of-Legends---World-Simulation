@@ -195,6 +195,8 @@ export interface SimState {
   routes: Route[];
   /** How much people, herds and caravans travel over each point (for trails and roads; fades slowly). */
   traffic: Float32Array;
+  /** Who first came to each technology, and when. */
+  firsts?: Record<string, { day: number; by: string }>;
   /** The way at each point: 0 none, 1 trail, 2 cart track, 3 paved road, 4 railway (ways.ts). */
   way: Uint8Array;
   /** The settlement that built and keeps the way there (−1: none, for trails). */

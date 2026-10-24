@@ -4,7 +4,7 @@ import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
-import { armsMight, canSettle, clanKnows, hasArchive, knows, techYear, wallsMight } from './tech';
+import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
@@ -465,6 +465,23 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
 
 type Info = (t: { race: string; culture: string }) => RaceInfo | null;
 
+function techContext(sim: SimState, env: Env, lib: Library): TechContext {
+  return {
+    sim,
+    env,
+    lib,
+    intelligence: (race) => lib.species.flatMap((s) => s.races).find((r) => r.id === race)?.stats.intelligence ?? 10,
+    cellsNear: (x, y, r) => cellsNear(env, x, y, r),
+    dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+    rand: () => rand(sim),
+    log: (text, x, y) => log(sim, text, x, y),
+  };
+}
+/** What a settlement or clan may come to next, with yearly chances (for the Peoples tab). */
+export function techOutlook(sim: SimState, env: Env, lib: Library, who: { settlement?: number; clan?: number }) {
+  return outlook(techContext(sim, env, lib), who);
+}
+
 function tradeContext(sim: SimState, env: Env, lib: Library, info: Info): TradeContext {
   return {
     sim,
@@ -872,16 +889,7 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   }
   settlementsYearly(sim, env, lib, info);
   // Discoveries, learning and forgetting (tech.ts).
-  techYear({
-    sim,
-    env,
-    lib,
-    intelligence: (race) => lib.species.flatMap((s) => s.races).find((r) => r.id === race)?.stats.intelligence ?? 10,
-    cellsNear: (x, y, r) => cellsNear(env, x, y, r),
-    dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
-    rand: () => rand(sim),
-    log: (text, x, y) => log(sim, text, x, y),
-  });
+  techYear(techContext(sim, env, lib));
   // Trails from use; roads and railways built, kept up, or let go (ways.ts).
   waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
   // Ways fade unless they are used; routes long unused are forgotten.
