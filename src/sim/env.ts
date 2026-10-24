@@ -88,6 +88,8 @@ export interface Env {
   beastInfo: BeastInfo[];
   /** On a volcano or lava flow. */
   volcanic: Uint8Array;
+  /** The main ground cover at each point (index into COVER_BRUSHES, −1 none). */
+  cover: Int8Array;
   /** Where each resource is (0–1: how good the land is for it, or how rich the deposit). */
   res: Record<string, Float32Array>;
   resInfo: ResInfo[];
@@ -209,7 +211,7 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface): Env {
     }
   }
   const { res, resInfo } = resources(cl, lib.resources, { mzone, coast, fresh, volcanic });
-  return { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, res, resInfo };
+  return { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, res, resInfo };
 }
 
 const RARITY_WEIGHT: Record<string, number> = { Common: 1, Uncommon: 0.6, Rare: 0.3, 'Very rare': 0.12 };

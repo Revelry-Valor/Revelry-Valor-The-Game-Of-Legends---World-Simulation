@@ -3,6 +3,8 @@ import { PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
+import { markThinned, thinned } from './thinned';
+import { armsMight, canSettle, clanKnows, hasArchive, knows, techYear, wallsMight } from './tech';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
@@ -186,7 +188,7 @@ export function startCulture(lib: Library, species: Species, race: Race): string
 
 function newClan(sim: SimState, lib: Library, species: string, race: string, culture: string, parent = -1): Clan {
   const id = sim.nextId++;
-  const clan: Clan = { id, name: makeName(sim, lib, culture), colour: PALETTE[sim.clans.length % PALETTE.length], species, race, culture, founded: sim.day, parent };
+  const clan: Clan = { id, name: makeName(sim, lib, culture), colour: PALETTE[sim.clans.length % PALETTE.length], species, race, culture, founded: sim.day, parent, techs: [...(sim.clans.find((c) => c.id === parent)?.techs ?? [])] };
   sim.clans.push(clan);
   return clan;
 }
@@ -256,7 +258,8 @@ export function placeStart(sim: SimState, env: Env, lib: Library, setup: SetupRo
     const hy = yOf(env, home.k);
     taken.push({ x: hx, y: hy });
     // The dawn city: where the race woke, on the best ground of its homeland.
-    if (start !== 'tribes') addDawnCity(sim, env, lib, race, hx, hy, row.cityPop ?? 800);
+    const clansBefore = sim.clans.length;
+    if (start !== 'tribes') addDawnCity(sim, env, lib, race, hx, hy, row.cityPop ?? 800, row.techs ?? []);
     const ring = start === 'both' ? ri.range * 3 : 0;
     // Its tribes around it, a clan for every three or four.
     let clan = -1;
@@ -277,6 +280,8 @@ export function placeStart(sim: SimState, env: Env, lib: Library, setup: SetupRo
       const t = addTribe(sim, env, lib, race, best.x, best.y, clan, 120 + Math.floor(rand(sim) * 120));
       if (t) clan = t.clan;
     }
+    // What its first peoples know beyond survival.
+    for (const c of sim.clans.slice(clansBefore)) c.techs = [...(row.techs ?? [])];
   }
 }
 
@@ -292,7 +297,7 @@ function dropUnusedClans(sim: SimState): void {
 }
 
 /** A race's dawn city: where it woke, holy to all of that race. One per race (placing another moves it). */
-export function addDawnCity(sim: SimState, env: Env, lib: Library, raceId: string, x: number, y: number, pop = 800): Settlement | null {
+export function addDawnCity(sim: SimState, env: Env, lib: Library, raceId: string, x: number, y: number, pop = 800, techs: string[] = []): Settlement | null {
   const ri = raceInfo(lib, raceId);
   if (!ri) return null;
   const old = sim.settlements.find((s) => s.kind === 'dawn' && s.holyTo.includes(raceId));
@@ -305,6 +310,8 @@ export function addDawnCity(sim: SimState, env: Env, lib: Library, raceId: strin
   const st: Settlement = { id: sim.nextId++, name: makeName(sim, lib, clan.culture), kind: 'dawn', clan: clan.id, species: ri.species.id, race: raceId, culture: clan.culture, x, y, pop, fed: 1, warband: 0, holyTo: [raceId], ruined: false, founded: sim.day, ruinedOn: -1 };
   st.warband = Math.round(pop * ri.warShare * 0.6);
   st.economy = newEconomy(pop, ri.need, foundingMonths(env, x, y, sim.day));
+  st.techs = [...techs];
+  clan.techs = [...techs];
   sim.settlements.push(st);
   claimAround(sim, env, st.x, st.y, settleRange(ri, st), st.clan);
   return st;
@@ -448,7 +455,7 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
   };
   for (let d = 0; d < days; d++) {
     sim.started = true;
-    daily(sim, env, info);
+    daily(sim, env, info, lib);
     caravansDay(tradeContext(sim, env, lib, info));
     sim.day++;
     if (sim.day % DAYS_PER_MONTH === 0) monthly(sim, env, lib, info);
@@ -472,7 +479,7 @@ function tradeContext(sim: SimState, env: Env, lib: Library, info: Info): TradeC
   };
 }
 
-function daily(sim: SimState, env: Env, info: Info): void {
+function daily(sim: SimState, env: Env, info: Info, lib: Library): void {
   for (const t of sim.tribes) {
     const ri = info(t);
     if (!ri) continue;
@@ -531,8 +538,8 @@ function daily(sim: SimState, env: Env, info: Info): void {
       if (env.wrapKm) s.x = ((s.x % env.wrapKm) + env.wrapKm) % env.wrapKm;
       continue;
     }
-    if (s.leg === 'out' && enemy) battle(sim, env, s, enemy, info);
-    else if (s.leg === 'out' && city) raid(sim, env, s, city, info);
+    if (s.leg === 'out' && enemy) battle(sim, env, s, enemy, info, lib);
+    else if (s.leg === 'out' && city) raid(sim, env, s, city, info, lib);
     else if (home) {
       // Back with the tribe.
       home.away = Math.max(0, home.away - s.strength);
@@ -542,13 +549,15 @@ function daily(sim: SimState, env: Env, info: Info): void {
   }
 }
 
-function battle(sim: SimState, env: Env, s: Sortie, enemy: Tribe, info: Info): void {
+function battle(sim: SimState, env: Env, s: Sortie, enemy: Tribe, info: Info, lib: Library): void {
   const home = sim.tribes.find((t) => t.id === s.tribe);
   const ra = home ? info(home) : null;
   const rd = info(enemy);
   const defenders = Math.max(0, enemy.warband - enemy.away);
-  const attack = s.strength * (ra?.might ?? 1) * (0.6 + 0.8 * rand(sim));
-  const defend = Math.max(1, defenders) * (rd?.might ?? 1) * 1.1 * (0.6 + 0.8 * rand(sim));
+  // Their weapons: what their clans know.
+  const armsOf = (clanId: number) => armsMight((id) => clanKnows(lib, sim.clans.find((c) => c.id === clanId), id));
+  const attack = s.strength * (ra?.might ?? 1) * armsOf(s.clan) * (0.6 + 0.8 * rand(sim));
+  const defend = Math.max(1, defenders) * (rd?.might ?? 1) * armsOf(enemy.clan) * 1.1 * (0.6 + 0.8 * rand(sim));
   const win = attack > defend;
   const loseA = Math.round(s.strength * (win ? 0.05 + 0.1 * rand(sim) : 0.25 + 0.2 * rand(sim)));
   const loseD = Math.round(defenders * (win ? 0.25 + 0.2 * rand(sim) : 0.05 + 0.1 * rand(sim)));
@@ -580,14 +589,16 @@ function battle(sim: SimState, env: Env, s: Sortie, enemy: Tribe, info: Info): v
 }
 
 /** A warband falls on a settlement: if it wins it carries off food and the land round it. */
-function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info): void {
+function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info, lib: Library): void {
   const home = sim.tribes.find((t) => t.id === s.tribe);
   const ra = home ? info(home) : null;
   const rd = info(st);
   const defenders = Math.max(1, st.warband);
-  const attack = s.strength * (ra?.might ?? 1) * (0.6 + 0.8 * rand(sim));
-  // Defending their own homes, behind whatever they have built.
-  const defend = defenders * (rd?.might ?? 1) * 1.35 * (0.6 + 0.8 * rand(sim));
+  const has = (id: string) => knows(lib, st, id);
+  const attack = s.strength * (ra?.might ?? 1) * armsMight((id) => clanKnows(lib, sim.clans.find((c) => c.id === s.clan), id)) * (0.6 + 0.8 * rand(sim));
+  // Defending their own homes, behind whatever they have built (walls, with fortification).
+  const defend = defenders * (rd?.might ?? 1) * armsMight(has) * wallsMight(has) * 1.35 * (0.6 + 0.8 * rand(sim));
+  st.hardship = { famine: st.hardship?.famine ?? 0, war: (st.hardship?.war ?? 0) + 1 };
   const win = attack > defend;
   const loseA = Math.round(s.strength * (win ? 0.05 + 0.1 * rand(sim) : 0.25 + 0.2 * rand(sim)));
   const loseD = Math.round(defenders * (win ? 0.2 + 0.2 * rand(sim) : 0.05 + 0.1 * rand(sim)));
@@ -605,6 +616,11 @@ function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info): v
     if (home) home.fed = Math.max(home.fed, 1.1);
     if (rd) for (const c of cellsNear(env, st.x, st.y, settleRange(rd, st) * 0.6)) if (env.land[c] && sim.owner[c] === st.clan) sim.owner[c] = s.clan;
     log(sim, `The warband of ${home?.name ?? 'a tribe'} (clan ${ac?.name ?? '?'}) raided ${what}: ${loseA} and ${loseD} fell.`, st.x, st.y);
+    // An archive can burn.
+    if (hasArchive(lib, st, sim.day) && rand(sim) < 0.25) {
+      st.archiveBurnedUntil = sim.day + DAYS_PER_YEAR * 5;
+      log(sim, `The archive of ${st.name} was burned in the raid.`, st.x, st.y);
+    }
   } else log(sim, `${what.charAt(0).toUpperCase() + what.slice(1)} beat off the warband of ${home?.name ?? 'a tribe'} (clan ${ac?.name ?? '?'}): ${loseA} and ${loseD} fell.`, st.x, st.y);
   // Raiding a holy place: every one of the race it is holy to holds it against the raiders' race.
   if (home) for (const r of st.holyTo) if (r !== home.race) {
@@ -639,6 +655,7 @@ function forage(sim: SimState, env: Env, left: Float32Array, cells: number[], ra
       const take = Math.min(stock * 0.06 * b.catchRate, need * 1.05 - got);
       got += take;
       D[c] = Math.max(0, D[c] - take / (b.meat * env.cellArea * Math.max(share, 1e-6)));
+      markThinned(sim, b.id, c);
     }
   }
   return got;
@@ -656,10 +673,12 @@ function useLand(sim: SimState, env: Env, cells: number[], clan: number, near: n
         sim.rival[c] = clan;
         sim.rivalUse[c] = 1;
       }
+      if (sim.rivalUse[c] < 12) continue;
+      // A year of use: it changes hands unless its owners are still about.
       const cx = xOf(env, c);
       const cy = yOf(env, c);
       const ownerHere = sim.tribes.some((q) => q.clan === o && dist(env, q.x, q.y, cx, cy) < near) || sim.settlements.some((q) => !q.ruined && q.clan === o && dist(env, q.x, q.y, cx, cy) < near * 1.5);
-      if (sim.rivalUse[c] >= 12 && !ownerHere) {
+      if (!ownerHere) {
         sim.owner[c] = clan;
         sim.rival[c] = -1;
         sim.rivalUse[c] = 0;
@@ -674,13 +693,16 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
   const sIdx = northernSummer(sim.day) ? 0 : 1;
   for (let k = 0; k < env.n; k++) if (env.land[k]) left[k] = env.plant[sIdx][k] * env.cellArea;
   // Beasts grow back toward what the land carries.
-  for (const b of env.beastInfo) {
+  // A season's growth every three months (the same in the end, for a third of the work).
+  if (Math.floor(sim.day / DAYS_PER_MONTH) % 3 === 0) for (const b of env.beastInfo) {
     const D = sim.beasts[b.id];
     const K = env.beastK[b.id];
-    for (let k = 0; k < env.n; k++) {
+    // Only where it is below what the land carries (thinned.ts).
+    const low = thinned(sim, env, b.id);
+    for (const k of low) {
       const cap = K[k] * 0.95;
-      if (cap <= 0) continue;
-      D[k] = Math.min(cap, D[k] + b.regrow * D[k] * (1 - D[k] / cap) + 0.002 * cap);
+      D[k] = Math.min(cap, D[k] + 3 * (b.regrow * D[k] * (1 - D[k] / cap) + 0.002 * cap));
+      if (D[k] >= cap) low.delete(k);
     }
   }
   for (const t of [...sim.tribes]) {
@@ -755,7 +777,8 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const R = settleRange(ri, st);
     const cells = cellsNear(env, st.x, st.y, R).filter((c) => env.land[c]);
     // Its economy: jobs, harvests, stores, eating (economy.ts).
-    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare, r: R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
+    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare, r: R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
+    if (st.fed < 0.8) st.hardship = { famine: (st.hardship?.famine ?? 0) + (1 - st.fed) / 6, war: st.hardship?.war ?? 0 };
     if (st.fed < 0.6 && !sim.events.some((e) => e.text.startsWith(`Famine in ${st.name}`) && sim.day - e.day < DAYS_PER_YEAR)) log(sim, `Famine in ${st.name}: its stores are gone${st.economy?.harvest && st.economy.harvest.year < 0.8 ? ' after a bad harvest' : ''}.`, st.x, st.y);
     const f = Math.min(1.2, st.fed);
     const comfort = st.economy?.comfort ?? 1;
@@ -766,6 +789,8 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     useLand(sim, env, cells, st.clan, R * 1.5);
     if (st.pop < 25) {
       st.ruined = true;
+      // What only its people knew is gone with them.
+      st.techs = [];
       st.ruinedOn = sim.day;
       const kin = sim.tribes.find((q) => q.clan === st.clan && dist(env, q.x, q.y, st.x, st.y) < 400);
       if (kin) kin.pop += st.pop;
@@ -812,7 +837,7 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const ri = info(t);
     if (!ri) continue;
     // Settling down, by way of life and the land.
-    if (trySettle(sim, env, t, ri)) continue;
+    if (trySettle(sim, env, lib, t, ri)) continue;
     // Grounds looked at again each year.
     chooseGrounds(sim, env, lib, t);
     // Too many for one tribe: a part breaks away to find land of its own.
@@ -846,6 +871,17 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   settlementsYearly(sim, env, lib, info);
+  // Discoveries, learning and forgetting (tech.ts).
+  techYear({
+    sim,
+    env,
+    lib,
+    intelligence: (race) => lib.species.flatMap((s) => s.races).find((r) => r.id === race)?.stats.intelligence ?? 10,
+    cellsNear: (x, y, r) => cellsNear(env, x, y, r),
+    dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+    rand: () => rand(sim),
+    log: (text, x, y) => log(sim, text, x, y),
+  });
   // Trails from use; roads and railways built, kept up, or let go (ways.ts).
   waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
   // Ways fade unless they are used; routes long unused are forgotten.
@@ -875,8 +911,12 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
  * on good ground; semi-nomadic ones where their land is crowded or rich; nomads rarely, and only
  * at the richest places. It settles at its winter grounds, keeping its name and clan.
  */
-function trySettle(sim: SimState, env: Env, t: Tribe, ri: RaceInfo): boolean {
+function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo): boolean {
   if (t.pop < 60 || t.fed < 0.9 || t.away > 0) return false;
+  // A village needs a way to feed itself: farming, herding, or fishing by water.
+  const clan = sim.clans.find((c) => c.id === t.clan);
+  const wk = cellOf(env, t.winter.x, t.winter.y);
+  if (!canSettle((id) => clanKnows(lib, clan, id), wk >= 0 && (env.coast[wk] === 1 || env.fresh[wk] === 1))) return false;
   const k = cellOf(env, t.winter.x, t.winter.y);
   if (k < 0 || !env.land[k] || !passable(env, ri, k)) return false;
   if (sim.settlements.some((s) => !s.ruined && dist(env, s.x, s.y, t.winter.x, t.winter.y) < ri.range * 3)) return false;
@@ -886,7 +926,7 @@ function trySettle(sim: SimState, env: Env, t: Tribe, ri: RaceInfo): boolean {
   for (const o of sim.tribes) if (o !== t && dist(env, o.x, o.y, t.x, t.y) < ri.range * 3) crowd += o.pop / 300;
   const p = ri.lifestyle === 'Settled' ? (score >= 0.8 ? 0.3 : 0.05) : ri.lifestyle === 'Nomadic' ? (rich === 1 ? 0.01 : 0) : 0.02 + 0.08 * rich + 0.06 * Math.min(1, crowd);
   if (rand(sim) >= p) return false;
-  const v: Settlement = { id: sim.nextId++, name: t.name, kind: 'village', clan: t.clan, species: t.species, race: t.race, culture: t.culture, x: t.winter.x, y: t.winter.y, pop: t.pop, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(t.pop, ri.need, foundingMonths(env, t.winter.x, t.winter.y, sim.day)) };
+  const v: Settlement = { id: sim.nextId++, name: t.name, kind: 'village', clan: t.clan, species: t.species, race: t.race, culture: t.culture, x: t.winter.x, y: t.winter.y, pop: t.pop, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(t.pop, ri.need, foundingMonths(env, t.winter.x, t.winter.y, sim.day)), techs: [...(clan?.techs ?? [])] };
   sim.settlements.push(v);
   sim.tribes = sim.tribes.filter((q) => q !== t);
   sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
@@ -926,7 +966,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     if (!clan) continue;
     if (village && spot && spot.s > 0) {
       st.pop -= n;
-      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: spot.x, y: spot.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, spot.x, spot.y, sim.day)) };
+      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: spot.x, y: spot.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, spot.x, spot.y, sim.day)), techs: [...(st.techs ?? [])] };
       sim.settlements.push(v);
       log(sim, `People of ${st.name} founded the village of ${v.name}.`, v.x, v.y);
     } else {
@@ -938,6 +978,9 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
         clanId = nc.id;
       }
       const go = spot ?? { x: st.x + Math.cos(a0) * R * 2, y: st.y + Math.sin(a0) * R * 2 };
+      // Those who leave take what the city knows to their clan.
+      const tc = sim.clans.find((q) => q.id === clanId);
+      if (tc) tc.techs = [...new Set([...(tc.techs ?? []), ...(st.techs ?? [])])];
       const t: Tribe = { id: sim.nextId++, name: makeName(sim, lib, st.culture), clan: clanId, species: st.species, race: st.race, culture: st.culture, x: st.x, y: st.y, target: null, summer: { ...go }, winter: { ...go }, pop: n, fed: 1, warband: Math.round(n * ri.warShare), away: 0, founded: sim.day };
       sim.tribes.push(t);
       chooseGrounds(sim, env, lib, t);
@@ -953,7 +996,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       if (!ri || t.fed < 0.9 || t.pop < 60 || dist(env, t.x, t.y, st.x, st.y) > ri.range * 2.5) continue;
       const p = st.holyTo.includes(t.race) ? 0.35 : ri.lifestyle === 'Settled' ? 0.12 : 0.04;
       if (rand(sim) >= p) continue;
-      Object.assign(st, { ruined: false, pop: t.pop, clan: t.clan, species: t.species, race: t.race, culture: t.culture, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), economy: newEconomy(t.pop, ri.need, foundingMonths(env, st.x, st.y, sim.day)) });
+      Object.assign(st, { ruined: false, pop: t.pop, clan: t.clan, species: t.species, race: t.race, culture: t.culture, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), economy: newEconomy(t.pop, ri.need, foundingMonths(env, st.x, st.y, sim.day)), techs: [...(sim.clans.find((q) => q.id === t.clan)?.techs ?? [])] });
       sim.tribes = sim.tribes.filter((q) => q !== t);
       sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
       log(sim, `${t.name} settled in the ruins of ${st.name} and built it again.`, st.x, st.y);

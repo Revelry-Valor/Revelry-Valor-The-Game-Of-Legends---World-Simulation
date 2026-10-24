@@ -69,6 +69,41 @@ export function updatePrices(env: Env, st: Settlement, needPer: number): Record<
   return prices;
 }
 
+/** How much a settlement can spare of everything it keeps (worked out at once: totals by need). */
+export function spareAll(env: Env, st: Settlement, needPer: number): Record<string, number> {
+  const S = st.economy?.stores ?? {};
+  const res = st.economy?.reserve ?? {};
+  let food = 0;
+  const byNeed = NEEDS.map(() => 0);
+  const needOf = new Map<string, number>();
+  for (const [id, v] of Object.entries(S)) {
+    const r = resInfoOf(env, id);
+    if (!r) continue;
+    if (r.food) food += v;
+    else {
+      const i = NEEDS.findIndex((n) => n.match(r));
+      needOf.set(id, i);
+      if (i >= 0) byNeed[i] += v;
+    }
+  }
+  const out: Record<string, number> = {};
+  for (const [id, v] of Object.entries(S)) {
+    const r = resInfoOf(env, id);
+    if (!r) continue;
+    const kept = (res[id] ?? 0) + (r.category === 'Wood' ? res.wood ?? 0 : 0) + (r.category === 'Stone' ? res.stone ?? 0 : 0);
+    const have = v - kept;
+    if (have <= 0) continue;
+    let spare: number;
+    if (r.food) spare = Math.min(have, food - st.pop * needPer * 5);
+    else {
+      const i = needOf.get(id) ?? -1;
+      spare = i >= 0 ? Math.min(have, byNeed[i] - NEEDS[i].per * st.pop * 8) : have - desire(env, id, st.pop) * 6;
+    }
+    if (spare > 0) out[id] = spare;
+  }
+  return out;
+}
+
 /** How much of a good a settlement can spare: what is over a good stock to keep. */
 export function surplus(env: Env, st: Settlement, needPer: number, id: string): number {
   const S = st.economy?.stores ?? {};
@@ -124,15 +159,15 @@ export function willingness(c: TradeContext, a: Settlement, b: Settlement): numb
 }
 
 /** Goods a partner should give back for a cargo: what it can spare that home values more, worth (at its own prices) a little under what it receives. */
-function barterReturn(env: Env, home: Settlement, partner: Settlement, partnerNeed: number, cargo: Record<string, number>, capacity: number): Record<string, number> {
+function barterReturn(env: Env, home: Settlement, partner: Settlement, partnerSpare: Record<string, number>, cargo: Record<string, number>, capacity: number): Record<string, number> {
   const pH = home.economy?.prices ?? {};
   const pP = partner.economy?.prices ?? {};
   let worth = 0;
   for (const [id, u] of Object.entries(cargo)) worth += u * (pP[id] ?? baseWorth(env, id));
   worth *= 0.9;
-  const offers = Object.keys(partner.economy?.stores ?? {})
+  const offers = Object.keys(partnerSpare)
     .filter((id) => !(id in cargo) && (pP[id] ?? 0) > 0)
-    .map((id) => ({ id, ratio: (pH[id] ?? baseWorth(env, id)) / pP[id], spare: surplus(env, partner, partnerNeed, id) }))
+    .map((id) => ({ id, ratio: (pH[id] ?? baseWorth(env, id)) / pP[id], spare: partnerSpare[id] }))
     .filter((o) => o.spare > 0.5 && o.ratio > 1.15)
     .sort((a, b) => b.ratio - a.ratio);
   const out: Record<string, number> = {};
@@ -151,17 +186,42 @@ function barterReturn(env: Env, home: Settlement, partner: Settlement, partnerNe
 const CARRY_PERSON = 2;
 const CARRY_ANIMAL = 6;
 
+/** The points between two settlements (they don't move, so worked out once). */
+const paths = new WeakMap<SimState, Map<string, number[]>>();
+function pathBetween(c: TradeContext, a: Settlement, b: Settlement): number[] {
+  let m = paths.get(c.sim);
+  if (!m) paths.set(c.sim, (m = new Map()));
+  const key = `${a.id}:${b.id}`;
+  let p = m.get(key);
+  if (!p) m.set(key, (p = pathCells(c.env, a.x, a.y, b.x, b.y, c.cellAt)));
+  return p;
+}
+
 /** Each month: settlements look for a good trade, and send a caravan if one is worth the road. */
 export function tradeMonth(c: TradeContext): void {
   const { sim, env } = c;
   const live = sim.settlements.filter((s) => !s.ruined && s.economy);
-  for (const st of live) {
+  // Each settlement takes its turn every third month: it sets its prices and looks for a trade
+  // (caravans take months on the road anyway). Partners' markets are read as they were last set,
+  // or set now if they never were.
+  const month = Math.floor(sim.day / 30);
+  const turn = (st: Settlement) => (st.id + month) % 3 === 0;
+  const spare = new Map<Settlement, Record<string, number>>();
+  const ready = (st: Settlement) => {
+    if (spare.has(st)) return spare.get(st)!;
     const ri = c.info(st);
-    if (ri) updatePrices(env, st, ri.need);
-  }
+    if (!ri) return {};
+    if (turn(st) || !st.economy!.prices) updatePrices(env, st, ri.need);
+    const sp = spareAll(env, st, ri.need);
+    spare.set(st, sp);
+    return sp;
+  };
+  for (const st of live) if (turn(st)) ready(st);
+  // How far the fastest way anywhere lets a caravan go (to skip partners plainly out of reach).
+  let fastest = 1;
+  for (let k = 0; k < sim.way.length; k++) if (sim.way[k]) fastest = Math.max(fastest, WAYS[sim.way[k]].speed);
   for (const a of live) {
-    if (a.pop < 50 || sim.caravans.some((v) => v.from === a.id)) continue;
-    if (c.rand() < 0.4) continue;
+    if (!turn(a) || a.pop < 50 || sim.caravans.some((v) => v.from === a.id)) continue;
     const ra = c.info(a);
     if (!ra) continue;
     const pA = a.economy!.prices ?? {};
@@ -180,9 +240,9 @@ export function tradeMonth(c: TradeContext): void {
     for (const b of live) {
       if (b === a) continue;
       const d = c.dist(a.x, a.y, b.x, b.y);
-      if (d > speed * 6 * 25) continue;
+      if (d > speed * fastest * 25) continue;
       // Days on the road, faster along trails, roads and railways; up to about 25 days away.
-      const cells = pathCells(env, a.x, a.y, b.x, b.y, c.cellAt);
+      const cells = pathBetween(c, a, b);
       const days = d / (speed * pathSpeed(sim, cells));
       if (days > 25) continue;
       // A train, where the whole way is railway and there is coal to burn there and back.
@@ -193,11 +253,13 @@ export function tradeMonth(c: TradeContext): void {
       if (w <= 0) continue;
       const rb = c.info(b);
       if (!rb) continue;
+      ready(b);
       const pB = b.economy!.prices ?? {};
       const cost = 1.15 + 0.02 * days;
       // What to take: its surplus, where the partner values it most against home.
-      const goods = Object.keys(a.economy!.stores)
-        .map((id) => ({ id, ratio: (pB[id] ?? 0) / (pA[id] ?? Infinity), spare: surplus(env, a, ra.need, id) }))
+      const sA = ready(a);
+      const goods = Object.keys(sA)
+        .map((id) => ({ id, ratio: (pB[id] ?? 0) / (pA[id] ?? Infinity), spare: sA[id] }))
         .filter((g) => g.spare > 0.5 && g.ratio > cost)
         .sort((x, y) => y.ratio - x.ratio);
       if (!goods.length) continue;
@@ -211,7 +273,7 @@ export function tradeMonth(c: TradeContext): void {
         if (room <= 0.5) break;
       }
       // Barter: the partner must have something to give back that home values more.
-      const back = barterReturn(env, a, b, rb.need, cargo, capacity);
+      const back = barterReturn(env, a, b, ready(b), cargo, capacity);
       let given = 0;
       for (const [id, u] of Object.entries(cargo)) given += u * (pA[id] ?? 0);
       let got = 0;
@@ -296,7 +358,7 @@ function arriveThere(c: TradeContext, cv: Caravan, home: Settlement, b: Settleme
   }
   updatePrices(env, b, rb.need);
   updatePrices(env, home, ra.need);
-  const back = barterReturn(env, home, b, rb.need, cv.cargo, (cv.people * CARRY_PERSON + cv.animals * CARRY_ANIMAL) * (knows(c.lib, home, 'carts') || knows(c.lib, home, 'wheel') ? 1.5 : 1) * (cv.train ? 10 : 1));
+  const back = barterReturn(env, home, b, spareAll(env, b, rb.need), cv.cargo, (cv.people * CARRY_PERSON + cv.animals * CARRY_ANIMAL) * (knows(c.lib, home, 'carts') || knows(c.lib, home, 'wheel') ? 1.5 : 1) * (cv.train ? 10 : 1));
   // Nothing to be had for it now (things changed on the road): no deal; the goods go home again.
   if (!Object.keys(back).length) {
     cv.leg = 'home';

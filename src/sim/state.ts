@@ -51,6 +51,8 @@ export interface Clan {
   founded: number;
   /** The clan it split from, if any (kin are slower to fight). */
   parent: number;
+  /** What its tribes know beyond survival (library tech ids). */
+  techs?: string[];
 }
 
 /**
@@ -79,8 +81,12 @@ export interface Settlement {
   ruinedOn: number;
   /** Its economy (Phase 7): what it has in store and how its workers are split (both in units). */
   economy?: Economy;
-  /** Technologies it knows beyond those every people starts with (library ids; Phase 8 spreads them). */
+  /** Technologies it knows beyond those every people starts with (library ids). */
   techs?: string[];
+  /** Its archive (with Libraries and archives) keeps what it knows from being forgotten; burned in a raid, it is lost until this day. */
+  archiveBurnedUntil?: number;
+  /** Fights and famines lately (for the need that drives discovery). */
+  hardship?: { famine: number; war: number };
 }
 
 /**
@@ -217,6 +223,8 @@ export interface SetupRow {
   tribes: number;
   start?: StartKind;
   cityPop?: number;
+  /** What its first tribes and dawn city know beyond survival. */
+  techs?: string[];
 }
 
 export const yearOf = (day: number) => Math.floor(day / DAYS_PER_YEAR) + 1;

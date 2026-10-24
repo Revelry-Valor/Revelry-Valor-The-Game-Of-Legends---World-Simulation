@@ -2,6 +2,8 @@ import type { Library } from '../core/library';
 import type { Env } from './env';
 import { resInfoOf } from './economy';
 import type { Settlement, SimState } from './state';
+import { knows } from './tech';
+export { knows };
 
 /**
  * The travel network (REDESIGN.md 8.4h and the Phase 7 decisions, step 3).
@@ -48,12 +50,6 @@ const TRAIL_FADES = 4;
 /** Ways built per year by a settlement along a route (points of the grid). */
 const BUILD_PER_YEAR = 4;
 
-/** Whether a settlement knows a technology: every people's starting ones, and those it has learned. */
-export function knows(lib: Library, st: Settlement, techId: string): boolean {
-  const t = lib.techs.find((q) => q.id === techId);
-  if (!t) return false;
-  return t.start || (st.techs ?? []).includes(techId);
-}
 
 /** The best way a settlement can build (1: trails only), and with which technology. */
 export function bestWay(lib: Library, st: Settlement): { tier: number; tech: string } {

@@ -825,6 +825,10 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Rift materials:** not necessarily better than ordinary materials (for example ordinary iron and rift iron), but rifts give access to better and different resources, possibly super-rare metals.
 - **Tech editor**, together with a **resource maker**, so new technologies and resources can be added.
 
+**Phase 8 decisions (agreed).** Built in three steps, each tried before the next: (1) technology held, discovered, spread and lost, with real effects; (2) living cultures: pillars, traditions earned with severity, learned behaviours spreading; (3) culture change: acceptance, big-settlement pull, divergence, hybrids, locked and encouraged story traits.
+- **Basic survival is free:** gathering, hunting and simple fishing need no technology. Everything above is learned: farming needs *Agriculture*, herding needs *Animal husbandry*, good fishing needs *Fishing*, mining, metalwork and the rest need theirs. Settling needs a way to feed a village (agriculture, husbandry, or fishing by water). What each race's dawn city and first tribes know beyond survival is chosen when setting up (nothing more by default).
+- **Folk cultures:** a race with no culture made for it in the Library grows one in the simulation from its homeland and way of life, named in its own sounds; a Library culture made for it takes its place.
+
 ### 8.4g Religion
 **Faith structure** (CK3-inspired, like culture)
 - **Identity:** name, symbols, followers (cultures and races).

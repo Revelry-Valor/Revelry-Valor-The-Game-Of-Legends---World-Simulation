@@ -12,6 +12,7 @@ import { packSim, unpackSim } from '../src/sim/pack';
 import { cropYear, isFood, newEconomy } from '../src/sim/economy';
 import { updatePrices } from '../src/sim/trade';
 import { bestWay, knows, pathCells, pathSpeed } from '../src/sim/ways';
+import { armsMight, clanKnows } from '../src/sim/tech';
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -109,12 +110,12 @@ describe('the first peoples', () => {
     expect(a.clan).not.toBe(b.clan);
     let out = 0;
     let fights = 0;
-    for (let m = 0; m < 120; m++) {
-      for (const t of [a, b]) {
+    for (let d = 0; d < 360 * 40; d += 5) {
+      for (const t of sim.tribes) {
         t.summer = { x: t.x, y: t.y };
         t.winter = { x: t.x, y: t.y };
       }
-      stepDays(sim, env, lib, 30);
+      stepDays(sim, env, lib, 5);
       out = Math.max(out, sim.sorties.length);
       fights = sim.events.filter((e) => /warband/.test(e.text)).length;
       if (fights > 0) break;
@@ -165,7 +166,7 @@ describe('dawn cities', () => {
   });
   it('grows, and its people spread out as villages and tribes', () => {
     const sim = newSim(env, 33);
-    placeStart(sim, env, lib, [{ race: humanId(), tribes: 0, start: 'dawn', cityPop: 1000 }], cl.zone);
+    placeStart(sim, env, lib, [{ race: humanId(), tribes: 0, start: 'dawn', cityPop: 1000, techs: ['agriculture', 'husbandry', 'fishing'] }], cl.zone);
     stepDays(sim, env, lib, DAYS_PER_YEAR * 40);
     const city = sim.settlements.find((s) => s.kind === 'dawn')!;
     expect(city.ruined).toBe(false);
@@ -260,7 +261,7 @@ describe('settlements and their economy', () => {
     // Good farmland: humid temperate lowland with grain, green in summer.
     const k = [...env.land.keys()].find((q) => env.land[q] && [7, 8, 9, 10].includes(cl.zone[q]) && env.mzone[q] === 0 && env.res.grain[q] >= 0.4 && env.plant[0][q] > 0.1)!;
     expect(k).toBeDefined();
-    const city = addDawnCity(sim, env, lib, humanId(), env.x0 + (k % env.w) * env.step, env.y0 + Math.floor(k / env.w) * env.step, 600)!;
+    const city = addDawnCity(sim, env, lib, humanId(), env.x0 + (k % env.w) * env.step, env.y0 + Math.floor(k / env.w) * env.step, 600, ['agriculture', 'husbandry', 'fishing'])!;
     let fedMonths = 0;
     for (let m = 0; m < 120; m++) {
       stepDays(sim, env, lib, 30);
@@ -279,7 +280,7 @@ describe('settlements and their economy', () => {
   }, 60000);
   it('on poor dry land, shrinks toward what the land can feed instead of dying out', () => {
     const sim = newSim(env, 45);
-    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(40), 600)!;
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(40), 600, ['agriculture', 'husbandry'])!;
     stepDays(sim, env, lib, DAYS_PER_YEAR * 10);
     expect(city.ruined).toBe(false);
     expect(city.pop).toBeLessThan(600);
@@ -293,8 +294,9 @@ describe('markets and trade', () => {
   /** Two peoples' cities near each other, one with grain to spare and no salt, the other the other way round. */
   const pair = (seed: number) => {
     const sim = newSim(env, seed);
-    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 300)!;
-    const other = addDawnCity(sim, env, lib, elfId(), 6150, yAt(-12), 300)!;
+    const farming = ['agriculture', 'husbandry', 'fishing'];
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 300, farming)!;
+    const other = addDawnCity(sim, env, lib, elfId(), 6150, yAt(-12), 300, farming)!;
     a.economy = newEconomy(300, 1, 20);
     a.economy.stores = { grain: 9000 };
     other.economy = newEconomy(300, 1, 20);
@@ -344,13 +346,13 @@ describe('trails, roads and railways', () => {
   /** Two trading cities, one with grain and no salt, the other with salt (as in the trade tests). */
   const pair = (seed: number, extra: Record<string, number> = {}, techs: string[] = []) => {
     const sim = newSim(env, seed);
-    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 300)!;
-    const b = addDawnCity(sim, env, lib, elfId(), 6150, yAt(-12), 300)!;
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 300, ['agriculture', 'husbandry', 'fishing'])!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6150, yAt(-12), 300, ['agriculture', 'husbandry', 'fishing'])!;
     a.economy = newEconomy(300, 1, 20);
     a.economy.stores = { grain: 9000, ...extra };
     b.economy = newEconomy(300, 1, 20);
     b.economy.stores = { provisions: 6000, salt: 600 };
-    a.techs = techs;
+    a.techs = [...a.techs!, ...techs];
     const cellAt = (x: number, y: number) => Math.round((y - env.y0) / env.step) * env.w + ((Math.round((x - env.x0) / env.step) % env.w) + env.w) % env.w;
     const path = pathCells(env, a.x, a.y, b.x, b.y, cellAt);
     return { sim, a, b, path };
@@ -422,4 +424,101 @@ describe('trails, roads and railways', () => {
     expect(path.map((k) => back.way[k])).toEqual(path.map((k) => sim.way[k]));
     expect(path.map((k) => back.wayKeeper[k])).toEqual(path.map((k) => sim.wayKeeper[k]));
   }, 60000);
+});
+
+describe('technology', () => {
+  const at = (x: number, lat: number) => ({ x, y: yAt(lat) });
+  it('farms only with agriculture: basic survival (gathering, hunting) is free', () => {
+    const run = (techs: string[]) => {
+      const sim = newSim(env, 81);
+      const p = at(6000, -12);
+      const city = addDawnCity(sim, env, lib, humanId(), p.x, p.y, 400, techs)!;
+      let farmed = false;
+      for (let m = 0; m < 24; m++) {
+        stepDays(sim, env, lib, 30);
+        if (Object.keys(city.economy!.jobs).some((k) => k.startsWith('farm:'))) farmed = true;
+      }
+      return { farmed, city };
+    };
+    const without = run([]);
+    expect(without.farmed).toBe(false);
+    // It lives by gathering, hunting, simple fishing (or herding, once it discovers husbandry by hunting).
+    expect(Object.keys(without.city.economy!.jobs).some((k) => k === 'gather' || k === 'hunt' || k.startsWith('fish:') || k.startsWith('herd:'))).toBe(true);
+    expect(run(['agriculture']).farmed).toBe(true);
+  }, 60000);
+  it('settles only peoples who know a way to feed a village', () => {
+    const race = lib.species.find((s) => s.name === 'Human')!.races.find((r) => r.name === 'Human')!;
+    const before = race.lifestyle;
+    race.lifestyle = 'Settled';
+    const run = (techs: string[]) => {
+      const sim = newSim(env, 83);
+      placeStart(sim, env, lib, [{ race: race.id, tribes: 6, techs }], cl.zone);
+      // Keep them from discovering farming for themselves in the meantime.
+      for (let y = 0; y < 8; y++) {
+        for (const c of sim.clans) c.techs = [...techs];
+        stepDays(sim, env, lib, DAYS_PER_YEAR);
+      }
+      return sim.events.filter((e) => e.text.includes('settled down')).length;
+    };
+    const foragers = run([]);
+    const farmers = run(['agriculture']);
+    race.lifestyle = before;
+    expect(foragers).toBe(0);
+    expect(farmers).toBeGreaterThan(0);
+  }, 60000);
+  it('lets foragers discover agriculture in time, by tending wild plants', () => {
+    let found = 0;
+    for (const seed of [91, 92, 93]) {
+      const sim = newSim(env, seed);
+      const p = at(6000, -12);
+      const city = addDawnCity(sim, env, lib, humanId(), p.x, p.y, 600)!;
+      for (let y = 0; y < 80 && !city.techs!.includes('agriculture'); y++) stepDays(sim, env, lib, DAYS_PER_YEAR);
+      if (city.techs!.includes('agriculture')) found++;
+    }
+    expect(found).toBeGreaterThanOrEqual(2);
+  }, 120000);
+  it('learns from neighbours what they know, far faster than finding it alone', () => {
+    const sim = newSim(env, 95);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 400, ['agriculture', 'writing'])!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6120, yAt(-12), 400, ['agriculture'])!;
+    let years = 0;
+    while (years < 25 && !b.techs!.includes('writing')) {
+      stepDays(sim, env, lib, DAYS_PER_YEAR);
+      years++;
+    }
+    expect(b.techs).toContain('writing');
+    void a;
+  }, 120000);
+  it('never knows a technology before what it builds on', () => {
+    const sim = newSim(env, 97);
+    placeStart(sim, env, lib, [{ race: humanId(), tribes: 6, start: 'both', techs: ['agriculture', 'husbandry', 'copper'] }], cl.zone);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 40);
+    const ok = (known: string[]) => known.every((id) => (lib.techs.find((t) => t.id === id)?.requires ?? []).every((r) => known.includes(r) || lib.techs.find((t) => t.id === r)?.start));
+    for (const st of sim.settlements) if (!st.ruined) expect(ok(st.techs ?? [])).toBe(true);
+    for (const c of sim.clans) expect(ok(c.techs ?? [])).toBe(true);
+  }, 120000);
+  it('forgets deep knowledge where too few are left and no one near knows it, unless an archive keeps it', () => {
+    const deep = ['agriculture', 'husbandry', 'fishing', 'copper', 'bronze', 'iron', 'steel', 'pottery', 'mudbrick', 'masonry', 'writing', 'mathematics', 'engineering'];
+    const run = (extra: string[]) => {
+      const sim = newSim(env, 99);
+      const v = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 70, [...deep, ...extra])!;
+      stepDays(sim, env, lib, DAYS_PER_YEAR * 20);
+      expect(v.ruined).toBe(false);
+      return v.techs!;
+    };
+    // Steel and engineering need about 140 people to keep alive.
+    const alone = run([]);
+    expect(alone.includes('engineering') && alone.includes('steel')).toBe(false);
+    const archived = run(['libraries']);
+    expect(archived.includes('engineering') && archived.includes('steel')).toBe(true);
+  }, 120000);
+  it('arms its fighters with what it knows', () => {
+    expect(armsMight(() => false)).toBe(1);
+    expect(armsMight((id) => id === 'iron-arms')).toBeGreaterThan(armsMight((id) => id === 'bronze-arms'));
+    const sim = newSim(env, 101);
+    const t = addTribe(sim, env, lib, humanId(), 6000, yAt(-12), -1, 200)!;
+    const clan = sim.clans.find((c) => c.id === t.clan)!;
+    expect(clanKnows(lib, clan, 'spears')).toBe(true);
+    expect(clanKnows(lib, clan, 'iron-arms')).toBe(false);
+  });
 });

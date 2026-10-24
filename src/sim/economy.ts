@@ -1,5 +1,7 @@
 import { PLANT_K, type Env, type ResInfo } from './env';
 import type { Economy, Settlement, SimState } from './state';
+import { canWork, techEffects } from './tech';
+import { markThinned } from './thinned';
 
 /**
  * A settlement's economy (REDESIGN.md 8.4h, Phase 7 step 1), counted in units: one unit of a food
@@ -37,8 +39,11 @@ const RATE: Record<string, number> = { Farmed: 8, Fished: 2.2, Herded: 3, Logged
 /** How well crops grow in a half-year with this wild plant growth (1 = as good as it gets): dry steppe still grows grain, poorly; frozen or bare desert, nothing. */
 const halfGrowth = (g: number) => (g < 0.06 ? 0 : Math.min(1.3, 0.35 + 0.65 * g));
 
+const infoMaps = new WeakMap<Env, Map<string, ResInfo>>();
 export function resInfoOf(env: Env, id: string): ResInfo | undefined {
-  return env.resInfo.find((r) => r.id === id) ?? EXTRA_FOODS.find((r) => r.id === id);
+  let m = infoMaps.get(env);
+  if (!m) infoMaps.set(env, (m = new Map([...EXTRA_FOODS, ...env.resInfo].map((r) => [r.id, r]))));
+  return m.get(id);
 }
 /** Most of one good (not food) a settlement keeps: enough to stockpile for building. */
 export const storeCap = (pop: number) => Math.max(50, pop * 2);
@@ -59,6 +64,9 @@ interface Reach {
   avail: Record<string, number>;
   /** Plant growth in reach, by season (1 = as good as it gets). */
   growth: [number, number];
+  /** Warm enough to grow crops, by season (for irrigation), and water by rivers or lakes in reach. */
+  warm: [boolean, boolean];
+  river: boolean;
 }
 const reaches = new WeakMap<Settlement, Reach>();
 export function reachOf(env: Env, st: Settlement, r: number, cellsNear: (x: number, y: number, r: number) => number[]): Reach {
@@ -85,7 +93,9 @@ export function reachOf(env: Env, st: Settlement, r: number, cellsNear: (x: numb
     for (const c of cells) g += env.plant[s][c] / PLANT_K;
     growth[s] = cells.length ? g / cells.length : 0;
   }
-  const out = { env, r, cells, share, avail, growth };
+  const warm: [boolean, boolean] = [0, 1].map((s) => cells.length > 0 && cells.reduce((n, c) => n + env.temp[s][c], 0) / cells.length > 8) as [boolean, boolean];
+  const river = cells.some((c) => env.fresh[c]);
+  const out = { env, r, cells, share, avail, growth, warm, river };
   reaches.set(st, out);
   return out;
 }
@@ -124,6 +134,8 @@ export interface MonthContext {
   /** In the southern hemisphere (the seasons' fields swap). */
   south: boolean;
   year: number;
+  /** What the settlement knows (technology ids); basic survival needs nothing. */
+  has: (techId: string) => boolean;
 }
 
 /** One month of a settlement's work, eating and stores. Returns how well it was fed (1 = enough). */
@@ -140,8 +152,11 @@ export function economyMonth(c: MonthContext): number {
   // ---- Food jobs: aim to eat, and to build up stores toward four months.
   // Crop growth in the local summer and winter halves: one harvest a year where winters are cold or
   // dry, two in the tropics.
-  const gSummer = halfGrowth(R.growth[c.south ? 1 : 0]);
-  const gWinter = halfGrowth(R.growth[c.south ? 0 : 1]);
+  const fx = techEffects(c.has);
+  // Irrigation: dry but warm land by rivers grows crops as if watered.
+  const irrigated = (s: 0 | 1) => (fx.irrigation && R.river && R.warm[s] ? Math.max(R.growth[s], 0.7) : R.growth[s]);
+  const gSummer = halfGrowth(irrigated(c.south ? 1 : 0));
+  const gWinter = halfGrowth(irrigated(c.south ? 0 : 1));
   const gNow = c.summer ? gSummer : gWinter;
   const gNext = c.summer ? gWinter : gSummer;
   const yearGrowth = (gSummer + gWinter) / 2;
@@ -154,9 +169,14 @@ export function economyMonth(c: MonthContext): number {
     }
     return { id, v };
   };
-  const crop = best((r) => r.food && r.source === 'Farmed');
+  // Farming needs agriculture and herding husbandry; simple fishing is free, but poor without nets and boats.
+  const workable = (r: ResInfo) => canWork(c.has, r.source, r.id);
+  const crop = best((r) => r.food && r.source === 'Farmed' && workable(r));
   const fish = best((r) => r.food && r.source === 'Fished');
-  const herd = best((r) => r.food && r.source === 'Herded');
+  const herd = best((r) => r.food && r.source === 'Herded' && workable(r));
+  const FARM = RATE.Farmed * fx.farm;
+  const FISH = RATE.Fished * fx.fish;
+  const HERD = RATE.Herded * fx.herd;
   // Wild food: the month's plants in reach (shared), and game.
   let pool = 0;
   for (const k of R.cells) pool += c.left[k] * R.share;
@@ -170,11 +190,11 @@ export function economyMonth(c: MonthContext): number {
   type Job = { key: string; y: number; cap: number };
   const jobs: Job[] = [];
   const landKm2 = R.cells.length * env.cellArea * R.share;
-  if (crop.id && yearGrowth > 0) jobs.push({ key: `farm:${crop.id}`, y: RATE.Farmed * crop.v * yearGrowth, cap: Math.max(10, landKm2 * crop.v * 2) });
-  if (fish.id) jobs.push({ key: `fish:${fish.id}`, y: RATE.Fished * fish.v, cap: Math.max(10, 40 + landKm2 * 0.05) });
+  if (crop.id && yearGrowth > 0) jobs.push({ key: `farm:${crop.id}`, y: FARM * crop.v * yearGrowth, cap: Math.max(10, landKm2 * crop.v * 2) });
+  if (fish.id) jobs.push({ key: `fish:${fish.id}`, y: FISH * fish.v, cap: Math.max(10, 40 + landKm2 * 0.05) });
   // Herds graze what the pasture offers (steppe is herding land, however dry).
   const pasture = 0.5 + 0.5 * Math.min(1, Math.max(R.growth[0], R.growth[1]) * 2);
-  if (herd.id) jobs.push({ key: `herd:${herd.id}`, y: RATE.Herded * herd.v * pasture, cap: Math.max(10, landKm2 * herd.v * 0.5) });
+  if (herd.id) jobs.push({ key: `herd:${herd.id}`, y: HERD * herd.v * pasture, cap: Math.max(10, landKm2 * herd.v * 0.5) });
   jobs.push({ key: 'gather', y: 1.2, cap: Math.max(1, pool / 1.2) });
   jobs.push({ key: 'hunt', y: 1.5, cap: Math.max(1, gameStock / 1.5) });
   const count: Record<string, number> = {};
@@ -184,7 +204,7 @@ export function economyMonth(c: MonthContext): number {
   const others = jobs.filter((j) => j !== farm);
   const bestOther = Math.max(0, ...others.map((j) => j.y));
   if (farm && (e.farmers === undefined || (c.summer && !c.wasSummer))) {
-    const perYear = RATE.Farmed * 6 * crop.v * (gSummer + gWinter);
+    const perYear = FARM * 6 * crop.v * (gSummer + gWinter);
     // A year's eating, plus what spoils while it is kept (half a year on average), plus a fifth over for bad years.
     const spoil = resInfoOf(env, crop.id)?.spoil ?? 0.02;
     const yearNeed = need * 12 * (1 + spoil * 6) * 1.2;
@@ -210,7 +230,7 @@ export function economyMonth(c: MonthContext): number {
     const gH = gNow > 0 ? gNow : gNext;
     const months = gNow > 0 ? c.monthsLeft : 6;
     const crowded = (e.farmers ?? 0) / (1 + (e.farmers ?? 0) / (farm?.cap ?? 1));
-    const coming = (gNow > 0 ? e.crop : 0) + RATE.Farmed * crop.v * gH * crowded * months * 0.95;
+    const coming = (gNow > 0 ? e.crop : 0) + FARM * crop.v * gH * crowded * months * 0.95;
     // After it, until the one after (6 months with two harvests a year, else 12).
     const after = gSummer > 0 && gWinter > 0 ? 6 : 12;
     const short = need * (H + after) * 1.15 - foodStock - coming;
@@ -237,7 +257,8 @@ export function economyMonth(c: MonthContext): number {
   // ---- Needs, then the rest of what the land offers.
   let free = W - foodWorkers;
   // Hides, horn, feathers and furs come from the herds and the hunt, not from workers of their own.
-  const rateOf = (r: ResInfo) => (r.source === 'Herded' || r.source === 'Hunted' ? 0 : RATE[r.source] ?? 0.5);
+  // Hides, horn and furs come from herds and hunts; what needs know-how waits for it; better tools work faster.
+  const rateOf = (r: ResInfo) => (r.source === 'Herded' || r.source === 'Hunted' || !workable(r) ? 0 : (RATE[r.source] ?? 0.5) * fx.craft);
   for (const nd of NEEDS) {
     const want = nd.per * pop;
     const have = env.resInfo.filter((r) => !r.food && nd.match(r)).reduce((n, r) => n + (S[r.id] ?? 0), 0);
@@ -294,14 +315,14 @@ export function economyMonth(c: MonthContext): number {
           e.crop = 0;
           e.cropId = id;
         }
-        e.crop += crowd(key, n) * RATE.Farmed * crop.v * gNow;
+        e.crop += crowd(key, n) * FARM * crop.v * gNow;
       }
-    } else if (key.startsWith('fish:')) add(key.slice(5), crowd(key, n) * RATE.Fished * fish.v * (c.summer ? 1.1 : 0.8));
+    } else if (key.startsWith('fish:')) add(key.slice(5), crowd(key, n) * FISH * fish.v * (c.summer ? 1.1 : 0.8));
     else if (key.startsWith('herd:')) {
-      const v = crowd(key, n) * RATE.Herded * herd.v * pasture;
+      const v = crowd(key, n) * HERD * herd.v * pasture;
       add(key.slice(5), v);
       // Hides and wool from the herds.
-      add('leather', v * 0.06);
+      add('leather', v * 0.06 * fx.hides);
       if (R.avail.wool) add('wool', v * 0.05);
     } else if (key === 'gather') {
       const want = crowd(key, n) * 1.2;
@@ -326,10 +347,11 @@ export function economyMonth(c: MonthContext): number {
           const take = Math.min(stock * 0.06 * b.catchRate, want - got);
           got += take;
           D[k] = Math.max(0, D[k] - take / (b.meat * env.cellArea * Math.max(R.share, 1e-6)));
+          markThinned(sim, b.id, k);
         }
       }
       add('game', got);
-      add('leather', got * 0.04);
+      add('leather', got * 0.04 * fx.hides);
       if (R.avail.furs) add('furs', got * 0.03);
     } else {
       const r = resInfoOf(env, key);
@@ -343,7 +365,7 @@ export function economyMonth(c: MonthContext): number {
   for (const id of Object.keys(S)) {
     const r = resInfoOf(env, id);
     const sp = r?.spoil ?? 0.01;
-    const keep = salted && r && (r.source === 'Fished' || r.source === 'Hunted' || r.source === 'Herded') ? sp * 0.5 : sp;
+    const keep = (salted && r && (r.source === 'Fished' || r.source === 'Hunted' || r.source === 'Herded') ? sp * 0.5 : sp) * fx.spoil;
     S[id] *= 1 - keep;
   }
   const foods = Object.keys(S).filter((id) => isFood(env, id)).sort((a, b) => (resInfoOf(env, b)?.spoil ?? 0) - (resInfoOf(env, a)?.spoil ?? 0));
