@@ -25,6 +25,9 @@ export interface PackedSim {
   relations?: SimState['relations'];
   way?: number[];
   wayKeeper?: number[];
+  bridge?: number[];
+  realmRelations?: SimState['realmRelations'];
+  spies?: SimState['spies'];
   clans: SimState['clans'];
   sorties: SimState['sorties'];
   events: SimState['events'];
@@ -93,6 +96,9 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     traffic: runs(Float32Array.from(sim.traffic, (v) => Math.round(v * 10) / 10)),
     way: runs(sim.way),
     wayKeeper: runs(sim.wayKeeper),
+    bridge: runs(sim.bridge ?? new Uint8Array(sim.way.length)),
+    realmRelations: sim.realmRelations ?? {},
+    spies: sim.spies ?? [],
     clans: sim.clans,
     sorties: sim.sorties,
     events: sim.events,
@@ -118,6 +124,8 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
   const wayKeeper = new Int32Array(n).fill(-1);
   if (p.way) unruns(p.way, n, way);
   if (p.wayKeeper) unruns(p.wayKeeper, n, wayKeeper);
+  const bridge = new Uint8Array(n);
+  if (p.bridge) unruns(p.bridge, n, bridge);
   const beasts: Record<string, Float32Array> = {};
   for (const b of env.beastInfo) {
     const K = env.beastK[b.id];
@@ -140,6 +148,9 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     traffic,
     way,
     wayKeeper,
+    bridge,
+    realmRelations: p.realmRelations && typeof p.realmRelations === 'object' ? p.realmRelations : {},
+    spies: Array.isArray(p.spies) ? p.spies : [],
     clans: p.clans,
     sorties: Array.isArray(p.sorties) ? p.sorties : [],
     nextId: p.nextId | 0,

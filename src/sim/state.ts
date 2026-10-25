@@ -81,6 +81,64 @@ export interface Realm {
   ruler: Ruler;
   /** Rulers so far of this realm (for the list of its reigns). */
   reigns: number;
+  /** The ruler's children (the royal family), heirs where rule is handed down. */
+  family?: Royal[];
+  /** Those pressing a claim to the throne, with how much of the realm backs them (0–1). */
+  claimants?: Claimant[];
+  /** Treaties it broke without cause (remembered by everyone; fades slowly). */
+  betrayals?: number;
+}
+
+/** A member of a ruling family. */
+export interface Royal {
+  name: string;
+  house: string;
+  female: boolean;
+  born: number;
+}
+
+/** A claimant to a throne: a rival heir, or the true line put aside. */
+export interface Claimant extends Royal {
+  /** Why they claim it: a passed-over child, or the old line. */
+  why: 'heir' | 'true line' | 'marriage';
+  backing: number;
+  since: number;
+}
+
+/** A treaty between two realms (REDESIGN.md 8.5). */
+export interface Pact {
+  kind: 'peace' | 'defence' | 'trade' | 'marriage';
+  since: number;
+  /** Shared roads and bridges between the capitals, as a term (trade and defence pacts). */
+  roads?: boolean;
+}
+
+/** How two realms stand: opinion (−1 … 1), remembered deeds, their treaties. */
+export interface RealmRelation {
+  opinion: number;
+  /** Remembered wars, betrayals, gifts and help (fades slowly; grudges slower). */
+  memory: number;
+  pacts: Pact[];
+  /** A defender's ally takes up its quarrel until this day. */
+  hostileUntil?: number;
+  /** Who last attacked whom, and when (for telling a justified break from a betrayal). */
+  lastAttack?: { by: number; day: number };
+  /** Attacks this year (only the first few sour memory further). */
+  hits?: number;
+}
+
+/** A spy: a notable individual travelling town to town to reach a target. */
+export interface Spy {
+  id: number;
+  name: string;
+  from: number;
+  /** The realm and town targeted. */
+  against: number;
+  target: number;
+  mission: 'steal' | 'unrest' | 'sabotage' | 'watch';
+  x: number;
+  y: number;
+  leg: 'out' | 'home';
 }
 
 /**
@@ -119,6 +177,9 @@ export interface Settlement {
   cultureShift?: { to: string; progress: number };
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
   control?: number;
+  /** Its loyalty to its realm (0–1), and the years it has been discontented. */
+  loyalty?: number;
+  unrest?: number;
 }
 
 /**
@@ -271,6 +332,11 @@ export interface SimState {
   way: Uint8Array;
   /** The settlement that built and keeps the way there (−1: none, for trails). */
   wayKeeper: Int32Array;
+  /** Bridges (1) over rivers; elsewhere a river is forded (slow). */
+  bridge?: Uint8Array;
+  /** Between each pair of realms ("a|b", clan ids in order). */
+  realmRelations?: Record<string, RealmRelation>;
+  spies?: Spy[];
   grudges: Grudge[];
   clans: Clan[];
   sorties: Sortie[];

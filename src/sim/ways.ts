@@ -15,8 +15,9 @@ export { knows };
  * and burn coal for each run.
  *
  * Realms build royal roads from their capital to their towns (nations.ts). Bridges are a
- * nation's choice (to shorten travel between its cities, to draw trade, or as a term of a pact)
- * and come with diplomacy (Phase 9 step 2).
+ * nation's choice: where a settled realm that knows stone bridges builds a road over a river (to
+ * shorten the way between its towns, to draw trade along a busy route, or as a pact's term of
+ * shared roads between capitals). Elsewhere rivers are forded, slowly.
  */
 
 export interface WayTier {
@@ -41,6 +42,8 @@ export const WAYS: WayTier[] = [
   { tier: 3, id: 'road', name: 'Paved road', techs: ['roads'], speed: 2, build: { stone: 1 }, upkeep: 0.05, colour: '#d8d4cc' },
   { tier: 4, id: 'rail', name: 'Railway', techs: ['railways', 'mana-rail'], speed: 6, build: { iron: 2, wood: 1, stone: 0.5 }, upkeep: 0.05, colour: '#1c1c1c' },
 ];
+/** A stone bridge over a river. */
+export const BRIDGE_COST: Record<string, number> = { stone: 8, wood: 2 };
 /** Mana rail is laid with mana crystals in place of iron. */
 const MANA_RAIL_BUILD: Record<string, number> = { 'mana-crystal': 0.2, stone: 0.5 };
 /** Coal a train burns per 100 km of a run (each way). */
@@ -103,14 +106,19 @@ export function pathCells(env: Env, ax: number, ay: number, bx: number, by: numb
   return out;
 }
 
-/** How much faster than open country travel is along a path (the average over its points). */
-export function pathSpeed(sim: SimState, cells: number[]): number {
+/** Travel is this much slower over a river with no bridge (fording, or finding a boat). */
+export const FORD_SLOW = 3;
+
+/** How much faster than open country travel is along a path (the average over its points); rivers without a bridge slow it. */
+export function pathSpeed(sim: SimState, cells: number[], fresh?: Uint8Array): number {
   if (!cells.length) return 1;
   // Time adds up per point: the harmonic mean.
   let t = 0;
-  for (const k of cells) t += 1 / WAYS[sim.way[k]].speed;
+  for (let i = 0; i < cells.length; i++) t += (fresh && crossing(cells, i, fresh) && !sim.bridge?.[cells[i]] ? FORD_SLOW : 1) / WAYS[sim.way[cells[i]]].speed;
   return cells.length / t;
 }
+/** Where a path comes onto a river (the point it must cross at); walking on along the bank is not a crossing. */
+export const crossing = (cells: number[], i: number, fresh: Uint8Array) => !!fresh[cells[i]] && (i === 0 || !fresh[cells[i - 1]]);
 /** Is the whole path railway (a train can run)? */
 export const allRail = (sim: SimState, cells: number[]) => cells.length > 0 && cells.every((k) => sim.way[k] >= 4);
 
@@ -120,8 +128,10 @@ export interface WaysContext {
   lib: Library;
   cellAt: (x: number, y: number) => number;
   log: (text: string, x?: number, y?: number) => void;
-  /** Roads a realm's capital builds to its towns this year (from, to: settlement ids). */
+  /** Roads a realm's capital builds to its towns this year, and toward a pact partner's capital (from, to: settlement ids). */
   royalRoads?: [number, number][];
+  /** May this settlement's realm build bridges (a settled realm, not clans and tribes)? */
+  bridges?: (st: Settlement) => boolean;
 }
 
 /** Each year: trails form and fade with use; keepers pay upkeep or their ways fall back; busy routes are improved. */
@@ -195,14 +205,28 @@ function buildToward(c: WaysContext, from: Settlement, to: Settlement, kind = ''
   if (best.tier < 2) return;
   const cells = pathCells(env, from.x, from.y, to.x, to.y, c.cellAt);
   let built = 0;
-  for (const k of cells) {
+  for (let i = 0; i < cells.length; i++) {
+    const k = cells[i];
     if (built >= BUILD_PER_YEAR) break;
-    if (sim.way[k] >= best.tier) continue;
+    if (sim.way[k] >= best.tier) {
+      // An old road over an unbridged river: bridge it when it can.
+      if (crossing(cells, i, env.fresh) && !sim.bridge?.[k] && c.bridges?.(from) && knows(lib, from, 'bridges') && pay(env, from, BRIDGE_COST)) {
+        (sim.bridge ??= new Uint8Array(env.n))[k] = 1;
+        built++;
+        c.log(`${from.name} built a bridge on the way to ${to.name}.`, from.x, from.y);
+      }
+      continue;
+    }
     if (!pay(env, from, scale(buildCost(best.tier, best.tech), env.step))) break;
     const first = !cells.some((q) => sim.way[q] >= best.tier);
     sim.way[k] = best.tier;
     sim.wayKeeper[k] = from.id;
     built++;
+    // A river on the way: a realm that knows how bridges it (to shorten the way between its towns, draw trade, or as a pact's term).
+    if (crossing(cells, i, env.fresh) && !sim.bridge?.[k] && c.bridges?.(from) && knows(lib, from, 'bridges') && pay(env, from, BRIDGE_COST)) {
+      (sim.bridge ??= new Uint8Array(env.n))[k] = 1;
+      c.log(`${from.name} built a bridge on the way to ${to.name}.`, from.x, from.y);
+    }
     if (first) c.log(`${from.name} began ${best.tier === 4 ? `a ${kind}railway` : `a ${kind}${WAYS[best.tier].name.toLowerCase()}`} toward ${to.name}.`, from.x, from.y);
   }
   if (built && cells.every((q) => sim.way[q] >= best.tier)) c.log(`The ${kind}${WAYS[best.tier].name.toLowerCase()} between ${from.name} and ${to.name} is finished.`, to.x, to.y);

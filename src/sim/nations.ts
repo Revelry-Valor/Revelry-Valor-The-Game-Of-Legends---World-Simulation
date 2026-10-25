@@ -245,7 +245,7 @@ export function ensureRealm(c: RulerContext, clan: Clan): Realm {
 function orderDays(c: NationContext, from: Settlement, to: Settlement, riders: boolean): number {
   const km = c.dist(from.x, from.y, to.x, to.y);
   if (km < 1) return 0;
-  const speed = pathSpeed(c.sim, pathCells(c.env, from.x, from.y, to.x, to.y, c.cellAt));
+  const speed = pathSpeed(c.sim, pathCells(c.env, from.x, from.y, to.x, to.y, c.cellAt), c.env.fresh);
   return km / ((riders ? RIDER_KM : FOOT_KM) * speed);
 }
 
@@ -299,22 +299,6 @@ export function nationsYear(c: NationContext): { royalRoads: [number, number][] 
       if (old !== want) c.log(`${before} is now ${realmName(lib, clan)}${g ? ` (${g.name.toLowerCase()})` : ''}, under ${rulerTitle(lib, clan)} ${realm.ruler.name}.`, at?.x, at?.y);
     }
     const g = govOf(lib, realm.gov);
-    // The ruler: reigns until death; the heir is of the same house where rule is handed down, else another is chosen.
-    const age = (sim.day - realm.ruler.born) / DAYS_PER_YEAR;
-    const life = c.lifespan(clan.race);
-    const dies = age > life * 0.5 && c.rand() < Math.min(0.5, 0.04 + 0.5 * Math.pow(Math.max(0, age / life - 0.5), 2) * 4);
-    if (dies) {
-      const old = realm.ruler;
-      const title = rulerTitle(lib, clan);
-      const lineHeld = !!g && (g.succession.startsWith('Hereditary') || g.legitimacy === 'True line / sacred blood');
-      const house = lineHeld || c.rand() < 0.3 ? old.house : c.name(clan.culture);
-      realm.ruler = newRuler(c, clan, house);
-      realm.reigns++;
-      if (realm.gov !== 'clan' || f.towns.length) {
-        const at = capital ?? sim.tribes.find((t) => t.clan === clan.id);
-        c.log(`${title} ${old.name} of ${realmName(lib, clan)} has died; ${rulerTitle(lib, clan)} ${realm.ruler.name} of the house of ${house} rules now${house === old.house ? '' : ' (a new house)'}.`, at?.x, at?.y);
-      }
-    }
     // Centralization, and each place's control.
     realm.centralization = centralization(c, clan, g, capital);
     for (const st of f.towns) {

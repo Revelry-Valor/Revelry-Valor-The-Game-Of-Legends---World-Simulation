@@ -1,3 +1,4 @@
+import { tradeFactor } from './politics';
 import type { Library } from '../core/library';
 import type { Env } from './env';
 import { isFood, NEEDS, resInfoOf } from './economy';
@@ -159,7 +160,8 @@ export function willingness(c: TradeContext, a: Settlement, b: Settlement): numb
   if (a.culture && a.culture === b.culture) w = Math.min(1, w * 1.2);
   // Its culture: traders and the hospitable deal readily with other peoples; xenophobes and the closed hardly.
   else w = Math.min(1, w * cultureFx(sim, a.culture).trade * (1 + 0.3 * acceptance(sim, a.culture, b.culture)));
-  return w;
+  // Their realms: opinion, and a trade agreement.
+  return Math.min(1, w * tradeFactor(sim, a.clan, b.clan));
 }
 
 /** Goods a partner should give back for a cargo: what it can spare that home values more, worth (at its own prices) a little under what it receives. */
@@ -247,7 +249,7 @@ export function tradeMonth(c: TradeContext): void {
       if (d > speed * fastest * 25) continue;
       // Days on the road, faster along trails, roads and railways; up to about 25 days away.
       const cells = pathBetween(c, a, b);
-      const days = d / (speed * pathSpeed(sim, cells));
+      const days = d / (speed * pathSpeed(sim, cells, env.fresh));
       if (days > 25) continue;
       // A train, where the whole way is railway and there is coal to burn there and back.
       const coal = (2 * d * TRAIN_COAL_PER_100KM) / 100;

@@ -13,6 +13,7 @@ import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import type { Clan, LiveCulture } from '../sim/state';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
+import { opinionWord, PACT_NAMES } from '../sim/politics';
 import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -416,6 +417,41 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             }
           }
           g.setLineDash([]);
+          // Bridges: a stone-coloured span with dark parapets.
+          if (s.bridge) for (let k = 0; k < e.n; k++) {
+            if (!s.bridge[k]) continue;
+            const [bx, by] = P(k);
+            g.fillStyle = '#cfc6b4';
+            g.strokeStyle = 'rgba(20,20,20,0.9)';
+            g.lineWidth = 1.5;
+            g.beginPath();
+            g.rect(bx - 5, by - 3, 10, 6);
+            g.fill();
+            g.stroke();
+          }
+        }
+        // Spies on their way: a small dark figure, with a faint line to where they are going.
+        for (const sp of s.spies ?? []) {
+          const [sx, sy] = at(sp.x, sp.y, c);
+          const to = s.settlements.find((q) => q.id === (sp.leg === 'out' ? sp.target : clanOf(sp.from)?.realm?.capital));
+          if (to) {
+            const [tx, ty] = at(to.x, to.y, c);
+            g.strokeStyle = 'rgba(30,30,30,0.45)';
+            g.lineWidth = 1;
+            g.setLineDash([2, 3]);
+            g.beginPath();
+            g.moveTo(sx, sy);
+            g.lineTo(tx, ty);
+            g.stroke();
+            g.setLineDash([]);
+          }
+          g.fillStyle = '#141414';
+          g.strokeStyle = '#e8e2d0';
+          g.lineWidth = 1;
+          g.beginPath();
+          g.arc(sx, sy, 3.5, 0, Math.PI * 2);
+          g.fill();
+          g.stroke();
         }
         // Trade routes: faint lines between trading settlements, bolder the more they are used; caravans on them.
         if (showTrade) {
@@ -641,7 +677,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const s = sim!;
       const out: string[] = [];
       const t = tribeAt(x, y, pxKm);
-      if (t) out.push(`${t.name} (clan ${clanOf(t.clan)?.name ?? '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
+      if (t) out.push(`${t.name} (${clanOf(t.clan) ? realmName(lib(), clanOf(t.clan)!) : '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
       const st = t ? null : settlementAt(x, y, pxKm);
       if (st) out.push(settlementLine(st));
       if (showTrade) for (const cv of s.caravans) {
@@ -655,13 +691,23 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         break;
       }
       const k = cellOf(x, y);
+      for (const sp of s.spies ?? []) {
+        const [sx, sy] = [sp.x, sp.y];
+        if (Math.hypot(sx - x, sy - y) < pxKm * 6) {
+          const from = clanOf(sp.from);
+          const tgt = s.settlements.find((q) => q.id === sp.target);
+          out.push(`${sp.name}, a spy of ${from ? realmName(lib(), from) : '?'}${sp.leg === 'out' ? `, on the way to ${tgt?.name ?? '?'}` : ', coming home'} (${({ steal: 'to steal its knowledge', unrest: 'to stir up unrest', sabotage: 'to burn its stores', watch: 'to watch and listen' } as const)[sp.mission]})`);
+        }
+      }
       if (k >= 0 && env!.land[k]) {
         const o = s.owner[k];
-        if (o >= 0) out.push(`Land of clan ${clanOf(o)?.name ?? '(gone)'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 ? `, being taken by clan ${clanOf(s.rival[k])?.name ?? '?'}` : ''}`);
+        if (o >= 0) out.push(`Land of ${clanOf(o) ? realmName(lib(), clanOf(o)!) : 'a clan now gone'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 && clanOf(s.rival[k]) ? `, being taken by ${realmName(lib(), clanOf(s.rival[k])!)}` : ''}`);
         if (s.way[k]) {
           const keeper = s.settlements.find((q) => q.id === s.wayKeeper[k]);
           out.push(`${WAYS[s.way[k]].name}${keeper ? ` (kept by ${keeper.name})` : s.way[k] === 1 ? ' (worn by use)' : ''}`);
         }
+        if (s.bridge?.[k]) out.push('A stone bridge');
+        else if (env!.fresh[k] && s.way[k]) out.push('A ford (no bridge yet: crossing is slow)');
         if (showRes) {
           const r = env!.resInfo.find((q) => q.id === showRes);
           if (r) out.push(env!.res[r.id][k] > 0.01 ? `${r.name} here (${Math.round(Math.min(1, env!.res[r.id][k]) * 100)}%)` : `No ${r.name.toLowerCase()} here`);
@@ -784,7 +830,44 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       towns.length > 1 ? h('div', { class: 'econ-head' }, 'How firmly it holds its towns') : null,
       towns.length > 1 ? h('ul', { class: 'econ-list' }, ...towns.slice(0, 12).map((q) => h('li', { class: 'clickable', onclick: () => { selected = q.id; selectedRealm = null; render(); d.redraw(); } }, h('span', {}, q.name, q.id === r?.capital ? h('span', { class: 'muted' }, ' (capital)') : null, q.culture !== cn.culture && cultureOf(s, q.culture) ? h('span', { class: 'muted' }, ` · ${cultureOf(s, q.culture)!.name}`) : null), h('span', { class: 'num' }, pct(q.control ?? 0))))) : null,
       towns.length > 12 ? h('div', { class: 'muted' }, `…and ${towns.length - 12} more.`) : null,
+      ...politicsPart(cn, towns),
     );
+  };
+  /** A realm's family, claimants, factions and relations with other realms. */
+  const politicsPart = (cn: Clan, towns: Settlement[]): (HTMLElement | null)[] => {
+    const L = lib();
+    const s = sim!;
+    const r = cn.realm;
+    if (!r || !s.started) return [];
+    const yrs = (born: number) => Math.floor((s.day - born) / 360);
+    const fam = r.family ?? [];
+    const claims = r.claimants ?? [];
+    const restless = towns.filter((q) => (q.unrest ?? 0) > 0).sort((a, b) => (b.unrest ?? 0) - (a.unrest ?? 0));
+    const rels = Object.entries(s.realmRelations ?? {})
+      .map(([k, rel]) => {
+        const [a, b] = k.split('|').map(Number);
+        const other = a === cn.id ? b : b === cn.id ? a : -1;
+        const oc = clanOf(other);
+        return oc ? { oc, rel } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x)
+      .sort((a, b) => b.rel.pacts.length - a.rel.pacts.length || b.rel.opinion - a.rel.opinion);
+    const why = { heir: 'a passed-over heir', 'true line': 'the true line, put aside', marriage: 'by marriage' } as const;
+    return [
+      fam.length ? h('div', { class: 'econ-head' }, 'The royal family') : null,
+      fam.length ? h('ul', { class: 'econ-list' }, ...fam.map((k) => h('li', {}, h('span', {}, `${k.name} of ${k.house}`), h('span', { class: 'muted' }, `${k.female ? 'daughter' : 'son'}, ${yrs(k.born)}`)))) : null,
+      claims.length ? h('div', { class: 'econ-head' }, 'Claimants to the throne') : null,
+      claims.length ? h('ul', { class: 'econ-list' }, ...claims.map((q) => h('li', {}, h('span', {}, `${q.name} of ${q.house}`, h('span', { class: 'muted' }, ` · ${why[q.why]}`)), h('span', { class: 'num' }, `${Math.round(q.backing * 100)}% backing`)))) : null,
+      restless.length ? h('div', { class: 'econ-head' }, 'Discontented towns (a faction may rise)') : null,
+      restless.length ? h('ul', { class: 'econ-list' }, ...restless.slice(0, 8).map((q) => h('li', {}, h('span', {}, q.name), h('span', { class: 'muted' }, `loyalty ${Math.round((q.loyalty ?? 0) * 100)}%, ${q.unrest} yr${q.unrest === 1 ? '' : 's'}`)))) : null,
+      r.betrayals ? h('div', { class: 'muted' }, `It has broken ${r.betrayals} treat${r.betrayals === 1 ? 'y' : 'ies'} without cause; everyone remembers.`) : null,
+      rels.length ? h('div', { class: 'econ-head' }, 'Relations with other realms') : null,
+      rels.length
+        ? h('ul', { class: 'econ-list' }, ...rels.slice(0, 10).map(({ oc, rel }) => h('li', {},
+            h('span', {}, h('span', { class: 'swatch', style: `background:${oc.colour}` }), realmName(L, oc), rel.pacts.length ? h('div', { class: 'muted' }, rel.pacts.map((p) => `${PACT_NAMES[p.kind]}${p.roads ? ' (shared roads and bridges)' : ''}`).join(' · ')) : null, (rel.hostileUntil ?? -1) > s.day ? h('div', { class: 'muted' }, 'Takes up a quarrel against it') : null),
+            h('span', { class: 'muted' }, `${opinionWord(rel.opinion)} (${rel.opinion >= 0 ? '+' : ''}${rel.opinion.toFixed(2)})`))))
+        : null,
+    ];
   };
   const cultureLine = (id: string): HTMLElement | null => {
     const cu = cultureOf(sim!, id);
@@ -1107,6 +1190,27 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       }
     }
 
+    // Treaties, the world over.
+    const treaties = Object.entries(s.realmRelations ?? {}).flatMap(([k, rel]) => {
+      const [a, b] = k.split('|').map(Number);
+      const A = clanOf(a);
+      const B = clanOf(b);
+      return A && B && rel.pacts.length ? [{ A, B, rel }] : [];
+    });
+    if (s.started && (treaties.length || s.spies?.length)) {
+      const L = lib();
+      parts.push(
+        h('h3', {}, 'Treaties'),
+        h('p', { class: 'muted small' }, 'Realms whose people have learned to send envoys make pacts. Breaking a promise of peace without cause is remembered by everyone; defending an ally is a justified break.'),
+        treaties.length
+          ? h('ul', { class: 'treaty-list small' }, ...treaties.map(({ A, B, rel }) => h('li', {},
+              h('div', {}, h('span', { class: 'swatch', style: `background:${A.colour}` }), realmName(L, A), ' & ', h('span', { class: 'swatch', style: `background:${B.colour}` }), realmName(L, B)),
+              h('div', { class: 'muted' }, rel.pacts.map((p) => `${PACT_NAMES[p.kind]}${p.roads ? ' (shared roads and bridges)' : ''} since Y${yearOf(p.since)}`).join(' · ')))))
+          : h('p', { class: 'muted small' }, 'No treaties yet.'),
+        s.spies?.length ? h('p', { class: 'small' }, `${s.spies.length} spy${s.spies.length === 1 ? '' : 'ies'} abroad (dark dots on the map).`) : null,
+      );
+    }
+
     // Trade, the world over.
     if (s.started && (s.routes.length || s.caravans.length)) {
       const top = [...s.routes].sort((a, b) => b.trips - a.trips).slice(0, 6);
@@ -1200,6 +1304,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             : h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), h('span', { class: 'link', onclick: () => { if (clan) { selectedRealm = clan.id; selected = null; render(); d.redraw(); } } }, clan ? realmName(L, clan) : '?'), ` · ${raceName(st.race)}`),
           !st.ruined && clan?.realm && s.started
             ? h('div', {}, clan.realm.capital === st.id ? `The capital, seat of ${rulerTitle(L, clan)} ${clan.realm.ruler.name}.` : `Its realm's hold here: ${Math.round((st.control ?? 0) * 100)}%`, clan.realm.capital === st.id ? null : h('span', { class: 'muted' }, ' (from the days an order takes to come from the capital, and the realm’s centralization)'))
+            : null,
+          !st.ruined && s.started && st.loyalty !== undefined && clan?.realm?.capital !== st.id
+            ? h('div', {}, `Loyalty: ${Math.round(st.loyalty * 100)}%${st.unrest ? `, discontented for ${st.unrest} year${st.unrest === 1 ? '' : 's'}` : ''}`)
             : null,
           st.ruined ? null : cultureLine(st.culture),
           !st.ruined && st.cultureShift ? h('div', { class: 'muted' }, `Being drawn into the ways of the ${cultureOf(s, st.cultureShift.to)?.name ?? '?'} (${Math.round(st.cultureShift.progress * 100)}%).`) : null,

@@ -7,9 +7,11 @@ import { KM_PER_DEGREE } from '../src/core/units';
 import type { Library } from '../src/core/library';
 import { buildEnv, type Env } from '../src/sim/env';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
-import { DAYS_PER_YEAR, dateText, type Settlement, type SimState } from '../src/sim/state';
-import { nationsYear, type NationContext } from '../src/sim/nations';
-import { newCulture } from '../src/core/library';
+import { DAYS_PER_YEAR, dateText, type Clan, type Settlement, type SimState } from '../src/sim/state';
+import { ensureRealm, nationsYear, type NationContext } from '../src/sim/nations';
+import { hasPact, noteAttack, politicsYear, relationOf, spiesDay, type PoliticsContext } from '../src/sim/politics';
+import { waysYear } from '../src/sim/ways';
+import { newCulture, newGovernment } from '../src/core/library';
 import { packSim, unpackSim } from '../src/sim/pack';
 import { cropYear, isFood, newEconomy } from '../src/sim/economy';
 import { updatePrices } from '../src/sim/trade';
@@ -715,5 +717,171 @@ describe('realms', () => {
     for (let y = 0; y < 80 && small.clan !== city.clan; y++) nationsYear(ctx(sim));
     expect(sim.clans.find((c) => c.id === city.clan)!.realm!.gov).not.toBe('clan');
     expect(small.clan).toBe(city.clan);
+  });
+});
+
+describe('politics', () => {
+  const farming = ['agriculture', 'husbandry', 'fishing'];
+  const ctx = (sim: SimState, L = lib): PoliticsContext => {
+    const c: PoliticsContext = {
+      sim,
+      env,
+      lib: L,
+      rand: () => Math.random(),
+      dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
+      cellAt: cellOf,
+      log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
+      name: () => `N${sim.nextId++}`,
+      lifespan: () => 70,
+      newClan: (from) => {
+        const nc: Clan = { id: sim.nextId++, name: 'Rebels', colour: '#000', species: from.species, race: from.race, culture: from.culture, founded: sim.day, parent: from.id, techs: [] };
+        ensureRealm(c, nc);
+        sim.clans.push(nc);
+        return nc;
+      },
+    };
+    return c;
+  };
+  const town = (sim: SimState, base: Settlement, dx: number, dy: number, pop: number): Settlement => {
+    const st: Settlement = { ...base, id: sim.nextId++, kind: 'village', holyTo: [], x: base.x + dx, y: base.y + dy, pop, economy: newEconomy(pop, 1, 6), techs: [...(base.techs ?? [])] };
+    sim.settlements.push(st);
+    return st;
+  };
+  const realmOf = (sim: SimState, st: Settlement) => sim.clans.find((c) => c.id === st.clan)!;
+  const old = (sim: SimState) => sim.day - 69 * DAYS_PER_YEAR;
+  const kid = (sim: SimState, house: string, name: string, age: number) => ({ name, house, female: false, born: sim.day - age * DAYS_PER_YEAR });
+
+  it('passes the throne to the eldest child where the eldest inherits', () => {
+    const sim = newSim(env, 401);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, farming)!;
+    stepDays(sim, env, lib, 1);
+    const realm = realmOf(sim, city).realm!;
+    realm.gov = 'petty-kingdom';
+    const house = realm.ruler.house;
+    for (let y = 0; y < 40 && realm.reigns === 1; y++) {
+      realm.ruler.born = old(sim);
+      realm.family = [kid(sim, house, 'Younger', 20), kid(sim, house, 'Eldest', 30)];
+      politicsYear(ctx(sim));
+    }
+    expect(realm.ruler.name).toBe('Eldest');
+    expect(realm.ruler.house).toBe(house);
+  });
+
+  it('makes the old line a claimant when a new house takes a true-line throne', () => {
+    const L = structuredClone(lib);
+    const g = newGovernment('lords-choose', 'Lords choose');
+    Object.assign(g, { head: 'King or queen', land: 'Great lords with vassals (feudal)', succession: 'Election by lords', legitimacy: 'True line / sacred blood' });
+    L.governments.push(g);
+    const sim = newSim(env, 403);
+    const city = addDawnCity(sim, env, L, humanId(), 6000, yAt(-12), 900, farming)!;
+    stepDays(sim, env, L, 1);
+    const realm = realmOf(sim, city).realm!;
+    realm.gov = 'lords-choose';
+    for (let y = 0; y < 80 && !realm.claimants?.length; y++) {
+      realm.ruler.born = old(sim);
+      realm.family = [kid(sim, realm.ruler.house, 'Heir', 25)];
+      politicsYear(ctx(sim, L));
+    }
+    expect(realm.claimants?.[0]?.why).toBe('true line');
+  });
+
+  it('makes treaties between realms that send envoys, and remembers a broken one as a betrayal; allies take up the quarrel', () => {
+    const sim = newSim(env, 405);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, farming)!;
+    const b = addTribe(sim, env, lib, humanId(), 6200, yAt(-12), -1, 300)!;
+    const c3 = addDawnCity(sim, env, lib, elfId(), 6100, yAt(-13), 900, farming)!;
+    stepDays(sim, env, lib, 1);
+    for (const cu of sim.cultures!) cu.behaviours.push('envoys');
+    const B = sim.clans.find((q) => q.id === b.clan)!;
+    const [A, C] = [realmOf(sim, a), realmOf(sim, c3)];
+    for (let y = 0; y < 40 && !hasPact(sim, A.id, B.id, 'peace'); y++) politicsYear(ctx(sim));
+    expect(hasPact(sim, A.id, B.id, 'peace')).toBe(true);
+    // B and C are allies.
+    sim.realmRelations![B.id < C.id ? `${B.id}|${C.id}` : `${C.id}|${B.id}`] = { opinion: 0.6, memory: 0, pacts: [{ kind: 'defence', since: sim.day }] };
+    noteAttack(sim, lib, (text) => sim.events.push({ day: sim.day, text }), A.id, B.id);
+    expect(hasPact(sim, A.id, B.id, 'peace')).toBe(false);
+    expect(A.realm!.betrayals).toBe(1);
+    expect(relationOf(sim, C.id, A.id)!.hostileUntil!).toBeGreaterThan(sim.day);
+    // B striking back at A is justified: no betrayal.
+    relationOf(sim, A.id, B.id)!.pacts.push({ kind: 'peace', since: sim.day });
+    noteAttack(sim, lib, (text) => sim.events.push({ day: sim.day, text }), B.id, A.id);
+    expect(B.realm!.betrayals ?? 0).toBe(0);
+  });
+
+  it('joins two realms by marriage when a line dies out', () => {
+    const sim = newSim(env, 407);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, farming)!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6200, yAt(-12), 900, farming)!;
+    stepDays(sim, env, lib, 1);
+    const [A, B] = [realmOf(sim, a), realmOf(sim, b)];
+    A.realm!.gov = 'petty-kingdom';
+    B.realm!.gov = 'petty-kingdom';
+    sim.realmRelations = { [A.id < B.id ? `${A.id}|${B.id}` : `${B.id}|${A.id}`]: { opinion: 0.5, memory: 0.2, pacts: [{ kind: 'marriage', since: sim.day }] } };
+    for (let y = 0; y < 60 && sim.clans.includes(A); y++) {
+      A.realm!.ruler.born = old(sim);
+      A.realm!.family = [];
+      A.realm!.claimants = [];
+      B.realm!.ruler.born = sim.day;
+      politicsYear(ctx(sim));
+    }
+    expect(sim.clans.includes(A)).toBe(false);
+    expect(a.clan).toBe(B.id);
+  });
+
+  it('lets long-discontented towns far from the capital break away when they are the stronger', () => {
+    const sim = newSim(env, 409);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, farming)!;
+    stepDays(sim, env, lib, 1);
+    const realm = realmOf(sim, city);
+    realm.realm!.gov = 'feudal-kingdom';
+    const near = town(sim, city, 50, 0, 200);
+    const far = [town(sim, city, 0, 700, 400), town(sim, city, 60, 700, 400)];
+    for (let y = 0; y < 80 && far[0].clan === realm.id; y++) {
+      for (const s of far) {
+        s.control = 0;
+        s.warband = 300;
+        s.fed = 0.5;
+      }
+      near.warband = 5;
+      city.warband = 5;
+      politicsYear(ctx(sim));
+    }
+    expect(far[0].clan).not.toBe(realm.id);
+    expect(far[1].clan).toBe(far[0].clan);
+    expect(sim.clans.find((c) => c.id === far[0].clan)!.parent).toBe(realm.id);
+  });
+
+  it('sends spies from a royal court to steal what a rival knows', () => {
+    const sim = newSim(env, 411);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, farming)!;
+    addDawnCity(sim, env, lib, elfId(), 6200, yAt(-12), 900, [...farming, 'pottery'])!;
+    stepDays(sim, env, lib, 1);
+    sim.cultures!.find((c) => c.id === a.culture)!.behaviours.push('royal-court');
+    const c = ctx(sim);
+    for (let y = 0; y < 40 && !(a.techs ?? []).includes('pottery'); y++) {
+      nationsYear(c);
+      politicsYear(c);
+      for (let d = 0; d < 30; d++) spiesDay(c);
+    }
+    expect(a.techs).toContain('pottery');
+  });
+
+  it('bridges a river on a settled realm’s road, which makes the crossing faster than fording', () => {
+    const sim = newSim(env, 413);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, [...farming, 'roads', 'bridges', 'masonry'])!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6000 + env.step * 6, yAt(-12), 900, farming)!;
+    const cells = pathCells(env, a.x, a.y, b.x, b.y, cellOf);
+    const k = cells[Math.floor(cells.length / 2)];
+    const was = env.fresh[k];
+    env.fresh[k] = 1;
+    try {
+      const ford = pathSpeed(sim, cells, env.fresh);
+      a.economy!.stores = { ...a.economy!.stores, stone: 500, hardwood: 500 };
+      for (let y = 0; y < 5 && !sim.bridge?.[k]; y++) waysYear({ sim, env, lib, cellAt: cellOf, log: () => {}, royalRoads: [[a.id, b.id]], bridges: () => true });
+      expect(sim.bridge![k]).toBe(1);
+      expect(pathSpeed(sim, cells, env.fresh)).toBeGreaterThan(ford * 1.5);
+    } finally {
+      env.fresh[k] = was;
+    }
   });
 });

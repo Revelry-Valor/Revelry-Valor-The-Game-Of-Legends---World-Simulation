@@ -7,6 +7,7 @@ import { markThinned, thinned } from './thinned';
 import { cultureFx, cultureOf, cultureYear, ensureCulture, note, pushes } from './culture';
 import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
 import { ensureRealm, nationsYear, tribalRule } from './nations';
+import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
@@ -181,7 +182,7 @@ function passable(env: Env, ri: RaceInfo, k: number): boolean {
 export function newSim(env: Env, seed: number): SimState {
   const beasts: Record<string, Float32Array> = {};
   for (const b of env.beastInfo) beasts[b.id] = Float32Array.from(env.beastK[b.id], (v) => v * 0.9);
-  return { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], caravans: [], routes: [], traffic: new Float32Array(env.n), way: new Uint8Array(env.n), wayKeeper: new Int32Array(env.n).fill(-1), clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
+  return { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], caravans: [], routes: [], traffic: new Float32Array(env.n), way: new Uint8Array(env.n), wayKeeper: new Int32Array(env.n).fill(-1), bridge: new Uint8Array(env.n), realmRelations: {}, spies: [], clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
 }
 
 /** The culture a race's people start with: the first that names the race (or its species) as its heritage. */
@@ -247,6 +248,9 @@ export function placeStart(sim: SimState, env: Env, lib: Library, setup: SetupRo
   sim.traffic.fill(0);
   sim.way.fill(0);
   sim.wayKeeper.fill(-1);
+  sim.bridge = new Uint8Array(env.n);
+  sim.realmRelations = {};
+  sim.spies = [];
   sim.clans = [];
   sim.sorties = [];
   sim.owner.fill(-1);
@@ -474,6 +478,7 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
     sim.started = true;
     daily(sim, env, info, lib);
     caravansDay(tradeContext(sim, env, lib, info));
+    spiesDay({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
     sim.day++;
     if (sim.day % DAYS_PER_MONTH === 0) monthly(sim, env, lib, info);
     if (sim.day % DAYS_PER_YEAR === 0) yearly(sim, env, lib, info);
@@ -803,11 +808,13 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
         const strength = Math.round(home * 0.8);
         t.away += strength;
         sim.sorties.push({ id: sim.nextId++, tribe: t.id, clan: t.clan, target: raidOn.st.id, targetKind: 'settlement', strength, x: t.x, y: t.y, leg: 'out' });
+        noteAttack(sim, lib, (text, x, y) => log(sim, text, x, y), t.clan, raidOn.st.clan);
         note(sim, t.culture, 'raids');
       } else if (best && rand(sim) < best.p) {
         const strength = Math.round(home * 0.8);
         t.away += strength;
         sim.sorties.push({ id: sim.nextId++, tribe: t.id, clan: t.clan, target: best.e.id, targetKind: 'tribe', strength, x: t.x, y: t.y, leg: 'out' });
+        noteAttack(sim, lib, (text, x, y) => log(sim, text, x, y), t.clan, best.e.clan);
         note(sim, t.culture, 'fights');
       }
     }
@@ -878,6 +885,8 @@ function hostility(sim: SimState, lib: Library, t: Tribe, e: { species: string; 
   if (t.race !== e.race) h *= cultureFx(sim, t.culture).otherRace;
   // Acceptance between their cultures eases (or sharpens) it.
   if (t.culture !== e.culture) h *= 1 - 0.5 * acceptance(sim, t.culture, e.culture);
+  // Their realms: treaties keep the peace; ill will and an ally's quarrel sharpen it.
+  if (t.clan !== e.clan) h *= diplomacyFactor(sim, t.clan, e.clan);
   return h;
 }
 
@@ -937,9 +946,13 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
   cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // Realms: capitals, governments, rulers, reach, culture pressed on their places (nations.ts).
-  const { royalRoads } = nationsYear({ ...rulerContext(sim, lib), env, lib, dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
-  // Trails from use; roads and railways built, kept up, or let go (ways.ts).
-  waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y), royalRoads });
+  const nc = { ...rulerContext(sim, lib), env, lib, dist: (ax: number, ay: number, bx: number, by: number) => dist(env, ax, ay, bx, by), cellAt: (x: number, y: number) => cellOf(env, x, y), log: (text: string, x?: number, y?: number) => log(sim, text, x, y) };
+  const { royalRoads } = nationsYear(nc);
+  // Royal families, factions, diplomacy and spies (politics.ts).
+  const { pactRoads } = politicsYear({ ...nc, newClan: (from) => newClan(sim, lib, from.species, from.race, from.culture, from.id) });
+  // Trails from use; roads and railways built, kept up, or let go; bridges by settled realms (ways.ts).
+  const clanById = new Map(sim.clans.map((q) => [q.id, q]));
+  waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y), royalRoads: [...royalRoads, ...pactRoads], bridges: (st) => !!clanById.get(st.clan) && !tribalRule(lib, clanById.get(st.clan)!) });
   // Ways fade unless they are used; routes long unused are forgotten.
   for (let k = 0; k < sim.traffic.length; k++) sim.traffic[k] *= 0.85;
   sim.routes = sim.routes.filter((r) => sim.day - r.last < DAYS_PER_YEAR * 10 && sim.settlements.some((q) => q.id === r.a && !q.ruined) && sim.settlements.some((q) => q.id === r.b && !q.ruined));

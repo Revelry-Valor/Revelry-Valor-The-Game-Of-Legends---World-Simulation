@@ -367,3 +367,5 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .start-know .field-row { font-size: 0.85rem; }
 .culture-card summary { cursor: pointer; padding: 0.2rem 0; }
 .culture-card .tribe-card { margin-top: 0.3rem; }
+.peoples .treaty-list { list-style: none; padding: 0; margin: 0; }
+.peoples .treaty-list li { padding: 4px 0; border-bottom: 1px solid var(--line, rgba(0,0,0,0.08)); }
