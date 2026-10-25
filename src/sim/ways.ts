@@ -14,8 +14,9 @@ export { knows };
  * Busy trade routes are improved by whichever end can. Trains need the whole way laid as railway,
  * and burn coal for each run.
  *
- * Bridges are a nation's choice (to shorten travel between its cities, to draw trade, or as a
- * term of a pact) and come with nations in Phase 9.
+ * Realms build royal roads from their capital to their towns (nations.ts). Bridges are a
+ * nation's choice (to shorten travel between its cities, to draw trade, or as a term of a pact)
+ * and come with diplomacy (Phase 9 step 2).
  */
 
 export interface WayTier {
@@ -119,6 +120,8 @@ export interface WaysContext {
   lib: Library;
   cellAt: (x: number, y: number) => number;
   log: (text: string, x?: number, y?: number) => void;
+  /** Roads a realm's capital builds to its towns this year (from, to: settlement ids). */
+  royalRoads?: [number, number][];
 }
 
 /** Each year: trails form and fade with use; keepers pay upkeep or their ways fall back; busy routes are improved. */
@@ -161,7 +164,7 @@ export function waysYear(c: WaysContext): void {
     const add = (cost: Record<string, number>, f: number) => {
       for (const [kind, v] of Object.entries(cost)) reserve[kind] = (reserve[kind] ?? 0) + v * f;
     };
-    if (best.tier >= 2 && sim.routes.some((r) => r.a === st.id || r.b === st.id)) add(buildCost(best.tier, best.tech), env.step * BUILD_PER_YEAR);
+    if (best.tier >= 2 && (sim.routes.some((r) => r.a === st.id || r.b === st.id) || c.royalRoads?.some((r) => r[0] === st.id))) add(buildCost(best.tier, best.tech), env.step * BUILD_PER_YEAR);
     const mine = owed.get(st.id);
     if (mine) add(mine.cost, 1);
     st.economy.reserve = reserve;
@@ -174,22 +177,33 @@ export function waysYear(c: WaysContext): void {
     const a = sim.settlements.find((q) => q.id === r.a && !q.ruined);
     const b = sim.settlements.find((q) => q.id === r.b && !q.ruined);
     if (!a || !b) continue;
-    for (const [from, to] of [[a, b], [b, a]] as const) {
-      const best = bestWay(lib, from);
-      if (best.tier < 2) continue;
-      const cells = pathCells(env, from.x, from.y, to.x, to.y, c.cellAt);
-      let built = 0;
-      for (const k of cells) {
-        if (built >= BUILD_PER_YEAR) break;
-        if (sim.way[k] >= best.tier) continue;
-        if (!pay(env, from, scale(buildCost(best.tier, best.tech), env.step))) break;
-        const first = !cells.some((q) => sim.way[q] >= best.tier);
-        sim.way[k] = best.tier;
-        sim.wayKeeper[k] = from.id;
-        built++;
-        if (first) c.log(`${from.name} began ${best.tier === 4 ? 'a railway' : `a ${WAYS[best.tier].name.toLowerCase()}`} toward ${to.name}.`, from.x, from.y);
-      }
-      if (built && cells.every((q) => sim.way[q] >= best.tier) && built > 0) c.log(`The ${WAYS[best.tier].name.toLowerCase()} between ${from.name} and ${to.name} is finished.`, to.x, to.y);
-    }
+    buildToward(c, a, b);
+    buildToward(c, b, a);
   }
+  // Royal roads: a realm's capital ties its towns to it (nations.ts).
+  for (const [from, to] of c.royalRoads ?? []) {
+    const a = sim.settlements.find((q) => q.id === from && !q.ruined);
+    const b = sim.settlements.find((q) => q.id === to && !q.ruined);
+    if (a && b) buildToward(c, a, b, 'royal ');
+  }
+}
+
+/** A year's building on the way from one settlement toward another, at the best tier it can build and pay for. */
+function buildToward(c: WaysContext, from: Settlement, to: Settlement, kind = ''): void {
+  const { sim, env, lib } = c;
+  const best = bestWay(lib, from);
+  if (best.tier < 2) return;
+  const cells = pathCells(env, from.x, from.y, to.x, to.y, c.cellAt);
+  let built = 0;
+  for (const k of cells) {
+    if (built >= BUILD_PER_YEAR) break;
+    if (sim.way[k] >= best.tier) continue;
+    if (!pay(env, from, scale(buildCost(best.tier, best.tech), env.step))) break;
+    const first = !cells.some((q) => sim.way[q] >= best.tier);
+    sim.way[k] = best.tier;
+    sim.wayKeeper[k] = from.id;
+    built++;
+    if (first) c.log(`${from.name} began ${best.tier === 4 ? `a ${kind}railway` : `a ${kind}${WAYS[best.tier].name.toLowerCase()}`} toward ${to.name}.`, from.x, from.y);
+  }
+  if (built && cells.every((q) => sim.way[q] >= best.tier)) c.log(`The ${kind}${WAYS[best.tier].name.toLowerCase()} between ${from.name} and ${to.name} is finished.`, to.x, to.y);
 }

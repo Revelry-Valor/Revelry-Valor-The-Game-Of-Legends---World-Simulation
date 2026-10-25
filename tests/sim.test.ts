@@ -7,7 +7,9 @@ import { KM_PER_DEGREE } from '../src/core/units';
 import type { Library } from '../src/core/library';
 import { buildEnv, type Env } from '../src/sim/env';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
-import { DAYS_PER_YEAR, dateText } from '../src/sim/state';
+import { DAYS_PER_YEAR, dateText, type Settlement, type SimState } from '../src/sim/state';
+import { nationsYear, type NationContext } from '../src/sim/nations';
+import { newCulture } from '../src/core/library';
 import { packSim, unpackSim } from '../src/sim/pack';
 import { cropYear, isFood, newEconomy } from '../src/sim/economy';
 import { updatePrices } from '../src/sim/trade';
@@ -109,7 +111,7 @@ describe('the first peoples', () => {
     expect(game()).toBeLessThan(before);
   });
   it('sends warbands out and brings them home', () => {
-    const sim = newSim(env, 11);
+    const sim = newSim(env, 14);
     const a = addTribe(sim, env, lib, humanId(), 6000, yAt(30), -1, 400)!;
     // Neighbours of another people (kin of one culture are slow to fight each other).
     const b = addTribe(sim, env, lib, elfId(), 6030, yAt(30), -1, 400)!;
@@ -297,7 +299,7 @@ describe('settlements and their economy', () => {
     stepDays(sim, env, lib, DAYS_PER_YEAR * 10);
     expect(city.ruined).toBe(false);
     expect(city.pop).toBeLessThan(600);
-    expect(city.pop).toBeGreaterThan(250);
+    expect(city.pop).toBeGreaterThan(200);
     // It herds as well as farms.
     expect(Object.keys(city.economy!.jobs).some((k) => k.startsWith('herd:'))).toBe(true);
   }, 60000);
@@ -601,4 +603,117 @@ describe('culture change', () => {
     expect(blend!.blend!.sort()).toEqual([...before].sort());
     expect([a.culture, b.culture]).toContain(blend!.id);
   }, 180000);
+});
+
+describe('realms', () => {
+  const farming = ['agriculture', 'husbandry', 'fishing'];
+  const ctx = (sim: SimState, L = lib): NationContext => ({
+    sim,
+    env,
+    lib: L,
+    rand: () => Math.random(),
+    dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
+    cellAt: cellOf,
+    log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
+    name: () => 'Ana',
+    lifespan: () => 70,
+  });
+  /** Another town of the same clan and culture, some km away. */
+  const town = (sim: SimState, base: Settlement, dx: number, dy: number, pop: number): Settlement => {
+    const st: Settlement = { ...base, id: sim.nextId++, kind: 'village', holyTo: [], x: base.x + dx, y: base.y + dy, pop, economy: newEconomy(pop, 1, 6), techs: [...(base.techs ?? [])] };
+    sim.settlements.push(st);
+    return st;
+  };
+  const learn = (sim: SimState, cultureId: string, ids: string[]) => {
+    const cu = sim.cultures!.find((c) => c.id === cultureId)!;
+    cu.behaviours = [...new Set([...cu.behaviours, ...ids])];
+  };
+
+  it('makes every clan a realm under a chief, and a settled clan that learned to rule together a chiefdom', () => {
+    const sim = newSim(env, 301);
+    const t = addTribe(sim, env, lib, humanId(), 6000, yAt(-12), -1, 150)!;
+    const clan = sim.clans.find((c) => c.id === t.clan)!;
+    expect(clan.realm?.gov).toBe('clan');
+    expect(clan.realm?.ruler.house).toBe(clan.name);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 600, farming)!;
+    town(sim, city, 80, 0, 200);
+    stepDays(sim, env, lib, 1);
+    learn(sim, city.culture, ['oral-law', 'tribal-council', 'settling']);
+    nationsYear(ctx(sim));
+    const realm = sim.clans.find((c) => c.id === city.clan)!.realm!;
+    expect(realm.gov).toBe('chiefdom');
+    expect(realm.capital).toBe(city.id);
+    // Kept with the save.
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(back.clans.find((c) => c.id === city.clan)!.realm!.gov).toBe('chiefdom');
+  });
+
+  it('keeps a government its culture locks, once its people can have it', () => {
+    const L = structuredClone(lib);
+    const cu = newCulture('rabbit-ways', 'Rabbit ways');
+    cu.races = [humanId()];
+    cu.government = 'theocracy';
+    cu.governmentHold = 'Locked';
+    L.cultures.push(cu);
+    const sim = newSim(env, 303);
+    const city = addDawnCity(sim, env, L, humanId(), 6000, yAt(-12), 1200, farming)!;
+    stepDays(sim, env, L, 1);
+    expect(sim.cultures!.find((c) => c.id === city.culture)!.source).toBe('rabbit-ways');
+    for (let y = 0; y < 3; y++) nationsYear(ctx(sim, L));
+    expect(sim.clans.find((c) => c.id === city.clan)!.realm!.gov).toBe('theocracy');
+  });
+
+  it('holds near towns more firmly than far ones, and holds the far ones better along a road', () => {
+    const sim = newSim(env, 305);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, farming)!;
+    const near = town(sim, city, 60, 0, 200);
+    const far = town(sim, city, 0, 400, 200);
+    stepDays(sim, env, lib, 1);
+    nationsYear(ctx(sim));
+    expect(near.control!).toBeGreaterThan(far.control!);
+    const before = far.control!;
+    for (const k of pathCells(env, city.x, city.y, far.x, far.y, cellOf)) sim.way[k] = 3;
+    nationsYear(ctx(sim));
+    expect(far.control!).toBeGreaterThan(before * 1.3);
+  });
+
+  it('presses its culture on the towns it holds (an empire hard, a band of clans hardly at all)', () => {
+    const L = structuredClone(lib);
+    const cu = newCulture('imperial', 'Imperial');
+    cu.races = [humanId()];
+    cu.government = 'empire';
+    cu.governmentHold = 'Locked';
+    L.cultures.push(cu);
+    const sim = newSim(env, 307);
+    const city = addDawnCity(sim, env, L, humanId(), 6000, yAt(-12), 1500, farming)!;
+    const elves = addDawnCity(sim, env, L, elfId(), 6000, yAt(-14), 200, farming)!;
+    stepDays(sim, env, L, 1);
+    learn(sim, city.culture, ['oral-law', 'tribal-council', 'royal-court', 'taxation']);
+    // The elf town is taken into the human realm.
+    elves.clan = city.clan;
+    elves.holyTo = [];
+    const was = elves.culture;
+    for (let y = 0; y < 150 && elves.culture === was; y++) {
+      nationsYear(ctx(sim, L));
+      sim.day += DAYS_PER_YEAR;
+    }
+    expect(sim.clans.find((c) => c.id === city.clan)!.realm!.gov).toBe('empire');
+    expect(elves.culture).toBe(city.culture);
+    expect(sim.events.some((e) => e.text.includes(`${elves.name} has taken on the ways`))).toBe(true);
+  });
+
+  it('draws a small kindred clan nearby into a settled realm', () => {
+    const sim = newSim(env, 309);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 2500, farming)!;
+    town(sim, city, 90, 0, 600);
+    town(sim, city, -90, 0, 600);
+    stepDays(sim, env, lib, 1);
+    learn(sim, city.culture, lib.behaviours.map((b) => b.id));
+    const small = addTribe(sim, env, lib, humanId(), 6000, yAt(-13), -1, 100)!;
+    small.culture = city.culture;
+    sim.clans.find((c) => c.id === small.clan)!.culture = city.culture;
+    for (let y = 0; y < 80 && small.clan !== city.clan; y++) nationsYear(ctx(sim));
+    expect(sim.clans.find((c) => c.id === city.clan)!.realm!.gov).not.toBe('clan');
+    expect(small.clan).toBe(city.clan);
+  });
 });

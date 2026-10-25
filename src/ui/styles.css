@@ -336,6 +336,10 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 @media (prefers-color-scheme: dark) { .holy-tag { color: #f2c230; } }
 .peoples tr.clickable { cursor: pointer; }
 .peoples tr.clickable:hover { background: var(--bg); }
+.peoples tr.picked { background: var(--bg); outline: 1px solid var(--accent, #6a8); }
+.peoples .link { cursor: pointer; text-decoration: underline dotted; }
+.peoples li.clickable { cursor: pointer; }
+.peoples li.clickable:hover { background: var(--bg); }
 .race-pick select { max-width: 7.5rem; }
 .race-pick { display: flex; flex-direction: column; gap: 0.35rem; }
 .race-row { border-bottom: 1px solid var(--line); padding-bottom: 0.35rem; }

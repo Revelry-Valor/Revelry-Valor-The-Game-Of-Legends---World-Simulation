@@ -55,6 +55,32 @@ export interface Clan {
   techs?: string[];
   /** Years it has lived far from its culture's heartland with no ties back (toward a culture of its own). */
   drift?: number;
+  /** How it is ruled (Phase 9): every clan is a realm, from a band under its chief to an empire. */
+  realm?: Realm;
+}
+
+/** A ruler: a name, a house (the ruling line), and when they were born and came to rule. */
+export interface Ruler {
+  name: string;
+  house: string;
+  female: boolean;
+  born: number;
+  since: number;
+}
+
+/**
+ * How a clan is ruled (REDESIGN.md 8.4a–c): its government (a Library government id), its capital,
+ * its ruler, and how centralized it is (0–1: its real ability to make its orders felt).
+ */
+export interface Realm {
+  gov: string;
+  since: number;
+  /** The capital (a settlement id), or −1 for a realm with no settlements. */
+  capital: number;
+  centralization: number;
+  ruler: Ruler;
+  /** Rulers so far of this realm (for the list of its reigns). */
+  reigns: number;
 }
 
 /**
@@ -91,6 +117,8 @@ export interface Settlement {
   hardship?: { famine: number; war: number };
   /** Drawn toward another culture (a big neighbour's, or the many small ones round it): how far along (0–1). */
   cultureShift?: { to: string; progress: number };
+  /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
+  control?: number;
 }
 
 /**

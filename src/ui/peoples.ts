@@ -11,7 +11,8 @@ import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTri
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
-import type { LiveCulture } from '../sim/state';
+import type { Clan, LiveCulture } from '../sim/state';
+import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
 import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -64,6 +65,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let gridProblem = false;
   let active = false;
   let selected: number | null = null;
+  /** The realm (clan id) whose card is open. */
+  let selectedRealm: number | null = null;
   let mode: 'select' | 'add' = 'select';
   let addRace = '';
   let addWhat: 'tribe' | 'dawn' = 'tribe';
@@ -460,6 +463,25 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.strokeStyle = st.id === selected ? '#ffffff' : st.holyTo.length ? '#f2c230' : 'rgba(0,0,0,0.8)';
           g.stroke();
           g.setLineDash([]);
+          // A realm's capital: a crown above the house.
+          const cap = !st.ruined && clanOf(st.clan)?.realm?.capital === st.id;
+          if (cap) {
+            const cy = sy - r - 3;
+            g.beginPath();
+            g.moveTo(sx - 5, cy);
+            g.lineTo(sx - 5, cy - 6);
+            g.lineTo(sx - 2.5, cy - 3);
+            g.lineTo(sx, cy - 7);
+            g.lineTo(sx + 2.5, cy - 3);
+            g.lineTo(sx + 5, cy - 6);
+            g.lineTo(sx + 5, cy);
+            g.closePath();
+            g.fillStyle = '#f2c230';
+            g.fill();
+            g.lineWidth = 1;
+            g.strokeStyle = 'rgba(0,0,0,0.8)';
+            g.stroke();
+          }
           if (!st.ruined && st.fed < 0.8) {
             g.strokeStyle = '#ff4030';
             g.lineWidth = 1.5;
@@ -736,6 +758,34 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const made = L.cultures.find((c) => c.races.includes(raceId)) ?? (sp ? L.cultures.find((c) => c.species.includes(sp.id)) : undefined);
     return made ? `Culture: ${made.name} (from the Library).` : 'Culture: a folk culture will grow from its homeland and way of life (make one in the Library to choose it yourself).';
   };
+  /** A realm: its government (parts), ruler, capital, centralization and how firmly it holds each town. */
+  const realmCard = (cn: Clan): HTMLElement => {
+    const L = lib();
+    const s = sim!;
+    const r = cn.realm;
+    const g = r ? govOf(L, r.gov) : undefined;
+    const towns = s.settlements.filter((q) => !q.ruined && q.clan === cn.id).sort((a, b) => (b.control ?? 0) - (a.control ?? 0) || b.pop - a.pop);
+    const tribes = s.tribes.filter((t) => t.clan === cn.id);
+    const capital = towns.find((q) => q.id === r?.capital);
+    const pref = preferredGov(s, L, cn.culture);
+    const pg = pref.gov ? govOf(L, pref.gov) : undefined;
+    const age = r ? Math.floor((s.day - r.ruler.born) / 360) : 0;
+    const part = (label: string, v: string | string[] | undefined) => (v && (!Array.isArray(v) || v.length) ? h('li', {}, h('span', { class: 'muted' }, label), h('span', {}, Array.isArray(v) ? v.join(', ') : v)) : null);
+    const pct = (v: number) => `${Math.round(v * 100)}%`;
+    return h('div', { class: 'tribe-card small realm-card' },
+      h('div', {}, h('span', { class: 'swatch', style: `background:${cn.colour}` }), h('b', {}, realmName(L, cn)), ` · ${raceName(cn.race)}`),
+      cultureLine(cn.culture),
+      r ? h('div', {}, `${rulerTitle(L, cn)} ${r.ruler.name} of the house of ${r.ruler.house}, ${age} years old, ruling since year ${yearOf(r.ruler.since)}${r.reigns > 1 ? ` (reign ${r.reigns} of this realm)` : ''}.`) : null,
+      h('div', {}, capital ? `Capital: ${capital.name}. ` : 'No capital: its tribes move with the seasons. ', `${towns.length} town${towns.length === 1 ? '' : 's'}, ${tribes.length} tribe${tribes.length === 1 ? '' : 's'}.`),
+      g ? h('div', { class: 'econ-head' }, `Government: ${g.name}${r ? ` (since year ${yearOf(r.since)})` : ''}`) : null,
+      g ? h('ul', { class: 'econ-list' }, part('Head', g.head), part('Ruling class', g.ruling), part('Land held by', g.land), part('Succession', g.succession), part('Legitimacy', g.legitimacy), part('Army', g.army), part('Law', g.law)) : null,
+      h('div', { class: 'muted' }, pg ? `Its culture prefers: ${pg.name}${pref.hold ? ` (${pref.hold.toLowerCase()})` : ' (free to change)'}.` : 'Its culture has no preferred government: its conditions lead it (size, way of life, trade, the ways of rule it has learned).'),
+      r ? h('div', {}, `Centralization: ${pct(r.centralization)}`, h('span', { class: 'muted' }, ' — how far its orders are felt; raised by writing, records, taxes, riders and roads.')) : null,
+      towns.length > 1 ? h('div', { class: 'econ-head' }, 'How firmly it holds its towns') : null,
+      towns.length > 1 ? h('ul', { class: 'econ-list' }, ...towns.slice(0, 12).map((q) => h('li', { class: 'clickable', onclick: () => { selected = q.id; selectedRealm = null; render(); d.redraw(); } }, h('span', {}, q.name, q.id === r?.capital ? h('span', { class: 'muted' }, ' (capital)') : null, q.culture !== cn.culture && cultureOf(s, q.culture) ? h('span', { class: 'muted' }, ` · ${cultureOf(s, q.culture)!.name}`) : null), h('span', { class: 'num' }, pct(q.control ?? 0))))) : null,
+      towns.length > 12 ? h('div', { class: 'muted' }, `…and ${towns.length - 12} more.`) : null,
+    );
+  };
   const cultureLine = (id: string): HTMLElement | null => {
     const cu = cultureOf(sim!, id);
     return cu ? h('div', {}, `Culture: ${cu.name}${cu.source ? '' : ' (folk)'}`) : null;
@@ -879,7 +929,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   const settlementLine = (st: Settlement) => {
     const what = st.kind === 'dawn' ? 'dawn city' : 'village';
     if (st.ruined) return `Ruins of ${st.name} (${what})${st.holyTo.length ? `, holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
-    return `${st.name} (${what}, clan ${clanOf(st.clan)?.name ?? '?'}): ${Math.round(st.pop)} people, ${Math.round(Math.min(1, st.fed) * 100)}% fed${st.holyTo.length ? `; holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
+    const cn = clanOf(st.clan);
+    return `${st.name} (${what}${cn?.realm?.capital === st.id ? ', capital' : ''}, ${cn ? realmName(lib(), cn) : '?'}): ${Math.round(st.pop)} people, ${Math.round(Math.min(1, st.fed) * 100)}% fed${st.holyTo.length ? `; holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
   };
   const tribeAt = (x: number, y: number, pk: number): Tribe | null => {
     if (!sim || !env) return null;
@@ -1027,17 +1078,20 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         .map((cn) => ({ cn, tribes: [...s.tribes.filter((t) => t.clan === cn.id), ...s.settlements.filter((q) => !q.ruined && q.clan === cn.id)] }))
         .sort((a, b) => b.tribes.reduce((n, t) => n + t.pop, 0) - a.tribes.reduce((n, t) => n + t.pop, 0))
         .map(({ cn, tribes }) =>
-          h('tr', {},
-            h('td', {}, h('span', { class: 'swatch', style: `background:${cn.colour}` }), cn.name, h('div', { class: 'muted' }, raceName(cn.race))),
-            h('td', { class: 'num' }, String(tribes.filter((q) => 'summer' in q).length)),
+          h('tr', { class: `clickable${selectedRealm === cn.id ? ' picked' : ''}`, onclick: () => { selectedRealm = selectedRealm === cn.id ? null : cn.id; selected = null; render(); d.redraw(); } },
+            h('td', {}, h('span', { class: 'swatch', style: `background:${cn.colour}` }), realmName(L, cn), h('div', { class: 'muted' }, `${raceName(cn.race)}${cn.realm ? ` · ${rulerTitle(L, cn)} ${cn.realm.ruler.name}` : ''}`)),
+            h('td', { class: 'num' }, `${tribes.filter((q) => !('summer' in q)).length} / ${tribes.filter((q) => 'summer' in q).length}`),
             h('td', { class: 'num' }, Math.round(tribes.reduce((n, t) => n + t.pop, 0)).toLocaleString()),
             h('td', { class: 'num' }, Math.round((land.get(cn.id) ?? 0) * SQ_MI).toLocaleString()),
           ),
         );
       parts.push(
-        h('h3', {}, 'Clans'),
-        h('div', { class: 'table-scroll' }, h('table', { class: 'clan-table small' }, h('thead', {}, h('tr', {}, h('th', {}, 'Clan'), h('th', {}, 'Tribes'), h('th', {}, 'People'), h('th', {}, 'Land, sq mi'))), h('tbody', {}, ...clanRows))),
+        h('h3', {}, 'Realms'),
+        h('p', { class: 'muted small' }, 'Every clan is a realm, from a band of tribes under its chief to a kingdom or empire. Click one to see how it is ruled.'),
+        h('div', { class: 'table-scroll' }, h('table', { class: 'clan-table small' }, h('thead', {}, h('tr', {}, h('th', {}, 'Realm'), h('th', {}, 'Towns / tribes'), h('th', {}, 'People'), h('th', {}, 'Land, sq mi'))), h('tbody', {}, ...clanRows))),
       );
+      const rc = s.clans.find((q) => q.id === selectedRealm);
+      if (rc) parts.push(realmCard(rc));
       if (s.settlements.length) {
         const order = [...s.settlements].sort((a, b) => (a.kind === 'dawn' ? 0 : 1) - (b.kind === 'dawn' ? 0 : 1) || b.pop - a.pop);
         parts.push(
@@ -1143,7 +1197,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           st.holyTo.length ? h('div', { class: 'holy-tag' }, `Holy to all the ${st.holyTo.map(raceName).join(', ')}, wherever they are${st.ruined ? ', even in ruin' : ''}.`) : null,
           st.ruined
             ? h('div', {}, 'In ruins. Those who come to it may build it again (its own people most of all).')
-            : h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), `Clan ${clan?.name ?? '?'} · ${raceName(st.race)}`),
+            : h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), h('span', { class: 'link', onclick: () => { if (clan) { selectedRealm = clan.id; selected = null; render(); d.redraw(); } } }, clan ? realmName(L, clan) : '?'), ` · ${raceName(st.race)}`),
+          !st.ruined && clan?.realm && s.started
+            ? h('div', {}, clan.realm.capital === st.id ? `The capital, seat of ${rulerTitle(L, clan)} ${clan.realm.ruler.name}.` : `Its realm's hold here: ${Math.round((st.control ?? 0) * 100)}%`, clan.realm.capital === st.id ? null : h('span', { class: 'muted' }, ' (from the days an order takes to come from the capital, and the realm’s centralization)'))
+            : null,
           st.ruined ? null : cultureLine(st.culture),
           !st.ruined && st.cultureShift ? h('div', { class: 'muted' }, `Being drawn into the ways of the ${cultureOf(s, st.cultureShift.to)?.name ?? '?'} (${Math.round(st.cultureShift.progress * 100)}%).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),

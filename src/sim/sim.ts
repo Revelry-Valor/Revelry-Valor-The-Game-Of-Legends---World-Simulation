@@ -6,6 +6,7 @@ import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
 import { cultureFx, cultureOf, cultureYear, ensureCulture, note, pushes } from './culture';
 import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
+import { ensureRealm, nationsYear, tribalRule } from './nations';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
@@ -191,8 +192,19 @@ export function startCulture(lib: Library, species: Species, race: Race): string
 function newClan(sim: SimState, lib: Library, species: string, race: string, culture: string, parent = -1): Clan {
   const id = sim.nextId++;
   const clan: Clan = { id, name: makeName(sim, lib, culture), colour: PALETTE[sim.clans.length % PALETTE.length], species, race, culture, founded: sim.day, parent, techs: [...(sim.clans.find((c) => c.id === parent)?.techs ?? [])] };
+  ensureRealm(rulerContext(sim, lib), clan);
   sim.clans.push(clan);
   return clan;
+}
+
+/** What naming rulers and judging their years needs. */
+function rulerContext(sim: SimState, lib: Library) {
+  return {
+    sim,
+    rand: () => rand(sim),
+    name: (cultureId: string) => makeName(sim, lib, cultureId),
+    lifespan: (raceId: string) => lib.species.flatMap((s) => s.races).find((r) => r.id === raceId)?.lifespan ?? 70,
+  };
 }
 
 export function addTribe(sim: SimState, env: Env, lib: Library, raceId: string, x: number, y: number, clanId = -1, pop = 150): Tribe | null {
@@ -888,7 +900,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
       const first = kinTribes[0];
       const far = first ? dist(env, first.x, first.y, t.x, t.y) > 700 : false;
       let clanId = clan.id;
-      if ((kinTribes.length >= 6 || far) && rand(sim) < 0.5) {
+      // (Only a clan still ruled as clans and tribes: a settled realm keeps its tribes.)
+      if ((kinTribes.length >= 6 || far) && tribalRule(lib, clan) && rand(sim) < 0.5) {
         const nc = newClan(sim, lib, clan.species, clan.race, clan.culture, clan.id);
         clanId = nc.id;
         log(sim, `A new clan, ${nc.name}, broke away from clan ${clan.name}.`, t.x, t.y);
@@ -923,8 +936,10 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   cultureYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
   cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
+  // Realms: capitals, governments, rulers, reach, culture pressed on their places (nations.ts).
+  const { royalRoads } = nationsYear({ ...rulerContext(sim, lib), env, lib, dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
   // Trails from use; roads and railways built, kept up, or let go (ways.ts).
-  waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y) });
+  waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y), royalRoads });
   // Ways fade unless they are used; routes long unused are forgotten.
   for (let k = 0; k < sim.traffic.length; k++) sim.traffic[k] *= 0.85;
   sim.routes = sim.routes.filter((r) => sim.day - r.last < DAYS_PER_YEAR * 10 && sim.settlements.some((q) => q.id === r.a && !q.ruined) && sim.settlements.some((q) => q.id === r.b && !q.ruined));
@@ -1014,7 +1029,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       st.pop -= n;
       // A big clan's new tribe may start a clan of its own.
       let clanId = clan.id;
-      if (sim.tribes.filter((t) => t.clan === clan.id).length >= 6 && rand(sim) < 0.4) {
+      if (sim.tribes.filter((t) => t.clan === clan.id).length >= 6 && tribalRule(lib, clan) && rand(sim) < 0.4) {
         const nc = newClan(sim, lib, clan.species, clan.race, clan.culture, clan.id);
         clanId = nc.id;
       }

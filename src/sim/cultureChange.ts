@@ -15,7 +15,7 @@ import type { LiveCulture, Settlement, SimState, Tribe } from './state';
  *   grows a culture of its own (a single city can).
  * - Hybrids: two cultures living side by side with high acceptance for decades blend into a new
  *   one where they mix.
- * Rulers enforcing their culture, and a nation's main culture pulling the rest, come with nations.
+ * Rulers pressing their culture on the places they rule is in nations.ts.
  */
 
 export interface ChangeContext {
@@ -151,6 +151,11 @@ export function cultureChangeYear(c: ChangeContext): void {
     const acc = acceptance(sim, small.culture, big.culture);
     const pace = 0.04 * (0.5 + Math.max(0, acc));
     const [who, to] = ours > theirs ? [big, small.culture] : [small, big.culture];
+    if (who.cultureShift && who.cultureShift.to !== to) {
+      // Already drawn another way (by its realm, or another neighbour): that is undone first.
+      who.cultureShift.progress -= pace;
+      if (who.cultureShift.progress > 0) continue;
+    }
     if (!who.cultureShift || who.cultureShift.to !== to) who.cultureShift = { to, progress: 0 };
     who.cultureShift.progress += pace;
     if (who.cultureShift.progress >= 1) {
