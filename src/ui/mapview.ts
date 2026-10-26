@@ -977,7 +977,9 @@ export function createMapView(o: MapViewOptions): MapView {
     const nice = [1, 2, 5, 10].map((m) => m * p).filter((m) => m <= miles).pop() ?? p;
     const len = milesToKm(nice) * view.scale;
     const x = 16;
-    const y = r.height - 22;
+    // Above the time bar when it is shown (it sits at the bottom left).
+    const bar = canvas.parentElement?.querySelector<HTMLElement>('.sim-bar:not([hidden])');
+    const y = r.height - 22 - (bar ? bar.offsetHeight + 12 : 0);
     g.fillStyle = css('--panel');
     g.globalAlpha = 0.85;
     g.fillRect(x - 8, y - 22, len + 16, 34);
