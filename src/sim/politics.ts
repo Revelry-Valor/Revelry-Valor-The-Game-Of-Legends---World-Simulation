@@ -5,6 +5,7 @@ import { govOf, realmName, rulerTitle, tribalRule, type NationContext } from './
 import type { Claimant, Clan, Pact, Realm, RealmRelation, Royal, Ruler, Settlement, SimState, Spy } from './state';
 import { DAYS_PER_YEAR } from './state';
 import { knows } from './tech';
+import { faithLoyalty, faithOpinion } from './faith';
 
 /**
  * Inside and between realms (REDESIGN.md 8.4a, 8.4d, 8.5; Phase 9 step 2).
@@ -223,6 +224,8 @@ function loyaltyOf(sim: SimState, lib: NationContext['lib'], clan: Clan, st: Set
   if (st.fed < 0.8) v -= 0.1;
   const rival = Math.max(0, ...(clan.realm?.claimants ?? []).map((q) => q.backing));
   v -= 0.15 * rival;
+  // Of another faith than its ruler's (persecuted under an intolerant one).
+  v -= faithLoyalty(sim, clan, st);
   // Great lords grow ambitious in a big realm (a feudal one most of all).
   const land = govOf(lib, clan.realm?.gov ?? '')?.land ?? '';
   v -= Math.min(0.3, towns * (land === 'Great lords with vassals (feudal)' ? 0.005 : land === 'Clans and tribes' ? 0.004 : 0.002));
@@ -371,7 +374,7 @@ function diplomacyYear(c: PoliticsContext): [number, number][] {
   }
   for (const [A, B] of pairs) {
     const rel = relation(sim, A.id, B.id);
-    const target = clamp(0.5 * acceptance(sim, A.culture, B.culture) + rel.memory + rel.pacts.reduce((n, p) => n + PACT_OPINION[p.kind], 0) - 0.1 * ((A.realm?.betrayals ?? 0) + (B.realm?.betrayals ?? 0)), -1, 1);
+    const target = clamp(0.5 * acceptance(sim, A.culture, B.culture) + faithOpinion(sim, A, B) + rel.memory + rel.pacts.reduce((n, p) => n + PACT_OPINION[p.kind], 0) - 0.1 * ((A.realm?.betrayals ?? 0) + (B.realm?.betrayals ?? 0)), -1, 1);
     rel.opinion += (target - rel.opinion) * 0.2;
     rel.memory *= rel.memory > 0 ? 0.93 : 0.92;
     rel.hits = 0;

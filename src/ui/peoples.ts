@@ -11,9 +11,10 @@ import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTri
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
-import type { Clan, LiveCulture } from '../sim/state';
+import type { Clan, LiveCulture, LiveFaith } from '../sim/state';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
 import { opinionWord, PACT_NAMES } from '../sim/politics';
+import { faithColour, faithOf, ORGANIZATION_WORDS, realmFaith } from '../sim/faith';
 import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -77,7 +78,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let showRes = '';
   let showTrade = true;
   let showWays = true;
-  let landsBy: 'clan' | 'culture' = 'clan';
+  let landsBy: 'clan' | 'culture' | 'faith' = 'clan';
   let resDirty = true;
   let resImg: HTMLCanvasElement | null = null;
   let follow = true;
@@ -169,6 +170,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const n = Math.floor(acc);
     if (n > 0) {
       acc -= n;
+      sim.gods = d.world().settings.gods ?? { active: true, activity: 50 };
       stepDays(sim, env, lib(), n);
       afterStep();
       if (!alive()) {
@@ -206,6 +208,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const t0 = performance.now();
       while (left > 0 && performance.now() - t0 < 30) {
         const n = Math.min(DAYS_PER_MONTH, left);
+        sim!.gods = d.world().settings.gods ?? { active: true, activity: 50 };
         stepDays(sim!, env!, lib(), n);
         left -= n;
       }
@@ -265,7 +268,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     // Each clan's colour, or its culture's.
     const colours = new Map(s.clans.map((c) => {
       const cu = landsBy === 'culture' ? cultureOf(s, c.culture) : undefined;
-      return [c.id, hex(cu ? cultureColour(s, cu) : c.colour)];
+      const fa = landsBy === 'faith' ? realmFaith(s, c) : undefined;
+      return [c.id, hex(cu ? cultureColour(s, cu) : fa ? faithColour(s, fa) : c.colour)];
     }));
     return fieldImage((data) => {
       for (let k = 0; k < e.n; k++) {
@@ -451,6 +455,22 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.beginPath();
           g.arc(sx, sy, 3.5, 0, Math.PI * 2);
           g.fill();
+          g.stroke();
+        }
+        // Holy sites: a gold star (dimmed where the faith has lost it).
+        for (const f of s.faiths ?? []) for (const hs of f.holySites) {
+          const [hx, hy] = at(hs.x, hs.y, c);
+          g.beginPath();
+          for (let i = 0; i < 10; i++) {
+            const a = -Math.PI / 2 + (i * Math.PI) / 5;
+            const r = i % 2 ? 2.6 : 6;
+            g.lineTo(hx + 12 + Math.cos(a) * r, hy - 10 + Math.sin(a) * r);
+          }
+          g.closePath();
+          g.fillStyle = hs.held ? faithColour(s, f) : 'rgba(150,150,150,0.6)';
+          g.fill();
+          g.lineWidth = 1.2;
+          g.strokeStyle = hs.held ? '#f2c230' : 'rgba(60,60,60,0.8)';
           g.stroke();
         }
         // Trade routes: faint lines between trading settlements, bolder the more they are used; caravans on them.
@@ -691,6 +711,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         break;
       }
       const k = cellOf(x, y);
+      for (const f of s.faiths ?? []) for (const hs of f.holySites) {
+        if (Math.hypot(hs.x + 12 * pxKm - x, hs.y - 10 * pxKm - y) < pxKm * 8) out.push(`${hs.name}: holy site of the ${f.name}${hs.held ? '' : ' (lost to it)'}`);
+      }
       for (const sp of s.spies ?? []) {
         const [sx, sy] = [sp.x, sp.y];
         if (Math.hypot(sx - x, sy - y) < pxKm * 6) {
@@ -821,6 +844,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     return h('div', { class: 'tribe-card small realm-card' },
       h('div', {}, h('span', { class: 'swatch', style: `background:${cn.colour}` }), h('b', {}, realmName(L, cn)), ` · ${raceName(cn.race)}`),
       cultureLine(cn.culture),
+      (() => {
+        const f = realmFaith(s, cn);
+        return f ? h('div', {}, h('span', { class: 'swatch', style: `background:${faithColour(s, f)}` }), `Faith: the ${f.name}`, h('span', { class: 'muted' }, ` (${({ Tolerant: 'tolerates other faiths', Accepting: 'accepts other faiths', Wary: 'wary of other faiths', Intolerant: 'presses its faith on others', Hostile: 'persecutes other faiths' } as Record<string, string>)[f.tolerance] ?? ''})`)) : null;
+      })(),
+      ...(s.champions ?? []).filter((ch) => ch.clan === cn.id).map((ch) => h('div', {}, `Champion of ${L.gods.find((g) => g.id === ch.god)?.name ?? 'a god'}: ${ch.name} (its warriors fight the harder)`)),
       r ? h('div', {}, `${rulerTitle(L, cn)} ${r.ruler.name} of the house of ${r.ruler.house}, ${age} years old, ruling since year ${yearOf(r.ruler.since)}${r.reigns > 1 ? ` (reign ${r.reigns} of this realm)` : ''}.`) : null,
       h('div', {}, capital ? `Capital: ${capital.name}. ` : 'No capital: its tribes move with the seasons. ', `${towns.length} town${towns.length === 1 ? '' : 's'}, ${tribes.length} tribe${tribes.length === 1 ? '' : 's'}.`),
       g ? h('div', { class: 'econ-head' }, `Government: ${g.name}${r ? ` (since year ${yearOf(r.since)})` : ''}`) : null,
@@ -867,6 +895,66 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             h('span', {}, h('span', { class: 'swatch', style: `background:${oc.colour}` }), realmName(L, oc), rel.pacts.length ? h('div', { class: 'muted' }, rel.pacts.map((p) => `${PACT_NAMES[p.kind]}${p.roads ? ' (shared roads and bridges)' : ''}`).join(' · ')) : null, (rel.hostileUntil ?? -1) > s.day ? h('div', { class: 'muted' }, 'Takes up a quarrel against it') : null),
             h('span', { class: 'muted' }, `${opinionWord(rel.opinion)} (${rel.opinion >= 0 ? '+' : ''}${rel.opinion.toFixed(2)})`))))
         : null,
+    ];
+  };
+  const faithLine = (id: string | undefined, shift?: { to: string; progress: number }): HTMLElement | null => {
+    const f = faithOf(sim!, id);
+    if (!f) return null;
+    return h('div', {}, h('span', { class: 'swatch', style: `background:${faithColour(sim!, f)}` }), `Faith: the ${f.name}`, shift && faithOf(sim!, shift.to) ? h('span', { class: 'muted' }, ` · being drawn to the ${faithOf(sim!, shift.to)!.name} (${Math.round(shift.progress * 100)}%)`) : null);
+  };
+  /** A faith: what it believes, how organized and fervent it is, its holy sites and gods, and who follows it. */
+  const faithCard = (f: LiveFaith): HTMLElement => {
+    const L = lib();
+    const s = sim!;
+    const towns = s.settlements.filter((q) => !q.ruined && q.faith === f.id);
+    const tribes = s.tribes.filter((t) => t.faith === f.id);
+    const people = towns.reduce((n, q) => n + q.pop, 0) + tribes.reduce((n, t) => n + t.pop, 0);
+    const realms = s.clans.filter((q) => realmFaith(s, q) === f);
+    const seat = s.settlements.find((q) => q.id === f.seat);
+    const gods = f.gods.map((id) => L.gods.find((g) => g.id === id)?.name ?? id);
+    return h('details', { class: 'culture-card small' },
+      h('summary', {}, h('span', { class: 'swatch', style: `background:${faithColour(s, f)}` }), h('strong', {}, f.name), ` · ${Math.round(people).toLocaleString()} people`, h('span', { class: 'muted' }, ` · ${towns.length} settlements, ${tribes.length} tribes`)),
+      h('div', { class: 'tribe-card econ' },
+        h('div', {}, f.source ? `From the Library${f.hold ? ` (${f.hold.toLowerCase()} for its followers)` : ''}.` : f.blend ? `A blend of the ${f.blend.map((id) => faithOf(s, id)?.name ?? 'old faiths').join(' and the ')}, born year ${yearOf(f.founded)}.` : f.parent ? `Broke from the ${faithOf(s, f.parent)?.name ?? 'old faith'} in year ${yearOf(f.founded)}.` : 'The folk belief of its people’s homeland.'),
+        h('div', {}, `Belief: ${f.nature.join(', ') || '—'} · Leads: ${f.leader || '—'} · Other faiths: ${f.tolerance.toLowerCase()}`),
+        h('div', {}, `Organization: ${ORGANIZATION_WORDS[f.organization]}${seat ? `, seated at ${seat.name}` : ''}`),
+        h('div', {}, `Fervour: ${Math.round(f.fervour * 100)}%`, h('span', { class: 'muted' }, ' — rises with holy sites held and the gods’ deeds; falls with losses, and in an old great hierarchy.')),
+        h('div', { class: 'econ-head' }, 'Tenets'),
+        f.tenets.length
+          ? h('ul', { class: 'econ-list' }, ...f.tenets.map((t) => {
+              const tn = L.tenets.find((q) => q.id === t.id);
+              return h('li', { title: tn?.effects ?? '' }, h('span', {}, tn?.name ?? t.id), h('span', { class: 'muted' }, tn?.levels[t.level]?.name ?? ''));
+            }))
+          : h('div', { class: 'muted' }, 'None.'),
+        h('div', { class: 'econ-head' }, 'Holy sites'),
+        f.holySites.length ? h('ul', { class: 'econ-list' }, ...f.holySites.map((hs) => h('li', {}, h('span', {}, hs.name), h('span', { class: 'muted' }, `${hs.kind}${hs.held ? '' : ' · lost'}`)))) : h('div', { class: 'muted' }, 'None.'),
+        h('div', {}, gods.length ? `Gods: ${gods.join(', ')}` : 'No gods named (make gods in the Library and give them to a faith, or favour a people with them).'),
+        realms.length ? h('div', {}, `The faith of: ${realms.map((q) => realmName(L, q)).join(', ')}`) : null,
+      ),
+    );
+  };
+  /** The gods: who they watch over, their champions, and what they have done lately. */
+  const godsPart = (): (HTMLElement | null)[] => {
+    const L = lib();
+    const s = sim!;
+    const worshipped = L.gods.filter((g) => (s.faiths ?? []).some((f) => f.gods.includes(g.id)));
+    if (!worshipped.length) return [];
+    const off = s.gods && !s.gods.active;
+    return [
+      h('h3', {}, 'The gods'),
+      off ? h('p', { class: 'muted small' }, 'Religion is belief only in this world (World settings): the gods do not act.') : null,
+      ...worshipped.map((g) => {
+        const champs = (s.champions ?? []).filter((ch) => ch.god === g.id);
+        const last = s.godActs?.[g.id];
+        const deeds = s.events.filter((e) => e.text.startsWith(g.name)).slice(-3).reverse();
+        return h('div', { class: 'tribe-card small' },
+          h('div', {}, h('strong', {}, g.name), g.titles ? h('span', { class: 'muted' }, `, ${g.titles}`) : null, g.domains.length ? h('span', { class: 'muted' }, ` · ${g.domains.join(', ')}`) : null),
+          h('div', {}, `Worshipped by: ${(s.faiths ?? []).filter((f) => f.gods.includes(g.id)).map((f) => f.name).join(', ')}`),
+          h('div', { class: 'muted' }, last !== undefined ? `Last acted in year ${yearOf(last)}.` : 'Has not acted yet.'),
+          champs.length ? h('div', {}, `Champions: ${champs.map((ch) => `${ch.name} (${clanOf(ch.clan) ? realmName(L, clanOf(ch.clan)!) : '?'})`).join(', ')}`) : null,
+          deeds.length ? h('ul', { class: 'econ-list' }, ...deeds.map((e) => h('li', {}, h('span', { class: 'muted' }, `Y${yearOf(e.day)}: ${e.text}`)))) : null,
+        );
+      }),
     ];
   };
   const cultureLine = (id: string): HTMLElement | null => {
@@ -1064,7 +1152,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     );
     const display = h('div', { class: 'group' },
       choice<'on' | 'off'>('Clan lands', [{ value: 'on', label: 'Clan lands shown' }, { value: 'off', label: 'Hidden' }], showLand ? 'on' : 'off', (v) => { showLand = v === 'on'; d.redraw(); }),
-      choice<'clan' | 'culture'>('Colour lands by', [{ value: 'clan', label: 'Clan' }, { value: 'culture', label: 'Culture' }], landsBy, (v) => { landsBy = v; landDirty = true; d.redraw(); render(); }),
+      choice<'clan' | 'culture' | 'faith'>('Colour lands by', [{ value: 'clan', label: 'Realm' }, { value: 'culture', label: 'Culture' }, { value: 'faith', label: 'Faith' }], landsBy, (v) => { landsBy = v; landDirty = true; d.redraw(); render(); }),
       choice<'on' | 'off'>('Ways', [{ value: 'on', label: 'Trails, roads and railways shown' }, { value: 'off', label: 'Hidden' }], showWays ? 'on' : 'off', (v) => { showWays = v === 'on'; d.redraw(); }),
       h('div', { class: 'way-key small' }, ...WAYS.slice(1).map((w) => h('span', {}, h('span', { class: `way-swatch way-${w.id}` }), `${w.name} (×${w.speed} speed)`))),
       choice<'on' | 'off'>('Trade', [{ value: 'on', label: 'Trade routes and caravans shown' }, { value: 'off', label: 'Hidden' }], showTrade ? 'on' : 'off', (v) => { showTrade = v === 'on'; d.redraw(); }),
@@ -1246,6 +1334,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const living = (s.cultures ?? []).filter((cu) => s.settlements.some((q) => !q.ruined && q.culture === cu.id) || s.tribes.some((t) => t.culture === cu.id));
     if (living.length) parts.push(h('h3', {}, 'Cultures'), ...living.map((cu) => cultureCard(cu)));
 
+    // Faiths and the gods.
+    const believed = (s.faiths ?? []).filter((f) => s.settlements.some((q) => !q.ruined && q.faith === f.id) || s.tribes.some((t) => t.faith === f.id));
+    if (believed.length) parts.push(h('h3', {}, 'Faiths'), h('p', { class: 'muted small' }, 'Every people has a faith from the start: a Library faith of its culture or species, else the folk belief of its homeland. Towns are drawn to their neighbours’ and their ruler’s faith; holy places and fervour hold them.'), ...believed.map((f) => faithCard(f)));
+    if (s.started) parts.push(...godsPart());
+
     // Technology, the world over: what is known anywhere, how widely, and who came to it first.
     if (s.started) {
       const holders = [...s.settlements.filter((q) => !q.ruined).map((q) => q.techs ?? []), ...s.clans.filter((c) => s.tribes.some((t) => t.clan === c.id)).map((c) => c.techs ?? [])];
@@ -1276,6 +1369,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         h('div', { class: 'tribe-card small' },
           h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), `Clan ${clan?.name ?? '?'} · ${raceName(t.race)}`),
           cultureLine(t.culture),
+          faithLine(t.faith),
           h('div', {}, `${Math.round(t.pop)} people · warband ${Math.round(t.warband)}${t.away ? ` (${Math.round(t.away)} away fighting)` : ''}`),
           s.started ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, t.fed) * 100)}% of need${t.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri ? h('div', { class: 'muted' }, `Walks about ${Math.round(ri.speed * 0.621)} miles a day; forages and hunts about ${Math.round(ri.range * 0.621)} miles around. ${ri.lifestyle}.`) : null,
@@ -1309,6 +1403,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             ? h('div', {}, `Loyalty: ${Math.round(st.loyalty * 100)}%${st.unrest ? `, discontented for ${st.unrest} year${st.unrest === 1 ? '' : 's'}` : ''}`)
             : null,
           st.ruined ? null : cultureLine(st.culture),
+          st.ruined ? null : faithLine(st.faith, st.faithShift),
           !st.ruined && st.cultureShift ? h('div', { class: 'muted' }, `Being drawn into the ways of the ${cultureOf(s, st.cultureShift.to)?.name ?? '?'} (${Math.round(st.cultureShift.progress * 100)}%).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,

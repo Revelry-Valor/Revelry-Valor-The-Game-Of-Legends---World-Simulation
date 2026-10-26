@@ -11,7 +11,8 @@ import { DAYS_PER_YEAR, dateText, type Clan, type Settlement, type SimState } fr
 import { ensureRealm, nationsYear, type NationContext } from '../src/sim/nations';
 import { hasPact, noteAttack, politicsYear, relationOf, spiesDay, type PoliticsContext } from '../src/sim/politics';
 import { waysYear } from '../src/sim/ways';
-import { newCulture, newGovernment } from '../src/core/library';
+import { newCulture, newFaith, newGod, newGovernment } from '../src/core/library';
+import { championMight, faithLoyalty, faithOf, faithYear, type FaithContext } from '../src/sim/faith';
 import { packSim, unpackSim } from '../src/sim/pack';
 import { cropYear, isFood, newEconomy } from '../src/sim/economy';
 import { updatePrices } from '../src/sim/trade';
@@ -883,5 +884,125 @@ describe('politics', () => {
     } finally {
       env.fresh[k] = was;
     }
+  });
+});
+
+describe('faiths and gods', () => {
+  const farming = ['agriculture', 'husbandry', 'fishing'];
+  const ctx = (sim: SimState, L = lib): FaithContext => ({
+    sim,
+    env,
+    lib: L,
+    rand: () => Math.random(),
+    dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
+    cellAt: cellOf,
+    log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
+    name: () => `N${sim.nextId++}`,
+    lifespan: () => 70,
+  });
+  const town = (sim: SimState, base: Settlement, dx: number, dy: number, pop: number): Settlement => {
+    const st: Settlement = { ...base, id: sim.nextId++, kind: 'village', holyTo: [], x: base.x + dx, y: base.y + dy, pop, economy: newEconomy(pop, 1, 6), techs: [...(base.techs ?? [])] };
+    sim.settlements.push(st);
+    return st;
+  };
+  const elfSpecies = () => lib.species.find((s) => s.name === 'Elf')!.id;
+  const humanSpecies = () => lib.species.find((s) => s.name === 'Human')!.id;
+
+  it('gives every people a faith from the start: the Library faith of its people, else its folk belief with a holy site', () => {
+    const L = structuredClone(lib);
+    const f = newFaith('starlight', 'The Starlight');
+    f.species = [elfSpecies()];
+    f.organization = 'Organized (temples and priesthood)';
+    f.holySites = [{ name: 'The Star Pool', kind: 'Lake or spring', description: '' }];
+    L.faiths.push(f);
+    const sim = newSim(env, 501);
+    const h = addDawnCity(sim, env, L, humanId(), 6000, yAt(-12), 900, farming)!;
+    const e = addDawnCity(sim, env, L, elfId(), 6400, yAt(-12), 900, farming)!;
+    stepDays(sim, env, L, DAYS_PER_YEAR);
+    expect(e.faith).toBe('starlight');
+    const folk = faithOf(sim, h.faith)!;
+    expect(folk.source).toBe('');
+    expect(folk.holySites[0].name).toBe(h.name);
+    expect(faithOf(sim, 'starlight')!.maxOrganization).toBe(2);
+    // Kept with the save.
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(back.settlements.find((q) => q.id === e.id)!.faith).toBe('starlight');
+    expect(back.faiths!.length).toBe(sim.faiths!.length);
+  });
+
+  it('draws a small town into the faith of the big, fervent one beside it', () => {
+    const sim = newSim(env, 503);
+    const big = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 4000, [...farming, 'writing'])!;
+    const small = addDawnCity(sim, env, lib, elfId(), 6060, yAt(-12), 150, farming)!;
+    const c = ctx(sim);
+    faithYear(c);
+    expect(small.faith).not.toBe(big.faith);
+    for (let y = 0; y < 40 && small.faith !== big.faith; y++) faithYear(c);
+    expect(small.faith).toBe(big.faith);
+  });
+
+  it('lets an intolerant ruler press its faith on its towns, which are less loyal meanwhile', () => {
+    const sim = newSim(env, 505);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, farming)!;
+    const elves = addDawnCity(sim, env, lib, elfId(), 6000, yAt(-16), 300, farming)!;
+    const c = ctx(sim);
+    nationsYear(c);
+    faithYear(c);
+    elves.clan = city.clan;
+    elves.holyTo = [];
+    elves.control = 0.9;
+    const rf = faithOf(sim, city.faith)!;
+    rf.tolerance = 'Hostile';
+    const clan = sim.clans.find((q) => q.id === city.clan)!;
+    expect(faithLoyalty(sim, clan, elves)).toBeGreaterThan(0.25);
+    for (let y = 0; y < 60 && elves.faith !== city.faith; y++) {
+      elves.control = 0.9;
+      faithYear(c);
+    }
+    expect(elves.faith).toBe(city.faith);
+    expect(faithLoyalty(sim, clan, elves)).toBe(0);
+  });
+
+  it('lets the gods act when the world allows, and never when religion is belief only', () => {
+    const L = structuredClone(lib);
+    const g = newGod('sela', 'Sela');
+    Object.assign(g, { domains: ['Harvest'], powers: ['Blessings', 'Choosing champions'], favouredSpecies: [humanSpecies()], activity: 5 });
+    L.gods.push(g);
+    for (const active of [false, true]) {
+      const sim = newSim(env, 507);
+      const city = addDawnCity(sim, env, L, humanId(), 6000, yAt(-12), 900, farming)!;
+      sim.gods = { active, activity: 100 };
+      const c = ctx(sim, L);
+      nationsYear(c);
+      for (let y = 0; y < 30; y++) faithYear(c);
+      expect(faithOf(sim, city.faith)!.gods).toContain('sela');
+      const acts = sim.events.filter((e) => e.text.startsWith('Sela')).length;
+      if (!active) expect(acts).toBe(0);
+      else {
+        expect(acts).toBeGreaterThan(2);
+        expect(sim.champions!.some((ch) => ch.clan === city.clan)).toBe(true);
+        expect(championMight(sim, city.clan)).toBeGreaterThan(1);
+      }
+    }
+  });
+
+  it('lets far followers of an organized faith break off in a heresy', () => {
+    const sim = newSim(env, 509);
+    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 3000, [...farming, 'writing'])!;
+    town(sim, city, 80, 0, 500);
+    const far = [town(sim, city, 0, 900, 700), town(sim, city, 80, 900, 700)];
+    const c = ctx(sim);
+    faithYear(c);
+    const f = faithOf(sim, city.faith)!;
+    for (let y = 0; y < 400 && far[0].faith === f.id; y++) {
+      f.founded = sim.day - 100 * DAYS_PER_YEAR;
+      f.fervour = 0.2;
+      faithYear(c);
+    }
+    const nf = faithOf(sim, far[0].faith)!;
+    expect(nf.id).not.toBe(f.id);
+    expect(nf.parent).toBe(f.id);
+    expect(far[1].faith).toBe(nf.id);
+    expect(city.faith).toBe(f.id);
   });
 });

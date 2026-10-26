@@ -28,6 +28,10 @@ export interface PackedSim {
   bridge?: number[];
   realmRelations?: SimState['realmRelations'];
   spies?: SimState['spies'];
+  faiths?: SimState['faiths'];
+  champions?: SimState['champions'];
+  prophecies?: SimState['prophecies'];
+  godActs?: SimState['godActs'];
   clans: SimState['clans'];
   sorties: SimState['sorties'];
   events: SimState['events'];
@@ -99,6 +103,10 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     bridge: runs(sim.bridge ?? new Uint8Array(sim.way.length)),
     realmRelations: sim.realmRelations ?? {},
     spies: sim.spies ?? [],
+    faiths: sim.faiths ?? [],
+    champions: sim.champions ?? [],
+    prophecies: sim.prophecies ?? [],
+    godActs: sim.godActs ?? {},
     clans: sim.clans,
     sorties: sim.sorties,
     events: sim.events,
@@ -151,6 +159,10 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     bridge,
     realmRelations: p.realmRelations && typeof p.realmRelations === 'object' ? p.realmRelations : {},
     spies: Array.isArray(p.spies) ? p.spies : [],
+    faiths: Array.isArray(p.faiths) ? p.faiths : [],
+    champions: Array.isArray(p.champions) ? p.champions : [],
+    prophecies: Array.isArray(p.prophecies) ? p.prophecies : [],
+    godActs: p.godActs && typeof p.godActs === 'object' ? p.godActs : {},
     clans: p.clans,
     sorties: Array.isArray(p.sorties) ? p.sorties : [],
     nextId: p.nextId | 0,

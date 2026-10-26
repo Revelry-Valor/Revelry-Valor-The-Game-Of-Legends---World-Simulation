@@ -132,6 +132,10 @@ interface RealmFacts {
   behaviours: Set<string>;
   lifespan: number;
   elders: boolean;
+  /** Its faith's organization (0–3) and fervour, and whether that faith wants its rulers divine or its clergy to lead. */
+  faithOrg: number;
+  fervour: number;
+  divine: boolean;
 }
 
 function facts(c: NationContext, clan: Clan): RealmFacts {
@@ -158,6 +162,12 @@ function facts(c: NationContext, clan: Clan): RealmFacts {
     behaviours: new Set(cu?.behaviours ?? []),
     lifespan: c.lifespan(clan.race),
     elders: !!cu?.traditions.some((t) => t.id === 'ancestor-reverence' && t.level >= 0),
+    ...(() => {
+      // The realm's faith: its capital's (or its greatest town's).
+      const at = towns.find((s) => s.id === clan.realm?.capital) ?? [...towns].sort((a, b) => b.pop - a.pop)[0];
+      const fa = at?.faith ? sim.faiths?.find((q) => q.id === at.faith) : undefined;
+      return { faithOrg: fa?.organization ?? 0, fervour: fa?.fervour ?? 0, divine: !!fa && (fa.tenets.some((t) => t.id === 'divine-rulers') || fa.leader === 'The ruler' || fa.leader === 'A living god') };
+    })(),
   };
 }
 
@@ -197,7 +207,10 @@ function fit(f: RealmFacts, id: string): number {
       return S >= 4 && f.pop >= 3000 ? 1.4 + plus(e === 'Egalitarian', 1.4) : 0;
     case 'elective-monarchy':
       return S >= 4 && f.towns.filter((s) => s.pop >= 1000).length >= 3 ? 2 : 0;
-    // Theocracies come with faiths, and magocracies with mana; until then only a culture's preference brings them.
+    case 'theocracy':
+      // A fervent faith with a head of faith, in a settled realm: its clergy may rule.
+      return f.faithOrg >= 3 && f.fervour >= 0.65 && S >= 2 ? 2 + 2 * (f.fervour - 0.65) + plus(f.divine, 0.6) + plus(e === 'Spiritual', 0.8) : 0;
+    // Magocracies come with mana (Phase 11); until then only a culture's preference brings them.
     default:
       return 0;
   }

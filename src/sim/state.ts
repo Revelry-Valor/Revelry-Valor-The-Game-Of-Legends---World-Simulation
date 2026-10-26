@@ -39,6 +39,8 @@ export interface Tribe {
   warband: number;
   away: number;
   founded: number;
+  /** Its faith (a live faith id). */
+  faith?: string;
 }
 
 export interface Clan {
@@ -180,6 +182,9 @@ export interface Settlement {
   /** Its loyalty to its realm (0–1), and the years it has been discontented. */
   loyalty?: number;
   unrest?: number;
+  /** Its faith (a live faith id), and whether it is being drawn to another. */
+  faith?: string;
+  faithShift?: { to: string; progress: number };
 }
 
 /**
@@ -310,6 +315,65 @@ export interface SimEvent {
   y?: number;
 }
 
+/** A holy site of a faith: a place on the map; holding it strengthens the faith, losing it hurts. */
+export interface HolySite {
+  name: string;
+  kind: string;
+  x: number;
+  y: number;
+  held: boolean;
+}
+
+/**
+ * A faith living in the world (Phase 9 step 3): a Library faith, or the folk belief a people
+ * begins with. Organization grows with its followers' towns and learning; fervour rises with holy
+ * sites held and the gods' deeds and falls with losses and age.
+ */
+export interface LiveFaith {
+  id: string;
+  name: string;
+  /** The Library faith it is ('' for a folk belief or one grown during the run). */
+  source: string;
+  nature: string[];
+  tenets: { id: string; level: number }[];
+  /** How it sees other faiths (Tolerant … Hostile). */
+  tolerance: string;
+  leader: string;
+  /** 0 loose (local shamans), 1 gathering (shrines), 2 organized (temples, priesthood), 3 hierarchy (a head of faith); and how far it can grow. */
+  organization: number;
+  maxOrganization: number;
+  gods: string[];
+  /** Story faiths: Locked (followers never leave it) or Encouraged (they hold to it firmly). */
+  hold: string;
+  founded: number;
+  /** The faith it split from (a heresy or reformation), or the two it blended from. */
+  parent: string;
+  blend?: string[];
+  colour?: string;
+  /** Fervour, 0–1. */
+  fervour: number;
+  holySites: HolySite[];
+  /** Where its head of faith sits (a settlement id), once it has one. */
+  seat: number;
+}
+
+/** A god's champion: a notable individual raised up in a realm, for a time. */
+export interface Champion {
+  name: string;
+  god: string;
+  clan: number;
+  since: number;
+  until: number;
+}
+
+/** A prophecy: a god foretold a ruling house's fall; fate (and the god) see to it. */
+export interface Prophecy {
+  god: string;
+  clan: number;
+  house: string;
+  until: number;
+}
+
 export interface SimState {
   /** Days since the simulation began. */
   day: number;
@@ -337,6 +401,13 @@ export interface SimState {
   /** Between each pair of realms ("a|b", clan ids in order). */
   realmRelations?: Record<string, RealmRelation>;
   spies?: Spy[];
+  /** The faiths alive in the world, the gods' champions and prophecies, and when each god last acted. */
+  faiths?: LiveFaith[];
+  champions?: Champion[];
+  prophecies?: Prophecy[];
+  godActs?: Record<string, number>;
+  /** The world's setting for the gods (copied in from the world settings before each run). */
+  gods?: { active: boolean; activity: number };
   grudges: Grudge[];
   clans: Clan[];
   sorties: Sortie[];

@@ -8,6 +8,7 @@ import { cultureFx, cultureOf, cultureYear, ensureCulture, note, pushes } from '
 import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
 import { ensureRealm, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
+import { championMight, faithHostility, faithYear } from './faith';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
@@ -805,13 +806,13 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
         if (!raidOn || p > raidOn.p) raidOn = { st, p };
       }
       if (raidOn && (!best || raidOn.p > best.p) && rand(sim) < raidOn.p) {
-        const strength = Math.round(home * 0.8);
+        const strength = Math.round(home * 0.8 * championMight(sim, t.clan));
         t.away += strength;
         sim.sorties.push({ id: sim.nextId++, tribe: t.id, clan: t.clan, target: raidOn.st.id, targetKind: 'settlement', strength, x: t.x, y: t.y, leg: 'out' });
         noteAttack(sim, lib, (text, x, y) => log(sim, text, x, y), t.clan, raidOn.st.clan);
         note(sim, t.culture, 'raids');
       } else if (best && rand(sim) < best.p) {
-        const strength = Math.round(home * 0.8);
+        const strength = Math.round(home * 0.8 * championMight(sim, t.clan));
         t.away += strength;
         sim.sorties.push({ id: sim.nextId++, tribe: t.id, clan: t.clan, target: best.e.id, targetKind: 'tribe', strength, x: t.x, y: t.y, leg: 'out' });
         noteAttack(sim, lib, (text, x, y) => log(sim, text, x, y), t.clan, best.e.clan);
@@ -869,7 +870,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
 }
 
 /** How readily one tribe fights another: its race's attitude, kinship and shared culture. */
-function hostility(sim: SimState, lib: Library, t: Tribe, e: { species: string; race: string; culture: string; clan: number }, ri: RaceInfo): number {
+function hostility(sim: SimState, lib: Library, t: Tribe, e: { species: string; race: string; culture: string; clan: number; faith?: string }, ri: RaceInfo): number {
   const other = lib.species.find((s) => s.id === e.species);
   const over = ri.species.profile.attitudes.find((a) => a.species === other?.name)?.attitude;
   const att = over || ri.attitude;
@@ -887,6 +888,8 @@ function hostility(sim: SimState, lib: Library, t: Tribe, e: { species: string; 
   if (t.culture !== e.culture) h *= 1 - 0.5 * acceptance(sim, t.culture, e.culture);
   // Their realms: treaties keep the peace; ill will and an ally's quarrel sharpen it.
   if (t.clan !== e.clan) h *= diplomacyFactor(sim, t.clan, e.clan);
+  // Their faiths: holy war sharpens it against unbelievers; pacifism softens it.
+  h *= faithHostility(sim, t.faith, e.faith);
   return h;
 }
 
@@ -948,6 +951,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // Realms: capitals, governments, rulers, reach, culture pressed on their places (nations.ts).
   const nc = { ...rulerContext(sim, lib), env, lib, dist: (ax: number, ay: number, bx: number, by: number) => dist(env, ax, ay, bx, by), cellAt: (x: number, y: number) => cellOf(env, x, y), log: (text: string, x?: number, y?: number) => log(sim, text, x, y) };
   const { royalRoads } = nationsYear(nc);
+  // Faiths: who follows what, organization, fervour, conversion, splits; and the gods (faith.ts).
+  faithYear(nc);
   // Royal families, factions, diplomacy and spies (politics.ts).
   const { pactRoads } = politicsYear({ ...nc, newClan: (from) => newClan(sim, lib, from.species, from.race, from.culture, from.id) });
   // Trails from use; roads and railways built, kept up, or let go; bridges by settled realms (ways.ts).
