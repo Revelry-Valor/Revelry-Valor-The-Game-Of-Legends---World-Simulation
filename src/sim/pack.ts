@@ -32,6 +32,9 @@ export interface PackedSim {
   champions?: SimState['champions'];
   prophecies?: SimState['prophecies'];
   godActs?: SimState['godActs'];
+  wars?: SimState['wars'];
+  armies?: SimState['armies'];
+  battles?: SimState['battles'];
   clans: SimState['clans'];
   sorties: SimState['sorties'];
   events: SimState['events'];
@@ -107,6 +110,9 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     champions: sim.champions ?? [],
     prophecies: sim.prophecies ?? [],
     godActs: sim.godActs ?? {},
+    wars: sim.wars ?? [],
+    armies: sim.armies ?? [],
+    battles: sim.battles ?? [],
     clans: sim.clans,
     sorties: sim.sorties,
     events: sim.events,
@@ -163,6 +169,9 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     champions: Array.isArray(p.champions) ? p.champions : [],
     prophecies: Array.isArray(p.prophecies) ? p.prophecies : [],
     godActs: p.godActs && typeof p.godActs === 'object' ? p.godActs : {},
+    wars: Array.isArray(p.wars) ? p.wars : [],
+    armies: Array.isArray(p.armies) ? p.armies : [],
+    battles: Array.isArray(p.battles) ? p.battles : [],
     clans: p.clans,
     sorties: Array.isArray(p.sorties) ? p.sorties : [],
     nextId: p.nextId | 0,

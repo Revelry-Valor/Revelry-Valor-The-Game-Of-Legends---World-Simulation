@@ -11,10 +11,12 @@ import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTri
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
-import type { Clan, LiveCulture, LiveFaith } from '../sim/state';
+import type { Army, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
 import { opinionWord, PACT_NAMES } from '../sim/politics';
 import { faithColour, faithOf, ORGANIZATION_WORDS, realmFaith } from '../sim/faith';
+import { activeWars, REASON_WORDS, sideOf, warOutlook, type WarContext } from '../sim/wars';
+import { cultureFx } from '../sim/culture';
 import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
@@ -457,6 +459,77 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.fill();
           g.stroke();
         }
+        // Towns held by an enemy: a striped ring in the occupier's colour.
+        for (const st of s.settlements) {
+          if (!st.occupied || st.ruined) continue;
+          const [sx, sy] = at(st.x, st.y, c);
+          g.lineWidth = 3;
+          g.setLineDash([3, 3]);
+          g.strokeStyle = clanOf(st.occupied.by)?.colour ?? '#000';
+          g.beginPath();
+          g.arc(sx, sy, 12, 0, Math.PI * 2);
+          g.stroke();
+          g.setLineDash([]);
+        }
+        // Battles of the last two years: crossed swords.
+        for (const b of s.battles ?? []) {
+          if (s.day - b.day > 720) continue;
+          const [bx, by] = at(b.x, b.y, c);
+          g.strokeStyle = 'rgba(20,20,20,0.9)';
+          g.lineWidth = 3.5;
+          for (const sgn of [1, -1]) {
+            g.beginPath();
+            g.moveTo(bx - 6 * sgn, by - 6);
+            g.lineTo(bx + 6 * sgn, by + 6);
+            g.stroke();
+          }
+          g.strokeStyle = s.day - b.day < 60 ? '#ff5a3c' : '#d9d2c3';
+          g.lineWidth = 1.6;
+          for (const sgn of [1, -1]) {
+            g.beginPath();
+            g.moveTo(bx - 6 * sgn, by - 6);
+            g.lineTo(bx + 6 * sgn, by + 6);
+            g.stroke();
+          }
+        }
+        // Armies: a banner in the realm's colour, with its strength, and a line to where it is going.
+        for (const a of s.armies ?? []) {
+          const [ax, ay] = at(a.x, a.y, c);
+          const tgt = s.settlements.find((q) => q.id === a.target) ?? (s.armies ?? []).find((q) => q.id === a.target);
+          if (tgt) {
+            const [tx, ty] = at(tgt.x, tgt.y, c);
+            g.strokeStyle = 'rgba(160,20,20,0.6)';
+            g.lineWidth = 1.5;
+            g.setLineDash([5, 4]);
+            g.beginPath();
+            g.moveTo(ax, ay);
+            g.lineTo(tx, ty);
+            g.stroke();
+            g.setLineDash([]);
+          }
+          g.strokeStyle = '#111';
+          g.lineWidth = 2;
+          g.beginPath();
+          g.moveTo(ax, ay + 6);
+          g.lineTo(ax, ay - 16);
+          g.stroke();
+          g.fillStyle = clanOf(a.clan)?.colour ?? '#888';
+          g.beginPath();
+          g.moveTo(ax, ay - 16);
+          g.lineTo(ax + 14, ay - 12);
+          g.lineTo(ax, ay - 7);
+          g.closePath();
+          g.fill();
+          g.lineWidth = 1;
+          g.stroke();
+          const label = a.men >= 1000 ? `${(a.men / 1000).toFixed(1)}k` : String(Math.round(a.men));
+          g.font = 'bold 11px system-ui, sans-serif';
+          g.lineWidth = 3;
+          g.strokeStyle = 'rgba(0,0,0,0.8)';
+          g.fillStyle = a.goal === 'home' ? '#cfcfcf' : '#fff';
+          g.strokeText(label, ax + 4, ay + 4);
+          g.fillText(label, ax + 4, ay + 4);
+        }
         // Holy sites: a gold star (dimmed where the faith has lost it).
         for (const f of s.faiths ?? []) for (const hs of f.holySites) {
           const [hx, hy] = at(hs.x, hs.y, c);
@@ -711,6 +784,15 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         break;
       }
       const k = cellOf(x, y);
+      for (const a of s.armies ?? []) {
+        if (Math.hypot(a.x - x, a.y - y) < pxKm * 12) out.push(armyLine(a));
+      }
+      for (const b of s.battles ?? []) {
+        if (s.day - b.day <= 720 && Math.hypot(b.x - x, b.y - y) < pxKm * 8) {
+          const w = clanOf(b.winner);
+          out.push(`${b.name}, year ${yearOf(b.day)}: ${w ? realmName(lib(), w) : '?'} won (${b.a.lost} and ${b.b.lost} fell)`);
+        }
+      }
       for (const f of s.faiths ?? []) for (const hs of f.holySites) {
         if (Math.hypot(hs.x + 12 * pxKm - x, hs.y - 10 * pxKm - y) < pxKm * 8) out.push(`${hs.name}: holy site of the ${f.name}${hs.held ? '' : ' (lost to it)'}`);
       }
@@ -859,7 +941,28 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       towns.length > 1 ? h('ul', { class: 'econ-list' }, ...towns.slice(0, 12).map((q) => h('li', { class: 'clickable', onclick: () => { selected = q.id; selectedRealm = null; render(); d.redraw(); } }, h('span', {}, q.name, q.id === r?.capital ? h('span', { class: 'muted' }, ' (capital)') : null, q.culture !== cn.culture && cultureOf(s, q.culture) ? h('span', { class: 'muted' }, ` · ${cultureOf(s, q.culture)!.name}`) : null), h('span', { class: 'num' }, pct(q.control ?? 0))))) : null,
       towns.length > 12 ? h('div', { class: 'muted' }, `…and ${towns.length - 12} more.`) : null,
       ...politicsPart(cn, towns),
+      ...warPart(cn),
     );
+  };
+  /** A realm's wars, and the realms it may go to war with (the reason, and the chance each year). */
+  const warPart = (cn: Clan): (HTMLElement | null)[] => {
+    const s = sim!;
+    const L = lib();
+    if (!s.started) return [];
+    const wars = activeWars(s).filter((w) => sideOf(w, cn.id));
+    const c = warContextUI();
+    const outlook = s.clans
+      .filter((o) => o !== cn)
+      .map((o) => ({ o, w: warOutlook(c, cn, o) }))
+      .filter((x) => x.w && x.w.chance > 0.001)
+      .sort((a, b) => b.w!.chance - a.w!.chance)
+      .slice(0, 4);
+    return [
+      wars.length ? h('div', { class: 'econ-head' }, 'At war') : null,
+      ...wars.map((w) => h('div', {}, `${w.name}: ${sideOf(w, cn.id) === 'attackers' ? 'attacking' : 'defending'}, war score ${Math.round(w.score)}`)),
+      outlook.length && !wars.length ? h('div', { class: 'econ-head' }, 'Might go to war with') : null,
+      ...(!wars.length ? outlook.map(({ o, w }) => h('div', { class: 'muted' }, `${realmName(L, o)}: ${REASON_WORDS[w!.reason]}, ${Math.round(w!.chance * 1000) / 10}% a year (odds ${w!.odds.toFixed(1)} to 1)`)) : []),
+    ];
   };
   /** A realm's family, claimants, factions and relations with other realms. */
   const politicsPart = (cn: Clan, towns: Settlement[]): (HTMLElement | null)[] => {
@@ -896,6 +999,56 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             h('span', { class: 'muted' }, `${opinionWord(rel.opinion)} (${rel.opinion >= 0 ? '+' : ''}${rel.opinion.toFixed(2)})`))))
         : null,
     ];
+  };
+  const armyLine = (a: Army): string => {
+    const s = sim!;
+    const cn = clanOf(a.clan);
+    const tgt = s.settlements.find((q) => q.id === a.target);
+    const foe = (s.armies ?? []).find((q) => q.id === a.target);
+    const doing = a.goal === 'home' ? 'going home' : a.siege ? `investing ${tgt?.name ?? '?'} (${a.siege.days} days)` : foe ? `marching to meet the ${foe.name}` : tgt ? `marching on ${tgt.name}` : 'holding';
+    return `The ${a.name} (${cn ? realmName(lib(), cn) : '?'}): ${Math.round(a.men).toLocaleString()} under ${a.general}, morale ${Math.round(a.morale * 100)}%, food for ${Math.max(0, Math.round((a.supply / Math.max(1, a.men)) * 30))} days; ${doing}`;
+  };
+  /** How war looks from a realm: its enemies, and the realms it may go to war with (and why). */
+  const warContextUI = (): WarContext => {
+    const s = sim!;
+    const L = lib();
+    return {
+      sim: s,
+      env: env!,
+      lib: L,
+      rand: () => 0.5,
+      dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
+      cellAt: (x, y) => cellOf(x, y),
+      log: () => {},
+      name: () => '',
+      lifespan: () => 70,
+      might: (race, culture) => (raceInfo(L, race, culture, s.cultures)?.might ?? 1) * cultureFx(s, culture).fight,
+      speed: (race, culture) => (raceInfo(L, race, culture, s.cultures)?.speed ?? 15) * 0.9,
+    };
+  };
+  /** A war: its sides, reason, score and weariness, armies and latest battles. */
+  const warCard = (w: War): HTMLElement => {
+    const L = lib();
+    const s = sim!;
+    const side = (ids: number[]) => ids.map((id) => clanOf(id)).filter((q): q is Clan => !!q);
+    const names = (ids: number[]) => side(ids).map((q) => h('span', {}, h('span', { class: 'swatch', style: `background:${q.colour}` }), realmName(L, q), ` (weariness ${Math.round((w.weariness[q.id] ?? 0) * 100)}%)`));
+    const armies = (s.armies ?? []).filter((a) => a.war === w.id);
+    const battles = (s.battles ?? []).filter((b) => b.war === w.id).slice(-5).reverse();
+    const lead = w.score >= 15 ? 'the attackers lead' : w.score <= -15 ? 'the defenders lead' : 'neither side leads';
+    const goal = s.settlements.find((q) => q.id === w.goalTown);
+    return h('details', { class: 'culture-card small', open: w.ended === undefined },
+      h('summary', {}, h('strong', {}, w.name), h('span', { class: 'muted' }, ` · Y${yearOf(w.started)}${w.ended !== undefined ? `–${yearOf(w.ended)}` : ', going on'}`)),
+      h('div', { class: 'tribe-card econ' },
+        h('div', {}, `Why: ${REASON_WORDS[w.reason]}${goal ? ` (${goal.name})` : ''}${w.goalHouse ? ` (the house of ${w.goalHouse})` : ''}.`),
+        h('div', {}, h('b', {}, 'Attackers: '), ...names(w.attackers)),
+        h('div', {}, h('b', {}, 'Defenders: '), ...names(w.defenders)),
+        w.ended === undefined ? h('div', {}, `War score ${w.score >= 0 ? '+' : ''}${Math.round(w.score)}: ${lead}. ${w.battles} battle${w.battles === 1 ? '' : 's'}; fallen: ${w.losses.attackers.toLocaleString()} attackers, ${w.losses.defenders.toLocaleString()} defenders.`) : h('div', {}, w.outcome ?? ''),
+        armies.length ? h('div', { class: 'econ-head' }, 'Armies in the field') : null,
+        armies.length ? h('ul', { class: 'econ-list' }, ...armies.map((a) => h('li', {}, h('span', {}, armyLine(a))))) : null,
+        battles.length ? h('div', { class: 'econ-head' }, 'Latest battles') : null,
+        battles.length ? h('ul', { class: 'econ-list' }, ...battles.map((b) => h('li', {}, h('span', {}, `${b.name} (Y${yearOf(b.day)})`), h('span', { class: 'muted' }, `${clanOf(b.winner)?.name ?? '?'} won · ${b.a.lost}/${b.b.lost} fell`)))) : null,
+      ),
+    );
   };
   const faithLine = (id: string | undefined, shift?: { to: string; progress: number }): HTMLElement | null => {
     const f = faithOf(sim!, id);
@@ -1101,7 +1254,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const what = st.kind === 'dawn' ? 'dawn city' : 'village';
     if (st.ruined) return `Ruins of ${st.name} (${what})${st.holyTo.length ? `, holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
     const cn = clanOf(st.clan);
-    return `${st.name} (${what}${cn?.realm?.capital === st.id ? ', capital' : ''}, ${cn ? realmName(lib(), cn) : '?'}): ${Math.round(st.pop)} people, ${Math.round(Math.min(1, st.fed) * 100)}% fed${st.holyTo.length ? `; holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
+    const occ = st.occupied ? clanOf(st.occupied.by) : undefined;
+    return `${st.name} (${what}${cn?.realm?.capital === st.id ? ', capital' : ''}, ${cn ? realmName(lib(), cn) : '?'}${occ ? `; held by ${realmName(lib(), occ)}` : ''}): ${Math.round(st.pop)} people, ${Math.round(Math.min(1, st.fed) * 100)}% fed${st.holyTo.length ? `; holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
   };
   const tribeAt = (x: number, y: number, pk: number): Tribe | null => {
     if (!sim || !env) return null;
@@ -1278,6 +1432,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       }
     }
 
+    // Wars, going on and lately ended.
+    const wars = [...activeWars(s), ...(s.wars ?? []).filter((w) => w.ended !== undefined).slice(-6).reverse()];
+    if (s.started && wars.length) parts.push(h('h3', {}, 'Wars'), h('p', { class: 'muted small' }, 'Settled realms go to war for a reason (a claim, a throne, their faith, vengeance, their own people, or plain conquest). Banners on the map are armies; crossed swords are battles.'), ...wars.map((w) => warCard(w)));
+
     // Treaties, the world over.
     const treaties = Object.entries(s.realmRelations ?? {}).flatMap(([k, rel]) => {
       const [a, b] = k.split('|').map(Number);
@@ -1399,6 +1557,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           !st.ruined && clan?.realm && s.started
             ? h('div', {}, clan.realm.capital === st.id ? `The capital, seat of ${rulerTitle(L, clan)} ${clan.realm.ruler.name}.` : `Its realm's hold here: ${Math.round((st.control ?? 0) * 100)}%`, clan.realm.capital === st.id ? null : h('span', { class: 'muted' }, ' (from the days an order takes to come from the capital, and the realm’s centralization)'))
             : null,
+          !st.ruined && st.occupied
+            ? h('div', { class: 'warn' }, `Held by ${clanOf(st.occupied.by) ? realmName(L, clanOf(st.occupied.by)!) : '?'} since year ${yearOf(st.occupied.since)} (a garrison of ${Math.round(st.occupied.garrison)}).`)
+            : null,
+          !st.ruined && st.claimedBy?.some((q) => clanOf(q)) ? h('div', { class: 'muted' }, `Claimed by ${st.claimedBy.map((q) => clanOf(q)).filter((q): q is Clan => !!q).map((q) => realmName(L, q)).join(', ')} (who once held it).`) : null,
           !st.ruined && s.started && st.loyalty !== undefined && clan?.realm?.capital !== st.id
             ? h('div', {}, `Loyalty: ${Math.round(st.loyalty * 100)}%${st.unrest ? `, discontented for ${st.unrest} year${st.unrest === 1 ? '' : 's'}` : ''}`)
             : null,

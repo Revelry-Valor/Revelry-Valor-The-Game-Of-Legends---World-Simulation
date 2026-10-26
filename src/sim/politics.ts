@@ -55,6 +55,7 @@ export const hasPact = (sim: SimState, a: number, b: number, kind?: Pact['kind']
 export const opinionWord = (v: number) => (v >= 0.5 ? 'friends' : v >= 0.2 ? 'cordial' : v > -0.2 ? 'neutral' : v > -0.5 ? 'cold' : 'hostile');
 export const PACT_NAMES: Record<Pact['kind'], string> = { peace: 'Non-aggression pact', defence: 'Defensive pact', trade: 'Trade agreement', marriage: 'Royal marriage' };
 
+const atWar = (sim: SimState, a: number, b: number) => !!sim.wars?.some((w) => w.ended === undefined && ((w.attackers.includes(a) && w.defenders.includes(b)) || (w.attackers.includes(b) && w.defenders.includes(a))));
 /** How a realm's warbands look on another's (multiplies hostility): pacts keep the peace, ill will and an ally's quarrel sharpen it. */
 export function diplomacyFactor(sim: SimState, a: number, b: number): number {
   const rel = relationOf(sim, a, b);
@@ -62,11 +63,14 @@ export function diplomacyFactor(sim: SimState, a: number, b: number): number {
   let f = 1 - 0.6 * rel.opinion;
   if (rel.pacts.some((p) => p.kind === 'peace' || p.kind === 'defence' || p.kind === 'marriage')) f *= 0.08;
   if ((rel.hostileUntil ?? -1) > sim.day) f *= 2.5;
+  // At war: their warbands raid each other the more.
+  if (atWar(sim, a, b)) f *= 2;
   return Math.max(0.03, f);
 }
 /** How readily realms trade (multiplies willingness). */
 export function tradeFactor(sim: SimState, a: number, b: number): number {
   const rel = relationOf(sim, a, b);
+  if (atWar(sim, a, b)) return 0;
   if (!rel) return 1;
   return Math.max(0.2, (1 + 0.4 * rel.opinion) * (rel.pacts.some((p) => p.kind === 'trade') ? 1.4 : 1));
 }

@@ -9,6 +9,7 @@ import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
 import { ensureRealm, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
 import { championMight, faithHostility, faithYear } from './faith';
+import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
@@ -114,12 +115,15 @@ function makeName(sim: SimState, lib: Library, cultureId: string): string {
   const pre = parts.filter((p) => p.endsWith('-')).map((p) => p.slice(0, -1));
   const suf = parts.filter((p) => p.startsWith('-')).map((p) => p.slice(1));
   const pick = <T>(a: T[]) => a[Math.floor(rand(sim) * a.length)];
-  let name: string;
-  if (pre.length && suf.length) name = pick(pre) + pick(suf);
-  else {
+  const one = () => {
+    if (pre.length && suf.length) return pick(pre) + pick(suf);
     const n = 2 + (rand(sim) < 0.4 ? 1 : 0);
-    name = Array.from({ length: n }, () => pick(SYLLABLES)).join('');
-  }
+    return Array.from({ length: n }, () => pick(SYLLABLES)).join('');
+  };
+  // Not one already taken by a town or realm (a few tries; then a longer name).
+  const taken = new Set([...sim.settlements.map((s) => s.name), ...sim.clans.map((c) => c.name)].map((n) => n.toLowerCase()));
+  let name = one();
+  for (let i = 0; i < 8 && taken.has(name.toLowerCase()); i++) name = i < 5 ? one() : one() + (suf.length ? pick(suf) : pick(SYLLABLES));
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
@@ -480,6 +484,7 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
     daily(sim, env, info, lib);
     caravansDay(tradeContext(sim, env, lib, info));
     spiesDay({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
+    if (sim.armies?.length) armiesDay(warContext(sim, env, lib, info));
     sim.day++;
     if (sim.day % DAYS_PER_MONTH === 0) monthly(sim, env, lib, info);
     if (sim.day % DAYS_PER_YEAR === 0) yearly(sim, env, lib, info);
@@ -867,6 +872,23 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     sim.tribes = sim.tribes.filter((q) => q !== t);
     sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
   }
+  // Wars: weariness, peace, armies raised (wars.ts).
+  if (sim.wars?.some((w) => w.ended === undefined)) warsMonth(warContext(sim, env, lib, info));
+}
+
+/** What wars and armies need: the realms' context, and each people's strength and marching pace. */
+function warContext(sim: SimState, env: Env, lib: Library, info: Info): WarContext {
+  return {
+    ...rulerContext(sim, lib),
+    env,
+    lib,
+    dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+    cellAt: (x, y) => cellOf(env, x, y),
+    log: (text, x, y) => log(sim, text, x, y),
+    might: (race, culture) => (info({ race, culture })?.might ?? 1) * cultureFx(sim, culture).fight,
+    // An army marches a little slower than a tribe on the move.
+    speed: (race, culture) => (info({ race, culture })?.speed ?? 15) * 0.9,
+  };
 }
 
 /** How readily one tribe fights another: its race's attitude, kinship and shared culture. */
@@ -955,6 +977,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   faithYear(nc);
   // Royal families, factions, diplomacy and spies (politics.ts).
   const { pactRoads } = politicsYear({ ...nc, newClan: (from) => newClan(sim, lib, from.species, from.race, from.culture, from.id) });
+  // Going to war (wars.ts).
+  warsYear(warContext(sim, env, lib, info));
   // Trails from use; roads and railways built, kept up, or let go; bridges by settled realms (ways.ts).
   const clanById = new Map(sim.clans.map((q) => [q.id, q]));
   waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y), royalRoads: [...royalRoads, ...pactRoads], bridges: (st) => !!clanById.get(st.clan) && !tribalRule(lib, clanById.get(st.clan)!) });

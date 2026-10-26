@@ -127,6 +127,75 @@ export interface RealmRelation {
   lastAttack?: { by: number; day: number };
   /** Attacks this year (only the first few sour memory further). */
   hits?: number;
+  /** No war between them until this day (a truce after a war). */
+  truceUntil?: number;
+}
+
+/** Why a war is fought (REDESIGN.md 8.5, reasons for war). */
+export type WarReason = 'claim' | 'throne' | 'holy' | 'revenge' | 'liberate' | 'conquest';
+
+/** A war between realms (Phase 10). Score is from the attackers' side (−100 … 100). */
+export interface War {
+  id: number;
+  name: string;
+  reason: WarReason;
+  /** The realms that began it and that it was begun against (each side's leader first). */
+  attackers: number[];
+  defenders: number[];
+  /** What the attackers want: a town (claim, holy site, kin to free), or a claimant's throne. */
+  goalTown?: number;
+  goalHouse?: string;
+  started: number;
+  score: number;
+  /** War weariness by realm (0 … 1, at 1 it must make peace). */
+  weariness: Record<number, number>;
+  battles: number;
+  /** Fighters each side has lost. */
+  losses: { attackers: number; defenders: number };
+  ended?: number;
+  outcome?: string;
+}
+
+/** A named army in the field. */
+export interface Army {
+  id: number;
+  name: string;
+  clan: number;
+  war: number;
+  x: number;
+  y: number;
+  /** Fighters, and how many it set out with. */
+  men: number;
+  raised: number;
+  /** 0 … 1.2: breaks below about 0.3. */
+  morale: number;
+  /** Food carried, in units (one feeds one fighter a month). */
+  supply: number;
+  /** Where its fighters came from (settlement id → men), to send them home. */
+  from: Record<number, number>;
+  /** What it is doing: marching on a town (attack or relieve), hunting an enemy army, or going home. */
+  goal: 'attack' | 'defend' | 'home';
+  target: number;
+  general: string;
+  /** Days spent investing a town before the assault, and the day it last fought. */
+  siege?: { town: number; days: number };
+  lastFight?: number;
+}
+
+/** A battle, for the map and the war's record (the full phased report comes with step 2). */
+export interface Battle {
+  id: number;
+  war: number;
+  name: string;
+  x: number;
+  y: number;
+  day: number;
+  /** The armies' realms and fighters before and after. */
+  a: { clan: number; army: string; men: number; lost: number };
+  b: { clan: number; army: string; men: number; lost: number };
+  winner: number;
+  /** A town assaulted (its garrison fought). */
+  town?: number;
 }
 
 /** A spy: a notable individual travelling town to town to reach a target. */
@@ -185,6 +254,10 @@ export interface Settlement {
   /** Its faith (a live faith id), and whether it is being drawn to another. */
   faith?: string;
   faithShift?: { to: string; progress: number };
+  /** Held by an enemy in a war: who, for which war, since when, and the men left to hold it. */
+  occupied?: { by: number; war: number; since: number; garrison: number };
+  /** Realms that once held it (a claim to take it back). */
+  claimedBy?: number[];
 }
 
 /**
@@ -406,6 +479,10 @@ export interface SimState {
   champions?: Champion[];
   prophecies?: Prophecy[];
   godActs?: Record<string, number>;
+  /** Wars (going on and past), armies in the field, and battles fought. */
+  wars?: War[];
+  armies?: Army[];
+  battles?: Battle[];
   /** The world's setting for the gods (copied in from the world settings before each run). */
   gods?: { active: boolean; activity: number };
   grudges: Grudge[];

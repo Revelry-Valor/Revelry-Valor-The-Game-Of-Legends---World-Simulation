@@ -11,6 +11,7 @@ import { DAYS_PER_YEAR, dateText, type Clan, type Settlement, type SimState } fr
 import { ensureRealm, nationsYear, type NationContext } from '../src/sim/nations';
 import { hasPact, noteAttack, politicsYear, relationOf, spiesDay, type PoliticsContext } from '../src/sim/politics';
 import { waysYear } from '../src/sim/ways';
+import { armiesDay, declareWar, raiseArmy, warsMonth, warsYear, type WarContext } from '../src/sim/wars';
 import { newCulture, newFaith, newGod, newGovernment } from '../src/core/library';
 import { championMight, faithLoyalty, faithOf, faithYear, type FaithContext } from '../src/sim/faith';
 import { packSim, unpackSim } from '../src/sim/pack';
@@ -486,7 +487,7 @@ describe('technology', () => {
   }, 60000);
   it('lets foragers discover agriculture in time, by tending wild plants', () => {
     let found = 0;
-    for (const seed of [91, 92, 93]) {
+    for (const seed of [91, 92, 93, 94, 95, 96]) {
       const sim = newSim(env, seed);
       const p = at(6000, -12);
       const city = addDawnCity(sim, env, lib, humanId(), p.x, p.y, 600)!;
@@ -1004,5 +1005,122 @@ describe('faiths and gods', () => {
     expect(nf.parent).toBe(f.id);
     expect(far[1].faith).toBe(nf.id);
     expect(city.faith).toBe(f.id);
+  });
+});
+
+describe('wars and armies', () => {
+  const farming = ['agriculture', 'husbandry', 'fishing'];
+  const ctx = (sim: SimState): WarContext => ({
+    sim,
+    env,
+    lib,
+    rand: () => Math.random(),
+    dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
+    cellAt: cellOf,
+    log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
+    name: () => `N${sim.nextId++}`,
+    lifespan: () => 70,
+    might: () => 1,
+    speed: () => 20,
+  });
+  const town = (sim: SimState, base: Settlement, dx: number, dy: number, pop: number): Settlement => {
+    const st: Settlement = { ...base, id: sim.nextId++, name: `T${sim.nextId}`, kind: 'village', holyTo: [], x: base.x + dx, y: base.y + dy, pop, warband: pop * 0.1, economy: newEconomy(pop, 1, 6), techs: [...(base.techs ?? [])] };
+    st.economy!.stores = { ...st.economy!.stores, grain: pop * 3 };
+    sim.settlements.push(st);
+    return st;
+  };
+  /** Two settled realms: a strong one and a weak one beside it. */
+  const setup = (seed: number) => {
+    const sim = newSim(env, seed);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 3000, farming)!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6000, yAt(-14.5), 600, farming)!;
+    a.economy!.stores = { ...a.economy!.stores, grain: 20000 };
+    b.economy!.stores = { ...b.economy!.stores, grain: 4000 };
+    a.warband = 600;
+    b.warband = 60;
+    const bt = town(sim, b, 60, 0, 300);
+    const c = ctx(sim);
+    nationsYear(c);
+    const A = sim.clans.find((q) => q.id === a.clan)!;
+    const B = sim.clans.find((q) => q.id === b.clan)!;
+    A.realm!.gov = 'feudal-kingdom';
+    B.realm!.gov = 'feudal-kingdom';
+    return { sim, c, a, b, bt, A, B };
+  };
+
+  it('goes to war for a claim when it has the stronger army', () => {
+    const { sim, c, bt, A, B } = setup(601);
+    bt.claimedBy = [A.id];
+    for (let y = 0; y < 200 && !sim.wars?.length; y++) warsYear(c);
+    const w = sim.wars![0];
+    expect(w.reason).toBe('claim');
+    expect(w.goalTown).toBe(bt.id);
+    expect(w.attackers[0]).toBe(A.id);
+    expect(w.defenders[0]).toBe(B.id);
+  });
+
+  it('calls a defender’s allies into the war', () => {
+    const { sim, c, A, B } = setup(603);
+    // A separate realm (its own clan).
+    const third = addTribe(sim, env, lib, humanId(), 6400, yAt(-14), -1, 300)!;
+    const C = sim.clans.find((q) => q.id === third.clan)!;
+    sim.realmRelations = { [B.id < C.id ? `${B.id}|${C.id}` : `${C.id}|${B.id}`]: { opinion: 0.6, memory: 0, pacts: [{ kind: 'defence', since: 0 }] } };
+    let joined = false;
+    for (let i = 0; i < 20 && !joined; i++) {
+      sim.wars = [];
+      const w = declareWar(c, A, B, { reason: 'revenge' });
+      joined = w.defenders.includes(C.id);
+    }
+    expect(joined).toBe(true);
+  });
+
+  it('raises an army from its towns, feeds it from their stores, and sends the fighters home after', () => {
+    const { sim, c, a, A, B } = setup(605);
+    const before = a.pop;
+    const w = declareWar(c, A, B, { reason: 'revenge' });
+    const army = raiseArmy(c, A, w)!;
+    expect(army.men).toBeGreaterThan(300);
+    expect(a.pop).toBeLessThan(before);
+    expect(army.supply).toBeGreaterThan(army.men);
+    army.goal = 'home';
+    armiesDay(c);
+    expect(sim.armies!.includes(army)).toBe(false);
+    expect(a.pop).toBeCloseTo(before, -1);
+  });
+
+  it('marches, fights and takes towns; peace cedes what it holds, with a truce', () => {
+    const { sim, c, b, bt, A, B } = setup(607);
+    bt.claimedBy = [A.id];
+    declareWar(c, A, B, { reason: 'claim', town: bt });
+    for (let d = 0; d < 360 * 6 && sim.wars![0].ended === undefined; d++) {
+      armiesDay(c);
+      sim.day++;
+      if (sim.day % 30 === 0) warsMonth(c);
+    }
+    const w = sim.wars![0];
+    expect(w.ended).toBeDefined();
+    expect(w.outcome).toContain('won');
+    expect(sim.battles!.length).toBeGreaterThan(0);
+    expect([bt.clan, b.clan]).toContain(A.id);
+    const lost = [bt, b].find((s) => s.clan === A.id)!;
+    expect(lost.claimedBy).toContain(B.id);
+    expect(relationOf(sim, A.id, B.id)!.truceUntil!).toBeGreaterThan(sim.day);
+    // Kept with the save.
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(back.wars!.length).toBe(1);
+    expect(back.battles!.length).toBe(sim.battles!.length);
+  });
+
+  it('wears down an army that has no food and no land to forage', () => {
+    const { c, A, B } = setup(609);
+    const w = declareWar(c, A, B, { reason: 'revenge' });
+    const army = raiseArmy(c, A, w)!;
+    army.supply = 0;
+    // Out at sea, far from anything (no forage, no towns of its own).
+    army.x = 6000 + 9000;
+    army.y = yAt(-12);
+    const men = army.men;
+    for (let d = 0; d < 20; d++) armiesDay(c);
+    expect(army.men).toBeLessThan(men * 0.9);
   });
 });
