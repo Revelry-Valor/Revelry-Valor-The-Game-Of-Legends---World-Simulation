@@ -7,7 +7,8 @@ import { KM_PER_DEGREE } from '../src/core/units';
 import type { Library } from '../src/core/library';
 import { buildEnv, type Env } from '../src/sim/env';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
-import { DAYS_PER_YEAR, dateText, type Clan, type Settlement, type SimState } from '../src/sim/state';
+import { DAYS_PER_YEAR, dateText, type Clan, type Hero, type Settlement, type SimState } from '../src/sim/state';
+import { fight, total, type Ground, type Side } from '../src/sim/battle';
 import { ensureRealm, nationsYear, type NationContext } from '../src/sim/nations';
 import { hasPact, noteAttack, politicsYear, relationOf, spiesDay, type PoliticsContext } from '../src/sim/politics';
 import { waysYear } from '../src/sim/ways';
@@ -1111,6 +1112,31 @@ describe('wars and armies', () => {
     expect(back.battles!.length).toBe(sim.battles!.length);
   });
 
+  it('raises foot, archers and riders by what the realm knows, and keeps a full report of each battle', () => {
+    const { sim, c, a, b, A, B } = setup(611);
+    a.techs = [...(a.techs ?? []), 'bows', 'riding'];
+    const w = declareWar(c, A, B, { reason: 'revenge' });
+    const ours = raiseArmy(c, A, w)!;
+    expect(ours.units!.archers!).toBeGreaterThan(ours.men * 0.15);
+    expect(ours.units!.riders!).toBeGreaterThan(ours.men * 0.05);
+    expect(ours.heroes![0].kind).toBe('general');
+    b.warband = 400;
+    const theirs = raiseArmy(c, B, w)!;
+    // Bring them face to face.
+    theirs.x = ours.x + 3;
+    theirs.y = ours.y;
+    armiesDay(c);
+    const battle = sim.battles!.find((q) => q.report)!;
+    expect(battle.report!.phases.map((p) => p.name)).toEqual(['Skirmish', 'Clash', 'Pursuit']);
+    expect(battle.report!.sides[0].units.archers!).toBeGreaterThan(0);
+    expect(battle.until!).toBeGreaterThan(sim.day);
+    // Both hold where they are while the fighting lasts.
+    const at = { x: ours.x, y: ours.y };
+    sim.day++;
+    armiesDay(c);
+    if ((ours.engagedUntil ?? 0) > sim.day) expect({ x: ours.x, y: ours.y }).toEqual(at);
+  });
+
   it('wears down an army that has no food and no land to forage', () => {
     const { c, A, B } = setup(609);
     const w = declareWar(c, A, B, { reason: 'revenge' });
@@ -1122,5 +1148,78 @@ describe('wars and armies', () => {
     const men = army.men;
     for (let d = 0; d < 20; d++) armiesDay(c);
     expect(army.men).toBeLessThan(men * 0.9);
+  });
+});
+
+describe('phased battles', () => {
+  /** A seeded random stream, so the counts below repeat. */
+  const seeded = (seed: number) => () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const side = (o: Partial<Side>): Side => ({ label: 'side', heroes: [], morale: 1, might: 1, arms: 1, ranged: 1, defending: false, walls: 1, mountain: false, flies: false, specialistName: 'specialists', ...o, units: { foot: 0, archers: 0, riders: 0, specialists: 0, ...(o.units ?? { foot: 1000 }) } });
+  const open: Ground = { name: 'on open ground', hills: 0, river: false, forest: false, marsh: false };
+  const forest: Ground = { name: 'in the forest', hills: 0, river: false, forest: true, marsh: false };
+  const wins = (g: Ground, a: () => Side, b: () => Side, n = 300) => {
+    const r = seeded(7);
+    let w = 0;
+    for (let i = 0; i < n; i++) if (fight(r, g, a(), b()).winner === 0) w++;
+    return w / n;
+  };
+
+  it('fights in three phases, with losses by kind', () => {
+    const r = fight(seeded(1), open, side({ units: { foot: 600, archers: 300, riders: 100 } }), side({ units: { foot: 900 } }));
+    expect(r.phases.map((p) => p.name)).toEqual(['Skirmish', 'Clash', 'Pursuit']);
+    expect(r.lost[1].foot!).toBeGreaterThan(0);
+    // Only the side with archers did harm before the clash.
+    expect(total(r.phases[0].lost[1])).toBeGreaterThan(total(r.phases[0].lost[0]));
+  });
+
+  it('lets riders win on open ground more than in forest', () => {
+    const riders = () => side({ units: { foot: 300, riders: 500 } });
+    const foot = () => side({ units: { foot: 900 } });
+    expect(wins(open, riders, foot)).toBeGreaterThan(wins(forest, riders, foot) + 0.2);
+  });
+
+  it('gives defenders the edge on hills, behind rivers and behind walls', () => {
+    const att = () => side({ units: { foot: 1000 } });
+    const flat = wins(open, att, () => side({ units: { foot: 900 }, defending: true }));
+    const river = wins({ ...open, river: true, hills: 1 }, att, () => side({ units: { foot: 900 }, defending: true }));
+    const walled = wins(open, att, () => side({ units: { foot: 900 }, defending: true, walls: 1.8 }));
+    expect(river).toBeLessThan(flat - 0.15);
+    expect(walled).toBeLessThan(flat - 0.3);
+  });
+
+  it('lets heroes lift their side, duel, fall, and rise', () => {
+    const hero = (name: string, power: number): Hero => ({ name, kind: 'hero', power, born: 0, deeds: 0, female: false });
+    const even = wins(open, () => side({}), () => side({}));
+    const led = wins(open, () => side({ heroes: [hero('Ara', 5), hero('Bel', 4)] }), () => side({}));
+    expect(led).toBeGreaterThan(even + 0.1);
+    const r = seeded(3);
+    let duels = 0;
+    let fell = 0;
+    let rose = 0;
+    for (let i = 0; i < 200; i++) {
+      const out = fight(r, open, side({ heroes: [hero('Ara', 3)] }), side({ heroes: [hero('Cor', 3)] }));
+      if (out.notes.some((n) => n.includes('between the lines'))) duels++;
+      fell += out.fallen[0].length + out.fallen[1].length;
+      if (out.risen) rose++;
+    }
+    expect(duels).toBeGreaterThan(50);
+    expect(fell).toBeGreaterThan(20);
+    expect(rose).toBeGreaterThan(10);
+  });
+
+  it('cuts down a routed side with riders, while its own riders screen it', () => {
+    const chased = (screen: number) => {
+      const r = seeded(11);
+      let lost = 0;
+      for (let i = 0; i < 200; i++) {
+        const out = fight(r, open, side({ units: { foot: 1500, riders: 600 } }), side({ units: { foot: 600 - screen, riders: screen } }));
+        lost += total(out.phases[2].lost[1]);
+      }
+      return lost;
+    };
+    expect(chased(0)).toBeGreaterThan(chased(250) * 1.3);
   });
 });

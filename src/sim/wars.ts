@@ -6,7 +6,8 @@ import { PLANT_K } from './env';
 import { realmFaith } from './faith';
 import { govOf, realmName, tribalRule, type NationContext } from './nations';
 import { hasPact, noteAttack, relationOf } from './politics';
-import type { Army, Battle, Clan, RealmRelation, Settlement, SimState, War, WarReason } from './state';
+import type { Army, Battle, BattleReport, Clan, Hero, RealmRelation, Settlement, SimState, Units, War, WarReason } from './state';
+import { fight, kindName, total, UNIT_KINDS, type Ground, type Side } from './battle';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer } from './state';
 import { armsMight, knows, wallsMight } from './tech';
 import { FORD_SLOW, WAYS } from './ways';
@@ -38,6 +39,79 @@ export interface WarContext extends NationContext {
   /** How strong each fighter of a people is (race and culture), and how far an army of them marches in a day (km). */
   might: (race: string, culture: string) => number;
   speed: (race: string, culture: string) => number;
+  /** A race's gifts in war: flying, mountain-born, and its specialty (for its specialist troops). */
+  racial?: (race: string) => { flies: boolean; mountains: boolean; specialty: string };
+}
+
+// ---- Fighters by kind (Phase 10 step 2).
+
+/** An army's fighters by kind (older armies were all foot). */
+export const unitsOf = (a: Army): Units => (a.units ??= { foot: a.men, archers: 0, riders: 0, specialists: 0 });
+const sync = (a: Army) => {
+  a.men = Math.max(0, Math.round(total(unitsOf(a))));
+};
+/** Every kind shrinks by the same share (hunger, desertion). */
+function scaleUnits(a: Army, f: number): void {
+  const u = unitsOf(a);
+  for (const k of UNIT_KINDS) u[k] = (u[k] ?? 0) * f;
+  sync(a);
+}
+/** Take men out (a garrison): mostly foot, some archers and specialists, few riders. */
+function takeMen(a: Army, n: number): void {
+  const u = unitsOf(a);
+  const weight: Record<(typeof UNIT_KINDS)[number], number> = { foot: 2, archers: 1, riders: 0.3, specialists: 1 };
+  const w = UNIT_KINDS.reduce((m, k) => m + (u[k] ?? 0) * weight[k], 0);
+  if (w > 0) for (const k of UNIT_KINDS) u[k] = Math.max(0, (u[k] ?? 0) - (n * (u[k] ?? 0) * weight[k]) / w);
+  sync(a);
+}
+const RANGED: [string, number][] = [['firearms', 1.8], ['crossbows', 1.4], ['bows', 1]];
+function rangedOf(c: WarContext, clan: Clan | undefined): number {
+  const cap = capitalOf(c.sim, clan);
+  if (!cap) return 0.5;
+  return RANGED.find(([id]) => knows(c.lib, cap, id))?.[1] ?? 0.5;
+}
+/** How an army of this realm is made up, by its knowledge, its army custom, its way of life and its race. */
+function composition(c: WarContext, clan: Clan, men: number): { units: Units; specialists: string } {
+  const cap = capitalOf(c.sim, clan);
+  const has = (id: string) => (cap ? knows(c.lib, cap, id) : false);
+  const g = govOf(c.lib, clan.realm?.gov ?? '');
+  const parts = g?.army ?? [];
+  const cu = cultureOf(c.sim, clan.culture);
+  const race = c.racial?.(clan.race) ?? { flies: false, mountains: false, specialty: '' };
+  const archers = has('firearms') ? 0.3 : has('crossbows') ? 0.28 : has('bows') ? 0.22 : 0.08;
+  let riders = has('cavalry') ? 0.2 : has('riding') ? 0.1 : 0;
+  if (cu?.lifestyles.includes('Nomadic')) riders *= 2;
+  if (cu?.traditions.some((t) => t.id === 'horse-lords' && t.level >= 0)) riders *= 1.5;
+  riders = Math.min(0.5, riders);
+  let spec = 0;
+  let name = 'picked warriors';
+  if (parts.includes('Lords’ retainers (samurai-like)')) (spec += 0.08), (name = 'retainers');
+  if (parts.includes('Specialized troops')) spec += 0.1;
+  if (parts.includes('Religious or magic orders')) (spec += 0.05), (name = 'holy orders');
+  if (race.flies) (spec += 0.06), (name = 'sky scouts');
+  else if (race.mountains) (spec += 0.05), (name = 'mountain troops');
+  if (race.specialty && (parts.includes('Specialized troops') || race.flies || race.mountains)) name = race.specialty.length <= 40 ? race.specialty.toLowerCase() : name;
+  spec = Math.min(0.3, spec);
+  const foot = Math.max(0.2, 1 - archers - riders - spec);
+  const sum = foot + archers + riders + spec;
+  return { units: { foot: (men * foot) / sum, archers: (men * archers) / sum, riders: (men * riders) / sum, specialists: (men * spec) / sum }, specialists: name };
+}
+
+/** The army's heroes: its general (the realm's best at home, or a new one), any god's champion of the realm, and up to two more heroes. */
+function gatherHeroes(c: WarContext, clan: Clan): Hero[] {
+  const { sim } = c;
+  const realm = clan.realm;
+  const life = c.lifespan(clan.race);
+  const home = (realm?.heroes ?? []).filter((h) => (sim.day - h.born) / DAYS_PER_YEAR < life * 0.75).sort((a, b) => b.power - a.power);
+  const out: Hero[] = [];
+  const general = home.find((h) => h.kind === 'general') ?? { name: c.name(clan.culture), kind: 'general' as const, power: 1 + Math.floor(c.rand() * 3), born: sim.day - Math.round(life * (0.3 + 0.2 * c.rand()) * DAYS_PER_YEAR), deeds: 0, female: c.rand() < 0.3 };
+  out.push(general);
+  for (const ch of (sim.champions ?? []).filter((q) => q.clan === clan.id && q.until > sim.day)) {
+    if (!home.some((h) => h.name === ch.name)) out.push({ name: ch.name, kind: 'champion', power: 3, born: ch.since - Math.round(25 * DAYS_PER_YEAR), deeds: 0, female: false, god: ch.god });
+  }
+  for (const h of home) if (h !== general && out.length < 4) out.push(h);
+  if (realm) realm.heroes = (realm.heroes ?? []).filter((h) => !out.includes(h));
+  return out;
 }
 
 /** Share of a town's people raised by each army custom (warbands come from the town's own fighters). */
@@ -272,9 +346,12 @@ export function raiseArmy(c: WarContext, clan: Clan, war: War): Army | null {
   const g = govOf(lib, clan.realm?.gov ?? '');
   const word = ARMY_WORD[g?.army[0] ?? 'Clan warbands'] ?? 'Army';
   const n = (sim.armies ?? []).filter((a) => a.clan === clan.id).length + (sim.battles ?? []).filter((b) => b.a.clan === clan.id || b.b.clan === clan.id).length % 3;
-  const army: Army = { id: sim.nextId++, name: `${ORDINAL[n % ORDINAL.length]} ${word} of ${clan.name}`, clan: clan.id, war: war.id, x: cap.x, y: cap.y, men, raised: men, morale: 1, supply, from, goal: sideOf(war, clan.id) === 'attackers' ? 'attack' : 'defend', target: -1, general: c.name(clan.culture) };
+  const comp = composition(c, clan, men);
+  const heroes = gatherHeroes(c, clan);
+  const army: Army = { id: sim.nextId++, name: `${ORDINAL[n % ORDINAL.length]} ${word} of ${clan.name}`, clan: clan.id, war: war.id, x: cap.x, y: cap.y, men, raised: men, morale: 1, supply, from, goal: sideOf(war, clan.id) === 'attackers' ? 'attack' : 'defend', target: -1, general: heroes[0].name, units: comp.units, specialists: comp.specialists, heroes };
   (sim.armies ??= []).push(army);
-  c.log(`${realmName(lib, clan)} raised the ${army.name}: ${men.toLocaleString()} under ${army.general}.`, cap.x, cap.y);
+  const mix = UNIT_KINDS.filter((k) => (comp.units[k] ?? 0) >= 1).map((k) => `${Math.round(comp.units[k] ?? 0).toLocaleString()} ${kindName(k, comp.specialists)}`).join(', ');
+  c.log(`${realmName(lib, clan)} raised the ${army.name}: ${men.toLocaleString()} (${mix}) under ${army.general}${heroes.length > 1 ? `, with ${heroes.slice(1).map((h) => h.name).join(' and ')}` : ''}.`, cap.x, cap.y);
   return army;
 }
 
@@ -289,6 +366,9 @@ function disband(c: WarContext, a: Army): void {
     st.pop += back;
     st.warband += back * 0.6;
   }
+  // Its heroes come home (a god's champion goes back to the god's keeping).
+  const clan = sim.clans.find((q) => q.id === a.clan);
+  if (clan?.realm) clan.realm.heroes = [...(clan.realm.heroes ?? []), ...(a.heroes ?? []).filter((h) => h.kind !== 'champion')].slice(-8);
   sim.armies = (sim.armies ?? []).filter((q) => q !== a);
 }
 
@@ -333,16 +413,42 @@ function nearestName(c: WarContext, x: number, y: number): string {
   return k >= 0 && env.mzone[k] >= 2 ? 'the Heights' : k >= 0 && env.fresh[k] ? 'the River' : 'the Plain';
 }
 
-/** How a side's strength in a fight is set: fighters, their might and arms, morale, and the ground (defenders gain on hills and behind rivers). */
-function power(c: WarContext, clan: Clan | undefined, men: number, morale: number, defending: boolean, x: number, y: number): number {
-  if (!clan) return men;
+/** The ground where a battle is fought. */
+function groundAt(c: WarContext, x: number, y: number): Ground {
   const k = c.cellAt(x, y);
-  let ground = 1;
-  if (defending && k >= 0) {
-    if (c.env.mzone[k] >= 1) ground *= 1.15 + 0.05 * Math.min(3, c.env.mzone[k]);
-    if (c.env.fresh[k]) ground *= 1.25;
+  const e = c.env;
+  if (k < 0) return { name: 'on open ground', hills: 0, river: false, forest: false, marsh: false };
+  const cover = e.cover[k];
+  const g: Ground = { name: '', hills: e.mzone[k], river: !!e.fresh[k], forest: cover === 0 || cover === 1 || cover === 12, marsh: cover === 4 };
+  g.name = g.hills >= 2 ? 'in the mountains' : g.river ? 'at a river crossing' : g.hills === 1 ? 'in the hills' : g.forest ? 'in the forest' : g.marsh ? 'in the marsh' : 'on open ground';
+  return g;
+}
+function sideOfArmy(c: WarContext, a: Army, defending: boolean): Side {
+  const clan = c.sim.clans.find((q) => q.id === a.clan);
+  const race = clan && c.racial ? c.racial(clan.race) : { flies: false, mountains: false, specialty: '' };
+  return { label: `the ${a.name}`, units: { ...unitsOf(a) }, heroes: [...(a.heroes ?? [])], morale: a.morale, might: clan ? c.might(clan.race, clan.culture) : 1, arms: clan ? armsOf(c, clan) : 1, ranged: rangedOf(c, clan), defending, walls: 1, mountain: race.mountains, flies: race.flies, specialistName: a.specialists ?? 'specialists' };
+}
+/** Write a fought side back onto its army: fighters left, morale, heroes (and one risen). */
+function afterFight(c: WarContext, a: Army, s: Side, morale: number, risen: Hero | undefined): void {
+  a.units = s.units;
+  sync(a);
+  a.morale = morale;
+  a.heroes = s.heroes;
+  if (risen) {
+    const clan = c.sim.clans.find((q) => q.id === a.clan);
+    risen.name = c.name(clan?.culture ?? '');
+    risen.born = c.sim.day - Math.round(25 * DAYS_PER_YEAR);
+    a.heroes.push(risen);
   }
-  return men * c.might(clan.race, clan.culture) * armsOf(c, clan) * clamp(morale, 0.2, 1.2) * ground * (0.7 + 0.6 * c.rand());
+}
+function reportOf(sides: [Side, Side], clans: [number, number], before: [Units, Units], heroes: [string[], string[]], ground: Ground, r: ReturnType<typeof fight>, outcome: string): BattleReport {
+  return {
+    ground: ground.name,
+    sides: [0, 1].map((i) => ({ label: sides[i].label, clan: clans[i], units: before[i], heroes: heroes[i], specialists: sides[i].specialistName })),
+    phases: r.phases,
+    notes: r.notes,
+    outcome,
+  };
 }
 
 function record(c: WarContext, war: War, b: Battle): void {
@@ -367,65 +473,68 @@ function record(c: WarContext, war: War, b: Battle): void {
   }
 }
 
-/** Two armies meet. */
+/** Two armies meet: a phased battle (skirmish, clash, pursuit) on the ground where they stand. */
 function fieldBattle(c: WarContext, war: War, A: Army, B: Army): void {
   const { sim, lib } = c;
   const ca = sim.clans.find((q) => q.id === A.clan);
   const cb = sim.clans.find((q) => q.id === B.clan);
   const k = c.cellAt(B.x, B.y);
-  // The side on its own land, or holding its ground, defends.
+  // The side on its own land holds its ground and defends.
   const bDefends = k >= 0 && sim.owner[k] === B.clan;
-  const pa = power(c, ca, A.men, A.morale, !bDefends, A.x, A.y);
-  const pb = power(c, cb, B.men, B.morale, bDefends, B.x, B.y);
-  const aWins = pa > pb;
-  const edge = Math.max(pa, pb) / Math.max(1, Math.min(pa, pb));
-  const loseW = (0.04 + 0.08 * c.rand()) / Math.min(2, edge);
-  const loseL = Math.min(0.6, (0.15 + 0.15 * c.rand()) * Math.min(2, edge));
-  const [W, L] = aWins ? [A, B] : [B, A];
-  const lw = Math.round(W.men * loseW);
-  const ll = Math.round(L.men * loseL);
-  const before = { a: A.men, b: B.men };
-  W.men -= lw;
-  L.men -= ll;
-  W.morale = Math.min(1.2, W.morale + 0.1);
-  L.morale -= 0.3;
+  const ground = groundAt(c, B.x, B.y);
+  const sa = sideOfArmy(c, A, !bDefends && k >= 0 && sim.owner[k] === A.clan);
+  const sb = sideOfArmy(c, B, bDefends);
+  const before: [Units, Units] = [{ ...sa.units }, { ...sb.units }];
+  const heroes: [string[], string[]] = [sa.heroes.map((h) => h.name), sb.heroes.map((h) => h.name)];
+  const r = fight(c.rand, ground, sa, sb);
+  afterFight(c, A, sa, r.morale[0], r.winner === 0 ? r.risen : undefined);
+  afterFight(c, B, sb, r.morale[1], r.winner === 1 ? r.risen : undefined);
+  const [W, L] = r.winner === 0 ? [A, B] : [B, A];
   if (L.morale < 0.4 || L.men < L.raised * 0.3) L.goal = 'home';
   if (ca && cb) noteBetween(sim, ca.culture, cb.culture, 'fights');
+  // The fighting holds both armies where they are for a day or more.
+  A.engagedUntil = B.engagedUntil = sim.day + r.days;
   const name = `Battle of ${nearestName(c, B.x, B.y)}`;
-  record(c, war, { id: sim.nextId++, war: war.id, name, x: B.x, y: B.y, day: sim.day, a: { clan: A.clan, army: A.name, men: before.a, lost: aWins ? lw : ll }, b: { clan: B.clan, army: B.name, men: before.b, lost: aWins ? ll : lw }, winner: W.clan });
+  const lw = Math.round(total(r.lost[r.winner]));
+  const ll = Math.round(total(r.lost[1 - r.winner]));
   const wc = sim.clans.find((q) => q.id === W.clan)!;
-  c.log(`${name} (${war.name}): the ${W.name} of ${realmName(lib, wc)} beat the ${L.name}; ${lw.toLocaleString()} and ${ll.toLocaleString()} fell.${L.goal === 'home' ? ` The ${L.name} falls back.` : ''}`, B.x, B.y);
-  A.supply = Math.max(0, A.supply);
+  const outcome = `The ${W.name} of ${realmName(lib, wc)} won${r.routed ? `; the ${L.name} was routed` : ''}${L.goal === 'home' ? ` and falls back home` : ''}. ${lw.toLocaleString()} and ${ll.toLocaleString()} fell.${r.fallen[0].length + r.fallen[1].length ? ` Fallen heroes: ${[...r.fallen[0], ...r.fallen[1]].join(', ')}.` : ''}${r.risen ? ` ${r.risen.name} rose as a hero.` : ''}`;
+  record(c, war, { id: sim.nextId++, war: war.id, name, x: B.x, y: B.y, day: sim.day, until: sim.day + r.days, a: { clan: A.clan, army: A.name, men: Math.round(total(before[0])), lost: Math.round(total(r.lost[0])) }, b: { clan: B.clan, army: B.name, men: Math.round(total(before[1])), lost: Math.round(total(r.lost[1])) }, winner: W.clan, report: reportOf([sa, sb], [A.clan, B.clan], before, heroes, ground, r, outcome) });
+  c.log(`${name} (${war.name}), ${ground.name}: ${outcome}`, B.x, B.y);
 }
 
-/** An army falls on a town: its guards (behind walls) or the enemy holding it. Winning, the army takes it (or frees it). */
+/** An army falls on a town: its guards and townsfolk (behind walls), or the enemy holding it. Winning, the army takes it (or frees it). */
 function assault(c: WarContext, war: War, a: Army, st: Settlement): void {
   const { sim, lib } = c;
   const clan = sim.clans.find((q) => q.id === a.clan);
   const owner = sim.clans.find((q) => q.id === st.clan);
   const freeing = !!st.occupied && sideOf(war, st.clan) === sideOf(war, a.clan);
   const holder = freeing ? sim.clans.find((q) => q.id === st.occupied!.by) : owner;
-  // The town's guards, and its townsfolk on the walls (half as strong).
+  // The town's guards, and its townsfolk on the walls.
   const guards = freeing ? st.occupied!.garrison : Math.max(1, st.warband + st.pop * 0.05);
   const walls = !freeing ? wallsMight((id) => knows(lib, st, id)) : 1;
-  const pa = power(c, clan, a.men, a.morale, false, st.x, st.y);
-  const pd = power(c, holder, guards, 1, true, st.x, st.y) * walls * 1.2;
-  const win = pa > pd;
-  const edge = Math.max(pa, pd) / Math.max(1, Math.min(pa, pd));
-  const lostA = Math.round(a.men * (win ? 0.04 + 0.06 * c.rand() : 0.15 + 0.15 * c.rand()) * (win ? 1 / Math.min(2, edge) : Math.min(2, edge)) * walls);
-  const lostD = Math.round(guards * (win ? 0.5 + 0.3 * c.rand() : 0.05 + 0.1 * c.rand()));
-  a.men -= lostA;
-  if (freeing) st.occupied!.garrison -= lostD;
+  const ground = groundAt(c, st.x, st.y);
+  const sa = sideOfArmy(c, a, false);
+  const race = holder && c.racial ? c.racial(holder.race) : { flies: false, mountains: false, specialty: '' };
+  const sd: Side = { label: freeing ? `the garrison of ${st.name}` : `the defenders of ${st.name}`, units: { foot: guards * 0.7, archers: guards * 0.3, riders: 0, specialists: 0 }, heroes: [], morale: 1, might: holder ? c.might(holder.race, holder.culture) : 1, arms: holder ? armsOf(c, holder) : 1, ranged: rangedOf(c, holder), defending: true, walls: walls * 1.2, mountain: race.mountains, flies: race.flies, specialistName: 'specialists' };
+  const before: [Units, Units] = [{ ...sa.units }, { ...sd.units }];
+  const r = fight(c.rand, ground, sa, sd);
+  const win = r.winner === 0;
+  afterFight(c, a, sa, r.morale[0], win ? r.risen : undefined);
+  const lostD = Math.round(total(r.lost[1]));
+  if (freeing) st.occupied!.garrison = Math.max(0, st.occupied!.garrison - lostD);
   else {
     st.warband = Math.max(0, st.warband - lostD);
     st.pop = Math.max(10, st.pop - lostD);
   }
+  a.engagedUntil = sim.day + r.days;
   const name = `Assault on ${st.name}`;
-  record(c, war, { id: sim.nextId++, war: war.id, name, x: st.x, y: st.y, day: sim.day, a: { clan: a.clan, army: a.name, men: a.men + lostA, lost: lostA }, b: { clan: holder?.id ?? st.clan, army: freeing ? 'its garrison' : `the guards of ${st.name}`, men: guards, lost: lostD }, winner: win ? a.clan : holder?.id ?? st.clan, town: st.id });
+  const lostA = Math.round(total(r.lost[0]));
+  const outcome = win ? `The ${a.name} carried ${st.name}${walls > 1 ? ' over its walls' : ''}. ${lostA.toLocaleString()} and ${lostD.toLocaleString()} fell.` : `${st.name} held${walls > 1 ? ' behind its walls' : ''}: the ${a.name} lost ${lostA.toLocaleString()}.`;
+  record(c, war, { id: sim.nextId++, war: war.id, name, x: st.x, y: st.y, day: sim.day, until: sim.day + r.days, a: { clan: a.clan, army: a.name, men: Math.round(total(before[0])), lost: lostA }, b: { clan: holder?.id ?? st.clan, army: freeing ? 'its garrison' : `the defenders of ${st.name}`, men: Math.round(guards), lost: lostD }, winner: win ? a.clan : holder?.id ?? st.clan, town: st.id, report: reportOf([sa, sd], [a.clan, holder?.id ?? st.clan], before, [(a.heroes ?? []).map((h) => h.name), []], ground, r, outcome) });
   if (!win) {
-    a.morale -= 0.15;
     if (a.morale < 0.4) a.goal = 'home';
-    c.log(`${name} (${war.name}) failed: the ${a.name} lost ${lostA.toLocaleString()}.`, st.x, st.y);
+    c.log(`${name} (${war.name}) failed: ${outcome}`, st.x, st.y);
     return;
   }
   if (freeing) {
@@ -435,7 +544,7 @@ function assault(c: WarContext, war: War, a: Army, st: Settlement): void {
   }
   // Taken: a garrison stays; the army eats from its stores.
   const garrison = Math.max(20, Math.round(a.men * 0.1));
-  a.men -= garrison;
+  takeMen(a, garrison);
   st.occupied = { by: a.clan, war: war.id, since: sim.day, garrison };
   a.supply += takeFood(c, st, a.men * 2);
   if (owner && clan) noteBetween(sim, clan.culture, owner.culture, 'fights');
@@ -457,6 +566,12 @@ export function armiesDay(c: WarContext): void {
       continue;
     }
     if (!war || war.ended !== undefined) a.goal = 'home';
+    unitsOf(a);
+    // Fighting a battle: it holds where it is (eating) until the fighting is done.
+    if ((a.engagedUntil ?? -1) > sim.day) {
+      a.supply = Math.max(0, a.supply - a.men / DAYS_PER_MONTH);
+      continue;
+    }
     type Dest = { x: number; y: number; town?: Settlement; army?: Army };
     const homeDest = (): Dest | null => {
       const h = capitalOf(sim, clan);
@@ -493,7 +608,7 @@ export function armiesDay(c: WarContext): void {
     if (a.supply < 0) {
       // Hunger: sickness and desertion.
       a.supply = 0;
-      a.men = Math.floor(a.men * 0.99);
+      scaleUnits(a, 0.99);
       a.morale -= 0.01;
     }
     // Arrived home (going home): disband.

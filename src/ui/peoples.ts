@@ -11,7 +11,8 @@ import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTri
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
-import type { Army, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
+import type { Army, Battle, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
+import { kindName, total, UNIT_KINDS } from '../sim/battle';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
 import { opinionWord, PACT_NAMES } from '../sim/politics';
 import { faithColour, faithOf, ORGANIZATION_WORDS, realmFaith } from '../sim/faith';
@@ -69,8 +70,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let gridProblem = false;
   let active = false;
   let selected: number | null = null;
-  /** The realm (clan id) whose card is open. */
+  /** The realm (clan id) whose card is open, and the battle whose report is open. */
   let selectedRealm: number | null = null;
+  let selectedBattle: number | null = null;
   let mode: 'select' | 'add' = 'select';
   let addRace = '';
   let addWhat: 'tribe' | 'dawn' = 'tribe';
@@ -483,7 +485,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             g.lineTo(bx + 6 * sgn, by + 6);
             g.stroke();
           }
-          g.strokeStyle = s.day - b.day < 60 ? '#ff5a3c' : '#d9d2c3';
+          const fighting = (b.until ?? b.day) > s.day;
+          if (fighting) {
+            g.fillStyle = 'rgba(255,60,30,0.35)';
+            g.beginPath();
+            g.arc(bx, by, 13, 0, Math.PI * 2);
+            g.fill();
+          }
+          g.strokeStyle = fighting || s.day - b.day < 60 ? '#ff5a3c' : '#d9d2c3';
           g.lineWidth = 1.6;
           for (const sgn of [1, -1]) {
             g.beginPath();
@@ -690,6 +699,16 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const s = sim!;
       const hit = tribeAt(x, y, pk);
       const hitCity = hit ? null : settlementAt(x, y, pk);
+      // A battle on the map: open its report.
+      if (!hit && !hitCity && s.started) {
+        const b = [...(s.battles ?? [])].reverse().find((q) => s.day - q.day <= 720 && Math.hypot(q.x - x, q.y - y) < pk * 9);
+        if (b) {
+          selectedBattle = b.id;
+          render();
+          document.querySelector('.battle-report')?.scrollIntoView({ block: 'nearest' });
+          return true;
+        }
+      }
       if (mode === 'add' && !hit && !hitCity) {
         if (!addRace) {
           toast('Choose which race to add first.');
@@ -957,7 +976,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       .filter((x) => x.w && x.w.chance > 0.001)
       .sort((a, b) => b.w!.chance - a.w!.chance)
       .slice(0, 4);
+    const heroes = cn.realm?.heroes ?? [];
     return [
+      heroes.length ? h('div', { class: 'econ-head' }, 'Heroes and generals at home') : null,
+      heroes.length ? h('ul', { class: 'econ-list' }, ...heroes.map((hr) => h('li', {}, h('span', {}, hr.name, h('span', { class: 'muted' }, ` · ${hr.kind}`)), h('span', { class: 'muted' }, `${'★'.repeat(Math.max(1, Math.min(5, hr.power)))} · ${hr.deeds} deed${hr.deeds === 1 ? '' : 's'}`)))) : null,
       wars.length ? h('div', { class: 'econ-head' }, 'At war') : null,
       ...wars.map((w) => h('div', {}, `${w.name}: ${sideOf(w, cn.id) === 'attackers' ? 'attacking' : 'defending'}, war score ${Math.round(w.score)}`)),
       outlook.length && !wars.length ? h('div', { class: 'econ-head' }, 'Might go to war with') : null,
@@ -1006,7 +1028,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const tgt = s.settlements.find((q) => q.id === a.target);
     const foe = (s.armies ?? []).find((q) => q.id === a.target);
     const doing = a.goal === 'home' ? 'going home' : a.siege ? `investing ${tgt?.name ?? '?'} (${a.siege.days} days)` : foe ? `marching to meet the ${foe.name}` : tgt ? `marching on ${tgt.name}` : 'holding';
-    return `The ${a.name} (${cn ? realmName(lib(), cn) : '?'}): ${Math.round(a.men).toLocaleString()} under ${a.general}, morale ${Math.round(a.morale * 100)}%, food for ${Math.max(0, Math.round((a.supply / Math.max(1, a.men)) * 30))} days; ${doing}`;
+    const mix = a.units ? ` (${UNIT_KINDS.filter((k) => (a.units![k] ?? 0) >= 1).map((k) => `${Math.round(a.units![k] ?? 0).toLocaleString()} ${kindName(k, a.specialists)}`).join(', ')})` : '';
+    const heroes = (a.heroes ?? []).slice(1).map((h) => h.name);
+    const fighting = (a.engagedUntil ?? -1) > s.day ? '; fighting a battle' : '';
+    return `The ${a.name} (${cn ? realmName(lib(), cn) : '?'}): ${Math.round(a.men).toLocaleString()}${mix} under ${a.general}${heroes.length ? ` with ${heroes.join(', ')}` : ''}${fighting}, morale ${Math.round(a.morale * 100)}%, food for ${Math.max(0, Math.round((a.supply / Math.max(1, a.men)) * 30))} days; ${doing}`;
   };
   /** How war looks from a realm: its enemies, and the realms it may go to war with (and why). */
   const warContextUI = (): WarContext => {
@@ -1025,6 +1050,38 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       might: (race, culture) => (raceInfo(L, race, culture, s.cultures)?.might ?? 1) * cultureFx(s, culture).fight,
       speed: (race, culture) => (raceInfo(L, race, culture, s.cultures)?.speed ?? 15) * 0.9,
     };
+  };
+  /** A battle's report: the sides by kind of fighter, their heroes, each phase, and how it ended (once the fighting is over). */
+  const battleReport = (b: Battle): HTMLElement => {
+    const s = sim!;
+    const r = b.report;
+    const war = (s.wars ?? []).find((w) => w.id === b.war);
+    const going = (b.until ?? b.day) > s.day;
+    const head = h('div', {}, h('strong', {}, b.name), h('span', { class: 'muted' }, ` · ${war?.name ?? ''} · ${dateText(b.day)}${r ? ` · ${r.ground}` : ''}`));
+    const close = h('button', { type: 'button', class: 'ghost small', onclick: () => { selectedBattle = null; render(); } }, 'Close');
+    if (!r) return h('div', { class: 'tribe-card small battle-report' }, head, h('div', {}, `${b.a.army} (${b.a.men}) against ${b.b.army} (${b.b.men}): ${clanOf(b.winner)?.name ?? '?'} won; ${b.a.lost} and ${b.b.lost} fell.`), close);
+    const n = (v: number | undefined) => Math.round(v ?? 0).toLocaleString();
+    const kinds = UNIT_KINDS.filter((k) => (r.sides[0].units[k] ?? 0) >= 1 || (r.sides[1].units[k] ?? 0) >= 1);
+    const lostBy = (i: 0 | 1, k: (typeof UNIT_KINDS)[number]) => r.phases.reduce((m, p) => m + (p.lost[i][k] ?? 0), 0);
+    return h('div', { class: 'tribe-card small battle-report' },
+      head,
+      h('table', { class: 'clan-table small' },
+        h('thead', {}, h('tr', {}, h('th', {}, ''), ...r.sides.map((sd) => h('th', {}, h('span', { class: 'swatch', style: `background:${clanOf(sd.clan)?.colour ?? '#888'}` }), sd.label)))),
+        h('tbody', {},
+          ...kinds.map((k) => h('tr', {}, h('td', {}, kindName(k, r.sides[0].units.specialists ? r.sides[0].specialists : r.sides[1].specialists)), ...([0, 1] as const).map((i) => h('td', { class: 'num' }, going ? n(r.sides[i].units[k]) : `${n(r.sides[i].units[k])} (−${n(lostBy(i, k))})`)))),
+          h('tr', {}, h('td', {}, h('b', {}, 'All')), ...([0, 1] as const).map((i) => h('td', { class: 'num' }, h('b', {}, going ? n(total(r.sides[i].units)) : `${n(total(r.sides[i].units))} (−${n(r.phases.reduce((m, p) => m + total(p.lost[i]), 0))})`)))),
+          h('tr', {}, h('td', {}, 'Heroes'), ...r.sides.map((sd) => h('td', {}, sd.heroes.join(', ') || '—'))),
+        ),
+      ),
+      going
+        ? h('p', { class: 'muted' }, 'The armies are still fighting. The full report comes when the fighting stops.')
+        : h('div', {},
+            ...r.phases.map((p) => h('div', {}, h('span', { class: 'econ-head' }, `${p.name}: `), p.text)),
+            ...r.notes.map((t) => h('div', { class: 'muted' }, t)),
+            h('div', {}, h('b', {}, r.outcome)),
+          ),
+      close,
+    );
   };
   /** A war: its sides, reason, score and weariness, armies and latest battles. */
   const warCard = (w: War): HTMLElement => {
@@ -1046,7 +1103,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         armies.length ? h('div', { class: 'econ-head' }, 'Armies in the field') : null,
         armies.length ? h('ul', { class: 'econ-list' }, ...armies.map((a) => h('li', {}, h('span', {}, armyLine(a))))) : null,
         battles.length ? h('div', { class: 'econ-head' }, 'Latest battles') : null,
-        battles.length ? h('ul', { class: 'econ-list' }, ...battles.map((b) => h('li', {}, h('span', {}, `${b.name} (Y${yearOf(b.day)})`), h('span', { class: 'muted' }, `${clanOf(b.winner)?.name ?? '?'} won · ${b.a.lost}/${b.b.lost} fell`)))) : null,
+        battles.length ? h('ul', { class: 'econ-list' }, ...battles.map((b) => h('li', { class: 'clickable', title: 'Show the battle report', onclick: () => { selectedBattle = b.id; render(); document.querySelector('.battle-report')?.scrollIntoView({ block: 'nearest' }); } }, h('span', {}, `${b.name} (Y${yearOf(b.day)})`), h('span', { class: 'muted' }, (b.until ?? b.day) > s.day ? 'fighting…' : `${clanOf(b.winner)?.name ?? '?'} won · ${b.a.lost}/${b.b.lost} fell`)))) : null,
       ),
     );
   };
@@ -1434,6 +1491,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
 
     // Wars, going on and lately ended.
     const wars = [...activeWars(s), ...(s.wars ?? []).filter((w) => w.ended !== undefined).slice(-6).reverse()];
+    const openBattle = (s.battles ?? []).find((b) => b.id === selectedBattle);
+    if (openBattle) parts.push(h('h3', {}, 'Battle report'), battleReport(openBattle));
     if (s.started && wars.length) parts.push(h('h3', {}, 'Wars'), h('p', { class: 'muted small' }, 'Settled realms go to war for a reason (a claim, a throne, their faith, vengeance, their own people, or plain conquest). Banners on the map are armies; crossed swords are battles.'), ...wars.map((w) => warCard(w)));
 
     // Treaties, the world over.

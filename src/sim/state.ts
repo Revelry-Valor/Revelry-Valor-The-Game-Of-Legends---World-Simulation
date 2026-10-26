@@ -89,6 +89,38 @@ export interface Realm {
   claimants?: Claimant[];
   /** Treaties it broke without cause (remembered by everyone; fades slowly). */
   betrayals?: number;
+  /** Its heroes and generals at home (they go out with its armies). */
+  heroes?: Hero[];
+}
+
+/** Fighters by kind. */
+export interface Units {
+  foot?: number;
+  archers?: number;
+  riders?: number;
+  specialists?: number;
+}
+
+/** A notable individual of war: a general, a god's champion, or a hero risen in battle. */
+export interface Hero {
+  name: string;
+  kind: 'general' | 'champion' | 'hero';
+  /** 1 (able) … 5 (legendary). */
+  power: number;
+  born: number;
+  /** Battles won and duels. */
+  deeds: number;
+  female: boolean;
+  god?: string;
+}
+
+/** A battle's full report (Phase 10 step 2). */
+export interface BattleReport {
+  ground: string;
+  sides: { label: string; clan: number; units: Units; heroes: string[]; specialists: string }[];
+  phases: { name: string; text: string; lost: [Units, Units] }[];
+  notes: string[];
+  outcome: string;
 }
 
 /** A member of a ruling family. */
@@ -180,6 +212,12 @@ export interface Army {
   /** Days spent investing a town before the assault, and the day it last fought. */
   siege?: { town: number; days: number };
   lastFight?: number;
+  /** Its fighters by kind (sums to men), what its specialists are, and its heroes. */
+  units?: Units;
+  specialists?: string;
+  heroes?: Hero[];
+  /** Fighting a battle until this day (it holds where it is). */
+  engagedUntil?: number;
 }
 
 /** A battle, for the map and the war's record (the full phased report comes with step 2). */
@@ -196,6 +234,9 @@ export interface Battle {
   winner: number;
   /** A town assaulted (its garrison fought). */
   town?: number;
+  /** The fighting goes on until this day; then the full report is known. */
+  until?: number;
+  report?: BattleReport;
 }
 
 /** A spy: a notable individual travelling town to town to reach a target. */

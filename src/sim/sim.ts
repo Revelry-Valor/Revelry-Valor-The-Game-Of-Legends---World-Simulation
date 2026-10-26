@@ -888,6 +888,10 @@ function warContext(sim: SimState, env: Env, lib: Library, info: Info): WarConte
     might: (race, culture) => (info({ race, culture })?.might ?? 1) * cultureFx(sim, culture).fight,
     // An army marches a little slower than a tribe on the move.
     speed: (race, culture) => (info({ race, culture })?.speed ?? 15) * 0.9,
+    racial: (race) => {
+      const ri = info({ race, culture: '' });
+      return { flies: !!ri?.flies, mountains: !!ri?.mountains, specialty: ri?.race.specialty ?? '' };
+    },
   };
 }
 
