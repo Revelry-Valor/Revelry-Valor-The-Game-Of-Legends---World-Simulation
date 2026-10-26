@@ -833,7 +833,9 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const R = settleRange(ri, st);
     const cells = cellsNear(env, st.x, st.y, R).filter((c) => env.land[c]);
     // Its economy: jobs, harvests, stores, eating (economy.ts).
-    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare, r: R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
+    // Under siege only the fields within the walls are worked, and the besiegers trample the crop.
+    if (st.besieged && st.economy) st.economy.crop *= 0.7;
+    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
     if (st.fed < 0.8) st.hardship = { famine: (st.hardship?.famine ?? 0) + (1 - st.fed) / 6, war: st.hardship?.war ?? 0 };
     if (st.fed < 0.6) note(sim, st.culture, 'famines');
     if (st.fed < 0.6 && !sim.events.some((e) => e.text.startsWith(`Famine in ${st.name}`) && sim.day - e.day < DAYS_PER_YEAR)) log(sim, `Famine in ${st.name}: its stores are gone${st.economy?.harvest && st.economy.harvest.year < 0.8 ? ' after a bad harvest' : ''}.`, st.x, st.y);

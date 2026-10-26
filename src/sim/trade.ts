@@ -227,7 +227,8 @@ export function tradeMonth(c: TradeContext): void {
   let fastest = 1;
   for (let k = 0; k < sim.way.length; k++) if (sim.way[k]) fastest = Math.max(fastest, WAYS[sim.way[k]].speed);
   for (const a of live) {
-    if (!turn(a) || a.pop < 50 || sim.caravans.some((v) => v.from === a.id)) continue;
+    // A besieged town sends no caravans.
+    if (!turn(a) || a.pop < 50 || a.besieged || sim.caravans.some((v) => v.from === a.id)) continue;
     const ra = c.info(a);
     if (!ra) continue;
     const pA = a.economy!.prices ?? {};

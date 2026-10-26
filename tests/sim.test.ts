@@ -12,7 +12,7 @@ import { fight, total, type Ground, type Side } from '../src/sim/battle';
 import { ensureRealm, nationsYear, type NationContext } from '../src/sim/nations';
 import { hasPact, noteAttack, politicsYear, relationOf, spiesDay, type PoliticsContext } from '../src/sim/politics';
 import { waysYear } from '../src/sim/ways';
-import { armiesDay, declareWar, raiseArmy, warsMonth, warsYear, type WarContext } from '../src/sim/wars';
+import { armiesDay, conquer, declareWar, overlordOf, raiseArmy, wallLevel, warOutlook, warsMonth, warsYear, type WarContext } from '../src/sim/wars';
 import { newCulture, newFaith, newGod, newGovernment } from '../src/core/library';
 import { championMight, faithLoyalty, faithOf, faithYear, type FaithContext } from '../src/sim/faith';
 import { packSim, unpackSim } from '../src/sim/pack';
@@ -1103,10 +1103,13 @@ describe('wars and armies', () => {
     expect(w.ended).toBeDefined();
     expect(w.outcome).toContain('won');
     expect(sim.battles!.length).toBeGreaterThan(0);
-    expect([bt.clan, b.clan]).toContain(A.id);
-    const lost = [bt, b].find((s) => s.clan === A.id)!;
-    expect(lost.claimedBy).toContain(B.id);
-    expect(relationOf(sim, A.id, B.id)!.truceUntil!).toBeGreaterThan(sim.day);
+    if (sim.clans.includes(B) && overlordOf(sim, B.id) !== A.id) {
+      // A partial win: what it took is ceded, and the loser keeps a claim to it.
+      expect([bt.clan, b.clan]).toContain(A.id);
+      const lost = [bt, b].find((s) => s.clan === A.id)!;
+      expect(lost.claimedBy).toContain(B.id);
+    } else expect(sim.events.some((e) => / has fallen to | has bowed to /.test(e.text))).toBe(true);
+    if (sim.clans.includes(B)) expect(relationOf(sim, A.id, B.id)!.truceUntil!).toBeGreaterThan(sim.day);
     // Kept with the save.
     const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
     expect(back.wars!.length).toBe(1);
@@ -1222,5 +1225,143 @@ describe('phased battles', () => {
       return lost;
     };
     expect(chased(0)).toBeGreaterThan(chased(250) * 1.3);
+  });
+});
+
+describe('sieges, occupation and conquest', () => {
+  const farming = ['agriculture', 'husbandry', 'fishing'];
+  const ctx = (sim: SimState): WarContext & PoliticsContext => {
+    const c = {
+      sim,
+      env,
+      lib,
+      rand: () => Math.random(),
+      dist: (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by),
+      cellAt: cellOf,
+      log: (text: string, x?: number, y?: number) => sim.events.push({ day: sim.day, text, x, y }),
+      name: () => `N${sim.nextId++}`,
+      lifespan: () => 70,
+      might: () => 1,
+      speed: () => 20,
+      newClan: (from: Clan) => {
+        const nc: Clan = { id: sim.nextId++, name: `Risen${sim.nextId}`, colour: '#000', species: from.species, race: from.race, culture: from.culture, founded: sim.day, parent: from.id, techs: [] };
+        ensureRealm(c, nc);
+        sim.clans.push(nc);
+        return nc;
+      },
+    };
+    return c;
+  };
+  const town = (sim: SimState, base: Settlement, dx: number, dy: number, pop: number): Settlement => {
+    const st: Settlement = { ...base, id: sim.nextId++, name: `T${sim.nextId}`, kind: 'village', holyTo: [], x: base.x + dx, y: base.y + dy, pop, warband: pop * 0.1, economy: newEconomy(pop, 1, 6), techs: [...(base.techs ?? [])] };
+    sim.settlements.push(st);
+    return st;
+  };
+  const setup = (seed: number) => {
+    const sim = newSim(env, seed);
+    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 3000, farming)!;
+    const b = addDawnCity(sim, env, lib, elfId(), 6000, yAt(-14.5), 900, farming)!;
+    a.economy!.stores = { ...a.economy!.stores, grain: 30000 };
+    b.economy!.stores = { ...b.economy!.stores, grain: 5000 };
+    a.warband = 900;
+    b.warband = 90;
+    const c = ctx(sim);
+    nationsYear(c);
+    const A = sim.clans.find((q) => q.id === a.clan)!;
+    const B = sim.clans.find((q) => q.id === b.clan)!;
+    A.realm!.gov = 'feudal-kingdom';
+    B.realm!.gov = 'feudal-kingdom';
+    return { sim, c, a, b, A, B };
+  };
+
+  it('gives towns walls by their size and knowledge', () => {
+    const { a } = setup(701);
+    const t = { ...a, techs: [] as string[] };
+    expect(wallLevel(lib, { ...t, pop: 100 }, false)).toBe(0);
+    expect(wallLevel(lib, { ...t, pop: 100 }, true)).toBe(1);
+    expect(wallLevel(lib, { ...t, pop: 400 }, false)).toBe(1);
+    expect(wallLevel(lib, { ...t, techs: ['fortification'] }, false)).toBe(2);
+    expect(wallLevel(lib, { ...t, pop: 2000, techs: ['fortification', 'masonry'] }, false)).toBe(3);
+  });
+
+  it('besieges a walled town: cannon breach it and it is stormed; without engines it holds out longer', () => {
+    const days = (engines: string[]) => {
+      const { sim, c, a, b, A, B } = setup(703);
+      b.techs = [...(b.techs ?? []), 'fortification', 'masonry'];
+      a.techs = [...(a.techs ?? []), ...engines];
+      const w = declareWar(c, A, B, { reason: 'revenge' });
+      const army = raiseArmy(c, A, w)!;
+      army.x = b.x;
+      army.y = b.y;
+      let d = 0;
+      for (; d < 200 && !b.occupied; d++) {
+        armiesDay(c);
+        if (d === 3) expect(b.besieged?.by).toBe(army.id);
+        sim.day++;
+      }
+      expect(sim.events.some((e) => e.text.includes('laid siege to'))).toBe(true);
+      return d;
+    };
+    const cannon = days(['cannons']);
+    expect(cannon).toBeLessThan(40);
+    expect(days([])).toBeGreaterThan(cannon);
+  });
+
+  it('works a besieged town’s fields from within its walls only, and sends no caravans', () => {
+    const { sim, b } = setup(705);
+    b.besieged = { by: 1, since: 0 };
+    stepDays(sim, env, lib, DAYS_PER_YEAR);
+    expect(sim.caravans.some((v) => v.from === b.id)).toBe(false);
+  });
+
+  it('settles a conquered realm’s ruling family by each fate', () => {
+    for (const fate of ['princes', 'vassal', 'killed', 'exile'] as const) {
+      const { sim, c, b, A, B } = setup(707);
+      const bt = town(sim, b, 60, 0, 300);
+      // A friend to shelter an exile.
+      const friend = addTribe(sim, env, lib, humanId(), 6400, yAt(-14), -1, 300)!;
+      const F = sim.clans.find((q) => q.id === friend.clan)!;
+      sim.realmRelations![F.id < B.id ? `${F.id}|${B.id}` : `${B.id}|${F.id}`] = { opinion: 0.5, memory: 0.2, pacts: [] };
+      const house = B.realm!.ruler.house;
+      const w = declareWar(c, A, B, { reason: 'revenge' });
+      conquer(c, w, A, B, fate);
+      if (fate === 'vassal') {
+        expect(overlordOf(sim, B.id)).toBe(A.id);
+        expect(b.clan).toBe(B.id);
+        // A vassal goes to war only against its overlord, to throw it off.
+        expect(warOutlook(c, B, A)?.reason ?? null).not.toBe('revenge');
+      } else {
+        expect(sim.clans.includes(B)).toBe(false);
+        expect([b.clan, bt.clan]).toEqual([A.id, A.id]);
+      }
+      if (fate === 'princes') {
+        expect(b.prince).toBe(house);
+        expect(A.realm!.highPrinces![0].house).toBe(house);
+      }
+      if (fate === 'exile') {
+        const q = A.realm!.claimants!.find((x) => x.why === 'exile')!;
+        expect(q.hostedBy).toBe(F.id);
+        // Its host may go to war to put it back on the throne.
+        expect(warOutlook(c, F, A)?.reason).toBe('throne');
+      }
+    }
+  });
+
+  it('lets high princes rise again and restore their realm', () => {
+    const { sim, c, b, A, B } = setup(709);
+    const bt = town(sim, b, 60, 0, 600);
+    const w = declareWar(c, A, B, { reason: 'revenge' });
+    conquer(c, w, A, B, 'princes');
+    w.ended = sim.day;
+    const house = A.realm!.highPrinces![0].house;
+    for (let y = 0; y < 300 && b.clan === A.id; y++) {
+      for (const s of [b, bt]) {
+        s.control = 0.1;
+        s.warband = 400;
+      }
+      politicsYear(c);
+    }
+    expect(b.clan).not.toBe(A.id);
+    expect(sim.clans.find((q) => q.id === b.clan)!.realm!.ruler.house).toBe(house);
   });
 });

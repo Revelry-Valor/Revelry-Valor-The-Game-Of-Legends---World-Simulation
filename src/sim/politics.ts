@@ -53,7 +53,7 @@ function relation(sim: SimState, a: number, b: number): RealmRelation {
 }
 export const hasPact = (sim: SimState, a: number, b: number, kind?: Pact['kind']) => !!relationOf(sim, a, b)?.pacts.some((p) => !kind || p.kind === kind);
 export const opinionWord = (v: number) => (v >= 0.5 ? 'friends' : v >= 0.2 ? 'cordial' : v > -0.2 ? 'neutral' : v > -0.5 ? 'cold' : 'hostile');
-export const PACT_NAMES: Record<Pact['kind'], string> = { peace: 'Non-aggression pact', defence: 'Defensive pact', trade: 'Trade agreement', marriage: 'Royal marriage' };
+export const PACT_NAMES: Record<Pact['kind'], string> = { peace: 'Non-aggression pact', defence: 'Defensive pact', trade: 'Trade agreement', marriage: 'Royal marriage', vassal: 'Vassalage' };
 
 const atWar = (sim: SimState, a: number, b: number) => !!sim.wars?.some((w) => w.ended === undefined && ((w.attackers.includes(a) && w.defenders.includes(b)) || (w.attackers.includes(b) && w.defenders.includes(a))));
 /** How a realm's warbands look on another's (multiplies hostility): pacts keep the peace, ill will and an ally's quarrel sharpen it. */
@@ -61,7 +61,7 @@ export function diplomacyFactor(sim: SimState, a: number, b: number): number {
   const rel = relationOf(sim, a, b);
   if (!rel) return 1;
   let f = 1 - 0.6 * rel.opinion;
-  if (rel.pacts.some((p) => p.kind === 'peace' || p.kind === 'defence' || p.kind === 'marriage')) f *= 0.08;
+  if (rel.pacts.some((p) => p.kind === 'peace' || p.kind === 'defence' || p.kind === 'marriage' || p.kind === 'vassal')) f *= 0.08;
   if ((rel.hostileUntil ?? -1) > sim.day) f *= 2.5;
   // At war: their warbands raid each other the more.
   if (atWar(sim, a, b)) f *= 2;
@@ -88,7 +88,7 @@ export function noteAttack(sim: SimState, lib: NationContext['lib'], log: Nation
   const recent = (r: RealmRelation | undefined, by: number) => !!r?.lastAttack && r.lastAttack.by === by && sim.day - r.lastAttack.day < 2 * DAYS_PER_YEAR;
   // Fighting ends a trade agreement; breaking a promise of peace (peace, defence, marriage) is a betrayal unless justified.
   rel.pacts = rel.pacts.filter((p) => p.kind !== 'trade');
-  const kept = rel.pacts.filter((p) => p.kind === 'peace' || p.kind === 'defence' || p.kind === 'marriage');
+  const kept = rel.pacts.filter((p) => p.kind === 'peace' || p.kind === 'defence' || p.kind === 'marriage' || p.kind === 'vassal');
   if (kept.length) {
     // Justified: the other struck first, or struck one of our defensive allies.
     const allies = sim.clans.filter((q) => q !== A && hasPact(sim, att, q.id, 'defence'));
@@ -230,6 +230,8 @@ function loyaltyOf(sim: SimState, lib: NationContext['lib'], clan: Clan, st: Set
   v -= 0.15 * rival;
   // Of another faith than its ruler's (persecuted under an intolerant one).
   v -= faithLoyalty(sim, clan, st);
+  // Ruled for the realm by a high prince of its old line: held fast while the prince is content.
+  if (st.prince) v += 0.1;
   // Great lords grow ambitious in a big realm (a feudal one most of all).
   const land = govOf(lib, clan.realm?.gov ?? '')?.land ?? '';
   v -= Math.min(0.3, towns * (land === 'Great lords with vassals (feudal)' ? 0.005 : land === 'Clans and tribes' ? 0.004 : 0.002));
@@ -288,6 +290,43 @@ function breakAway(c: PoliticsContext, clan: Clan, group: Settlement[]): void {
   c.log(`${lord.name} and ${group.length - 1 ? `${group.length - 1} town${group.length === 2 ? '' : 's'} round it` : 'its lands'} broke away from ${realmName(lib, clan)}: a realm of their own, ${realmName(lib, nc)}, under ${nc.realm!.ruler.name} of the house of ${nc.realm!.ruler.house}.`, lord.x, lord.y);
 }
 
+/**
+ * High princes (REDESIGN.md 8.4b): a conquered ruling house that rules its old lands for the
+ * realm. They hold them fast, but may rise to restore their own realm, more readily the less loyal
+ * their towns and the weaker the realm's hold, and most when the realm is at war.
+ */
+function highPrincesYear(c: PoliticsContext, clan: Clan, towns: Settlement[]): void {
+  const { sim, lib } = c;
+  const realm = clan.realm;
+  if (!realm?.highPrinces?.length) return;
+  const atWarNow = !!sim.wars?.some((w) => w.ended === undefined && (w.attackers.includes(clan.id) || w.defenders.includes(clan.id)));
+  for (const hp of [...realm.highPrinces]) {
+    const lands = towns.filter((s) => s.prince === hp.house);
+    if (!lands.length) {
+      realm.highPrinces = realm.highPrinces.filter((q) => q !== hp);
+      continue;
+    }
+    const loyal = lands.reduce((n, s) => n + (s.loyalty ?? 0.5), 0) / lands.length;
+    const p = 0.03 * Math.max(0, 1 - loyal) * (atWarNow ? 2 : 1) * (1.5 - realm.centralization);
+    if (c.rand() >= p) continue;
+    const others = towns.filter((s) => !lands.includes(s));
+    const rebels = lands.reduce((n, s) => n + s.warband * 1.2 + s.pop * 0.05, 0);
+    const loyalists = others.reduce((n, s) => n + s.warband * (0.3 + (s.control ?? 0)), 0) * 0.6;
+    if (rebels * (0.5 + c.rand()) > loyalists * (0.5 + c.rand())) {
+      breakAway(c, clan, lands);
+      const nc = sim.clans.find((q) => q.id === lands[0].clan)!;
+      nc.realm!.ruler.house = hp.house;
+      nc.realm!.ruler.name = hp.name;
+      for (const s of lands) delete s.prince;
+      realm.highPrinces = realm.highPrinces.filter((q) => q !== hp);
+      c.log(`The high prince ${hp.name} of the house of ${hp.house} rose against ${realmName(lib, clan)} and restored ${hp.was} as ${realmName(lib, nc)}.`, lands[0].x, lands[0].y);
+    } else {
+      for (const s of lands) s.unrest = 0;
+      c.log(`The high prince ${hp.name} of the house of ${hp.house} rose against ${realmName(lib, clan)} and was put down; the house still holds its lands.`, lands[0].x, lands[0].y);
+    }
+  }
+}
+
 /** The towns' loyalty and unrest; factions that rise; claimants who fight for the throne. */
 function factionsYear(c: PoliticsContext, clan: Clan, realm: Realm): void {
   const { sim, lib } = c;
@@ -297,11 +336,13 @@ function factionsYear(c: PoliticsContext, clan: Clan, realm: Realm): void {
     st.unrest = st.loyalty < 0.4 ? (st.unrest ?? 0) + 1 : Math.max(0, (st.unrest ?? 0) - 1);
   }
   const pop = towns.reduce((n, s) => n + s.pop, 0);
+  highPrincesYear(c, clan, towns);
   // Claimants gather backing where the realm is restless.
   const restless = pop ? towns.filter((s) => (s.loyalty ?? 1) < 0.5).reduce((n, s) => n + s.pop, 0) / pop : 0;
   for (const q of realm.claimants ?? []) q.backing = clamp(q.backing + 0.06 * restless - 0.02, 0, 1);
   realm.claimants = (realm.claimants ?? []).filter((q) => q.backing > 0.02);
-  const pretender = [...(realm.claimants ?? [])].sort((a, b) => b.backing - a.backing)[0];
+  // (A ruler in exile abroad comes back only by a war its host fights for it.)
+  const pretender = [...(realm.claimants ?? [])].filter((q) => q.why !== 'exile').sort((a, b) => b.backing - a.backing)[0];
   if (pretender && pretender.backing >= 0.45 && c.rand() < 0.3) {
     const cap = towns.find((s) => s.id === realm.capital);
     realm.claimants = (realm.claimants ?? []).filter((q) => q !== pretender);
@@ -356,7 +397,8 @@ function contacts(c: NationContext): [Clan, Clan][] {
   return out;
 }
 
-const PACT_OPINION: Record<Pact['kind'], number> = { peace: 0.05, trade: 0.1, defence: 0.1, marriage: 0.15 };
+/** Treaties warm opinion; a vassal resents its overlord a little. */
+const PACT_OPINION: Record<Pact['kind'], number> = { peace: 0.05, trade: 0.1, defence: 0.1, marriage: 0.15, vassal: -0.1 };
 
 function diplomacyYear(c: PoliticsContext): [number, number][] {
   const { sim, lib } = c;
@@ -390,8 +432,9 @@ function diplomacyYear(c: PoliticsContext): [number, number][] {
     const rel = relation(sim, A.id, B.id);
     const name = (x: Clan) => realmName(lib, x);
     const at = sim.settlements.find((s) => s.id === A.realm?.capital) ?? sim.tribes.find((t) => t.clan === A.id);
-    if (rel.opinion < -0.15 && rel.pacts.length) {
-      rel.pacts = [];
+    if (rel.opinion < -0.15 && rel.pacts.some((p) => p.kind !== 'vassal')) {
+      // (Vassalage is not ended by ill will: only by a war for independence.)
+      rel.pacts = rel.pacts.filter((p) => p.kind === 'vassal');
       c.log(`Relations between ${name(A)} and ${name(B)} have soured; their treaties are ended.`, at?.x, at?.y);
       continue;
     }

@@ -91,6 +91,8 @@ export interface Realm {
   betrayals?: number;
   /** Its heroes and generals at home (they go out with its armies). */
   heroes?: Hero[];
+  /** Houses of realms it conquered that rule their old lands for it as high princes. */
+  highPrinces?: { house: string; name: string; since: number; was: string }[];
 }
 
 /** Fighters by kind. */
@@ -133,15 +135,18 @@ export interface Royal {
 
 /** A claimant to a throne: a rival heir, or the true line put aside. */
 export interface Claimant extends Royal {
-  /** Why they claim it: a passed-over child, or the old line. */
-  why: 'heir' | 'true line' | 'marriage';
+  /** Why they claim it: a passed-over child, the old line, by marriage, or a ruler driven out (in exile with another realm). */
+  why: 'heir' | 'true line' | 'marriage' | 'exile';
+  hostedBy?: number;
   backing: number;
   since: number;
 }
 
 /** A treaty between two realms (REDESIGN.md 8.5). */
 export interface Pact {
-  kind: 'peace' | 'defence' | 'trade' | 'marriage';
+  kind: 'peace' | 'defence' | 'trade' | 'marriage' | 'vassal';
+  /** For vassalage: the overlord (the other is its vassal). */
+  overlord?: number;
   since: number;
   /** Shared roads and bridges between the capitals, as a term (trade and defence pacts). */
   roads?: boolean;
@@ -164,7 +169,7 @@ export interface RealmRelation {
 }
 
 /** Why a war is fought (REDESIGN.md 8.5, reasons for war). */
-export type WarReason = 'claim' | 'throne' | 'holy' | 'revenge' | 'liberate' | 'conquest';
+export type WarReason = 'claim' | 'throne' | 'holy' | 'revenge' | 'liberate' | 'conquest' | 'independence';
 
 /** A war between realms (Phase 10). Score is from the attackers' side (−100 … 100). */
 export interface War {
@@ -210,7 +215,7 @@ export interface Army {
   target: number;
   general: string;
   /** Days spent investing a town before the assault, and the day it last fought. */
-  siege?: { town: number; days: number };
+  siege?: { town: number; days: number; breach?: number };
   lastFight?: number;
   /** Its fighters by kind (sums to men), what its specialists are, and its heroes. */
   units?: Units;
@@ -299,6 +304,10 @@ export interface Settlement {
   occupied?: { by: number; war: number; since: number; garrison: number };
   /** Realms that once held it (a claim to take it back). */
   claimedBy?: number[];
+  /** Under siege by an army (its id), since a day. */
+  besieged?: { by: number; since: number };
+  /** Ruled for its realm by a high prince of this house (once its own ruling line). */
+  prince?: string;
 }
 
 /**

@@ -16,7 +16,7 @@ import { kindName, total, UNIT_KINDS } from '../sim/battle';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
 import { opinionWord, PACT_NAMES } from '../sim/politics';
 import { faithColour, faithOf, ORGANIZATION_WORDS, realmFaith } from '../sim/faith';
-import { activeWars, REASON_WORDS, sideOf, warOutlook, type WarContext } from '../sim/wars';
+import { activeWars, overlordOf, REASON_WORDS, sideOf, vassalsOf, WALL_NAMES, wallLevel, warOutlook, type WarContext } from '../sim/wars';
 import { cultureFx } from '../sim/culture';
 import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
@@ -275,6 +275,26 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const fa = landsBy === 'faith' ? realmFaith(s, c) : undefined;
       return [c.id, hex(cu ? cultureColour(s, cu) : fa ? faithColour(s, fa) : c.colour)];
     }));
+    // Land round towns held by an enemy (its owner's land within about 30 miles): who holds it.
+    const occupiedBy = new Map<number, number>();
+    const reach = Math.ceil(50 / e.step);
+    for (const st of s.settlements) {
+      if (!st.occupied || st.ruined) continue;
+      const ci = Math.round((st.x - e.x0) / e.step);
+      const cj = Math.round((st.y - e.y0) / e.step);
+      for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) {
+        if (di * di + dj * dj > reach * reach) continue;
+        const jj = cj + dj;
+        let ii = ci + di;
+        if (jj < 0 || jj >= e.h) continue;
+        if (ii < 0 || ii >= e.w) {
+          if (!e.wrapKm) continue;
+          ii = ((ii % e.w) + e.w) % e.w;
+        }
+        const k = jj * e.w + ii;
+        if (s.owner[k] === st.clan) occupiedBy.set(k, st.occupied.by);
+      }
+    }
     return fieldImage((data) => {
       for (let k = 0; k < e.n; k++) {
         const o = s.owner[k];
@@ -285,6 +305,13 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         // Borders: next to land that is someone else's (or no one's).
         const nb = [i > 0 ? k - 1 : e.wrapKm ? k + e.w - 1 : -1, i < e.w - 1 ? k + 1 : e.wrapKm ? k - e.w + 1 : -1, j > 0 ? k - e.w : -1, j < e.h - 1 ? k + e.w : -1];
         const edge = nb.some((m) => m >= 0 && e.land[m] && s.owner[m] !== o);
+        // Held by an enemy: striped in the occupier's colour.
+        const occ = occupiedBy.get(k);
+        if (occ !== undefined && (i + j) % 6 < 3) {
+          const oc = hex(clanOf(occ)?.colour ?? '#000000');
+          data.set([oc[0], oc[1], oc[2], 200], k * 4);
+          continue;
+        }
         // Land being taken over: lighter.
         const contested = s.rival[k] >= 0 && s.rivalUse[k] > 0;
         data.set([c[0], c[1], c[2], edge ? 225 : contested ? 70 : 130], k * 4);
@@ -472,6 +499,20 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.arc(sx, sy, 12, 0, Math.PI * 2);
           g.stroke();
           g.setLineDash([]);
+        }
+        // Towns under siege: a ring of the besiegers' colour, tight round the walls.
+        for (const st of s.settlements) {
+          if (!st.besieged || st.ruined) continue;
+          const by = (s.armies ?? []).find((q) => q.id === st.besieged!.by);
+          const [sx, sy] = at(st.x, st.y, c);
+          g.strokeStyle = by ? clanOf(by.clan)?.colour ?? '#a00' : '#a00';
+          g.lineWidth = 2;
+          for (let i = 0; i < 10; i++) {
+            const an = (i / 10) * Math.PI * 2;
+            g.beginPath();
+            g.arc(sx + Math.cos(an) * 15, sy + Math.sin(an) * 15, 2.2, 0, Math.PI * 2);
+            g.stroke();
+          }
         }
         // Battles of the last two years: crossed swords.
         for (const b of s.battles ?? []) {
@@ -977,7 +1018,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       .sort((a, b) => b.w!.chance - a.w!.chance)
       .slice(0, 4);
     const heroes = cn.realm?.heroes ?? [];
+    const lord = overlordOf(s, cn.id);
+    const vassals = vassalsOf(s, cn.id).map((v) => clanOf(v)).filter((q): q is Clan => !!q);
+    const princes = cn.realm?.highPrinces ?? [];
     return [
+      lord !== undefined && clanOf(lord) ? h('div', {}, `A vassal of ${realmName(L, clanOf(lord)!)}: it pays a tenth of its capital's stores each year and follows it to war.`) : null,
+      vassals.length ? h('div', {}, `Vassals: ${vassals.map((v) => realmName(L, v)).join(', ')}.`) : null,
+      princes.length ? h('div', { class: 'econ-head' }, 'High princes') : null,
+      princes.length ? h('ul', { class: 'econ-list' }, ...princes.map((p) => h('li', {}, h('span', {}, `${p.name} of the house of ${p.house}`), h('span', { class: 'muted' }, `once ${p.was}, since Y${yearOf(p.since)}`)))) : null,
       heroes.length ? h('div', { class: 'econ-head' }, 'Heroes and generals at home') : null,
       heroes.length ? h('ul', { class: 'econ-list' }, ...heroes.map((hr) => h('li', {}, h('span', {}, hr.name, h('span', { class: 'muted' }, ` · ${hr.kind}`)), h('span', { class: 'muted' }, `${'★'.repeat(Math.max(1, Math.min(5, hr.power)))} · ${hr.deeds} deed${hr.deeds === 1 ? '' : 's'}`)))) : null,
       wars.length ? h('div', { class: 'econ-head' }, 'At war') : null,
@@ -1005,12 +1053,12 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       })
       .filter((x): x is NonNullable<typeof x> => !!x)
       .sort((a, b) => b.rel.pacts.length - a.rel.pacts.length || b.rel.opinion - a.rel.opinion);
-    const why = { heir: 'a passed-over heir', 'true line': 'the true line, put aside', marriage: 'by marriage' } as const;
+    const why = { heir: 'a passed-over heir', 'true line': 'the true line, put aside', marriage: 'by marriage', exile: 'driven out, in exile' } as const;
     return [
       fam.length ? h('div', { class: 'econ-head' }, 'The royal family') : null,
       fam.length ? h('ul', { class: 'econ-list' }, ...fam.map((k) => h('li', {}, h('span', {}, `${k.name} of ${k.house}`), h('span', { class: 'muted' }, `${k.female ? 'daughter' : 'son'}, ${yrs(k.born)}`)))) : null,
       claims.length ? h('div', { class: 'econ-head' }, 'Claimants to the throne') : null,
-      claims.length ? h('ul', { class: 'econ-list' }, ...claims.map((q) => h('li', {}, h('span', {}, `${q.name} of ${q.house}`, h('span', { class: 'muted' }, ` · ${why[q.why]}`)), h('span', { class: 'num' }, `${Math.round(q.backing * 100)}% backing`)))) : null,
+      claims.length ? h('ul', { class: 'econ-list' }, ...claims.map((q) => h('li', {}, h('span', {}, `${q.name} of ${q.house}`, h('span', { class: 'muted' }, ` · ${why[q.why]}${q.hostedBy !== undefined && clanOf(q.hostedBy) ? ` with ${realmName(L, clanOf(q.hostedBy)!)}` : ''}`)), h('span', { class: 'num' }, `${Math.round(q.backing * 100)}% backing`)))) : null,
       restless.length ? h('div', { class: 'econ-head' }, 'Discontented towns (a faction may rise)') : null,
       restless.length ? h('ul', { class: 'econ-list' }, ...restless.slice(0, 8).map((q) => h('li', {}, h('span', {}, q.name), h('span', { class: 'muted' }, `loyalty ${Math.round((q.loyalty ?? 0) * 100)}%, ${q.unrest} yr${q.unrest === 1 ? '' : 's'}`)))) : null,
       r.betrayals ? h('div', { class: 'muted' }, `It has broken ${r.betrayals} treat${r.betrayals === 1 ? 'y' : 'ies'} without cause; everyone remembers.`) : null,
@@ -1027,7 +1075,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const cn = clanOf(a.clan);
     const tgt = s.settlements.find((q) => q.id === a.target);
     const foe = (s.armies ?? []).find((q) => q.id === a.target);
-    const doing = a.goal === 'home' ? 'going home' : a.siege ? `investing ${tgt?.name ?? '?'} (${a.siege.days} days)` : foe ? `marching to meet the ${foe.name}` : tgt ? `marching on ${tgt.name}` : 'holding';
+    const doing = a.goal === 'home' ? 'going home' : a.siege ? `besieging ${tgt?.name ?? '?'} (${a.siege.days} days${a.siege.breach ? `, walls ${Math.round(a.siege.breach * 100)}% breached` : ''})` : foe ? `marching to meet the ${foe.name}` : tgt ? `marching on ${tgt.name}` : 'holding';
     const mix = a.units ? ` (${UNIT_KINDS.filter((k) => (a.units![k] ?? 0) >= 1).map((k) => `${Math.round(a.units![k] ?? 0).toLocaleString()} ${kindName(k, a.specialists)}`).join(', ')})` : '';
     const heroes = (a.heroes ?? []).slice(1).map((h) => h.name);
     const fighting = (a.engagedUntil ?? -1) > s.day ? '; fighting a battle' : '';
@@ -1619,6 +1667,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           !st.ruined && st.occupied
             ? h('div', { class: 'warn' }, `Held by ${clanOf(st.occupied.by) ? realmName(L, clanOf(st.occupied.by)!) : '?'} since year ${yearOf(st.occupied.since)} (a garrison of ${Math.round(st.occupied.garrison)}).`)
             : null,
+          !st.ruined ? h('div', { class: 'muted' }, `Walls: ${WALL_NAMES[wallLevel(L, st, clan?.realm?.capital === st.id)]}.`) : null,
+          !st.ruined && st.besieged
+            ? (() => {
+                const by = (s.armies ?? []).find((q) => q.id === st.besieged!.by);
+                return h('div', { class: 'warn' }, `Under siege by the ${by?.name ?? 'enemy'} for ${s.day - st.besieged!.since} days${by?.siege?.breach ? `; walls ${Math.round(by.siege.breach * 100)}% breached` : ''}. Only the fields within the walls are worked, and no caravans go out.`);
+              })()
+            : null,
+          !st.ruined && st.prince ? h('div', {}, `Ruled for its realm by the high prince of the house of ${st.prince} (its old ruling line).`) : null,
           !st.ruined && st.claimedBy?.some((q) => clanOf(q)) ? h('div', { class: 'muted' }, `Claimed by ${st.claimedBy.map((q) => clanOf(q)).filter((q): q is Clan => !!q).map((q) => realmName(L, q)).join(', ')} (who once held it).`) : null,
           !st.ruined && s.started && st.loyalty !== undefined && clan?.realm?.capital !== st.id
             ? h('div', {}, `Loyalty: ${Math.round(st.loyalty * 100)}%${st.unrest ? `, discontented for ${st.unrest} year${st.unrest === 1 ? '' : 's'}` : ''}`)

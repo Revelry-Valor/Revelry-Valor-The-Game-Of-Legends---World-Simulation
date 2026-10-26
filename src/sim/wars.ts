@@ -4,12 +4,12 @@ import { noteBetween } from './cultureChange';
 import { isFood } from './economy';
 import { PLANT_K } from './env';
 import { realmFaith } from './faith';
-import { govOf, realmName, tribalRule, type NationContext } from './nations';
+import { govOf, realmName, rulerTitle, tribalRule, type NationContext } from './nations';
 import { hasPact, noteAttack, relationOf } from './politics';
 import type { Army, Battle, BattleReport, Clan, Hero, RealmRelation, Settlement, SimState, Units, War, WarReason } from './state';
 import { fight, kindName, total, UNIT_KINDS, type Ground, type Side } from './battle';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer } from './state';
-import { armsMight, knows, wallsMight } from './tech';
+import { armsMight, knows } from './tech';
 import { FORD_SLOW, WAYS } from './ways';
 
 /**
@@ -127,8 +127,45 @@ const LEVY: Record<string, number> = {
 };
 const ARMY_WORD: Record<string, string> = { 'Clan warbands': 'Warband', Levies: 'Host', 'Lords’ retainers (samurai-like)': 'Banner', 'Standing army': 'Army', Mercenaries: 'Company', Militia: 'Muster', 'Religious or magic orders': 'Order' };
 const ORDINAL = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'];
-const REASON_WEIGHT: Record<WarReason, number> = { claim: 1.3, throne: 1.5, holy: 1.5, revenge: 1.1, liberate: 1.2, conquest: 0.35 };
-export const REASON_WORDS: Record<WarReason, string> = { claim: 'to take back towns it once held', throne: 'to put its own claimant on the throne', holy: 'a holy war', revenge: 'for vengeance', liberate: 'to free its own people', conquest: 'for conquest alone' };
+const REASON_WEIGHT: Record<WarReason, number> = { claim: 1.3, throne: 1.5, holy: 1.5, revenge: 1.1, liberate: 1.2, conquest: 0.35, independence: 1 };
+export const REASON_WORDS: Record<WarReason, string> = { claim: 'to take back towns it once held', throne: 'to put its own claimant on the throne', holy: 'a holy war', revenge: 'for vengeance', liberate: 'to free its own people', conquest: 'for conquest alone', independence: 'to throw off its overlord' };
+
+// ---- Walls (Phase 10 step 3).
+
+/** A town's walls by its size and knowledge: 0 none, 1 a palisade (300 people, or a capital), 2 stone walls (fortification), 3 a fortress (fortification and masonry, at a capital or a city of 1,500). */
+export function wallLevel(lib: Library, st: Settlement, capital: boolean): number {
+  const has = (id: string) => knows(lib, st, id);
+  if (has('fortification') && has('masonry') && (capital || st.pop >= 1500)) return 3;
+  if (has('fortification')) return 2;
+  // A palisade for a town of 300, and always round a capital.
+  return st.pop >= 300 || capital ? 1 : 0;
+}
+export const WALL_MIGHT = [1, 1.25, 1.6, 2.1];
+export const WALL_NAMES = ['no walls', 'a palisade', 'stone walls', 'a fortress'];
+const isCapital = (sim: SimState, st: Settlement) => sim.clans.some((q) => q.realm?.capital === st.id);
+
+// ---- Vassals.
+
+/** The overlord a realm answers to, if it is a vassal. */
+export function overlordOf(sim: SimState, clan: number): number | undefined {
+  for (const [k, rel] of Object.entries(sim.realmRelations ?? {})) {
+    const p = rel.pacts.find((q) => q.kind === 'vassal');
+    if (!p) continue;
+    const [a, b] = k.split('|').map(Number);
+    if ((a === clan || b === clan) && p.overlord !== clan) return p.overlord;
+  }
+  return undefined;
+}
+/** A realm's vassals. */
+export function vassalsOf(sim: SimState, clan: number): number[] {
+  const out: number[] = [];
+  for (const [k, rel] of Object.entries(sim.realmRelations ?? {})) {
+    if (!rel.pacts.some((q) => q.kind === 'vassal' && q.overlord === clan)) continue;
+    const [a, b] = k.split('|').map(Number);
+    out.push(a === clan ? b : a);
+  }
+  return out;
+}
 
 const live = (sim: SimState) => sim.settlements.filter((s) => !s.ruined);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -181,7 +218,15 @@ function reasons(c: WarContext, A: Clan, B: Clan): { reason: WarReason; town?: S
   const { sim } = c;
   const theirs = towns(sim, B.id);
   const claim = theirs.find((s) => s.claimedBy?.includes(A.id));
-  const claimant = (B.realm?.claimants ?? []).find((q) => q.house === A.realm?.ruler.house);
+  // A throne: a claimant of our own house, or a ruler driven out who sheltered with us.
+  const claimant = (B.realm?.claimants ?? []).find((q) => q.house === A.realm?.ruler.house || q.hostedBy === A.id);
+  // A vassal fights its overlord only to throw it off.
+  if (overlordOf(sim, A.id) === B.id) {
+    const strong = potential(c, A) >= 0.7 * potential(c, B);
+    const bitter = (relationOf(sim, A.id, B.id)?.opinion ?? 0) < -0.3;
+    return strong || bitter ? { reason: 'independence' } : null;
+  }
+  if (overlordOf(sim, B.id) === A.id) return null;
   const fa = realmFaith(sim, A);
   const fb = realmFaith(sim, B);
   const holySite = fa && fa !== fb ? theirs.find((s) => fa.holySites.some((h) => c.dist(h.x, h.y, s.x, s.y) < 65)) : undefined;
@@ -211,6 +256,8 @@ function warName(c: WarContext, A: Clan, B: Clan, r: { reason: WarReason; town?:
       return `War to free the ${cultureOf(c.sim, A.culture)?.name ?? A.name} of ${r.town?.name ?? B.name}`;
     case 'revenge':
       return `War of ${A.name}'s Vengeance`;
+    case 'independence':
+      return `War of ${A.name}'s Independence`;
     default:
       return `War of ${A.name}'s Conquest`;
   }
@@ -251,6 +298,21 @@ export function declareWar(c: WarContext, A: Clan, B: Clan, r: { reason: WarReas
       c.log(`${realmName(lib, C)} joins its ally ${realmName(lib, A)} in the ${war.name}.`);
     }
   }
+  // Vassals follow their overlords; an overlord defends its vassal.
+  for (const [side, lead] of [['attackers', A.id], ['defenders', B.id]] as const) {
+    for (const v of vassalsOf(sim, lead)) {
+      if (war.attackers.includes(v) || war.defenders.includes(v) || r.reason === 'independence') continue;
+      war[side].push(v);
+      war.weariness[v] = 0;
+    }
+  }
+  const lord = overlordOf(sim, B.id);
+  if (lord !== undefined && lord !== A.id && !war.attackers.includes(lord) && !war.defenders.includes(lord)) {
+    war.defenders.push(lord);
+    war.weariness[lord] = 0;
+    const L = sim.clans.find((q) => q.id === lord);
+    if (L) c.log(`${realmName(lib, L)} takes up the defence of its vassal ${realmName(lib, B)}.`);
+  }
   // A war without cause angers everyone, its own people too.
   if (r.reason === 'conquest') {
     for (const C of sim.clans) if (C !== A) relation(sim, A.id, C.id).memory -= 0.1;
@@ -278,11 +340,25 @@ export function warOutlook(c: WarContext, A: Clan, B: Clan): { reason: WarReason
 /** Each year: settled realms at peace weigh going to war. */
 export function warsYear(c: WarContext): void {
   const { sim, lib } = c;
+  // Vassals pay tribute: a tenth of their capital's stores.
+  for (const A of sim.clans) {
+    const lord = overlordOf(sim, A.id);
+    if (lord === undefined) continue;
+    const from = capitalOf(sim, A);
+    const to = capitalOf(sim, sim.clans.find((q) => q.id === lord));
+    if (!from?.economy || !to?.economy) continue;
+    for (const [id, v] of Object.entries(from.economy.stores)) {
+      from.economy.stores[id] = v * 0.9;
+      to.economy.stores[id] = (to.economy.stores[id] ?? 0) + v * 0.1;
+    }
+  }
   for (const A of [...sim.clans]) {
     if (tribalRule(lib, A) || !capitalOf(sim, A) || enemiesOf(sim, A.id).size) continue;
+    const lord = overlordOf(sim, A.id);
     // Resting from a war lately ended.
     if ((sim.wars ?? []).some((w) => w.ended !== undefined && sim.day - w.ended < 5 * DAYS_PER_YEAR && sideOf(w, A.id))) continue;
     for (const B of contacts(c, A)) {
+      if (lord !== undefined && B.id !== lord) continue;
       if (enemiesOf(sim, B.id).size && !enemiesOf(sim, B.id).has(A.id) && c.rand() < 0.5) continue;
       const o = warOutlook(c, A, B);
       if (!o || c.rand() >= o.chance) continue;
@@ -385,6 +461,12 @@ function chooseTarget(c: WarContext, a: Army, war: War): { x: number; y: number;
   const reach = c.speed(clan?.race ?? '', clan?.culture ?? '') * 15;
   const near = (sim.armies ?? []).filter((e) => e.war === war.id && foes.has(e.clan)).sort((p, q) => c.dist(a.x, a.y, p.x, p.y) - c.dist(a.x, a.y, q.x, q.y))[0];
   if (near && c.dist(a.x, a.y, near.x, near.y) < (a.goal === 'defend' ? reach * 1.5 : reach * 0.5)) return { x: near.x, y: near.y, army: near };
+  // Our towns under siege: relieve them (meeting the besiegers there).
+  const sieged = live(sim).filter((s) => friends.has(s.clan) && s.besieged && foes.has(sim.armies?.find((q) => q.id === s.besieged!.by)?.clan ?? -1)).sort((p, q) => c.dist(a.x, a.y, p.x, p.y) - c.dist(a.x, a.y, q.x, q.y))[0];
+  if (sieged && c.dist(a.x, a.y, sieged.x, sieged.y) < reach * 2) {
+    const besieger = sim.armies!.find((q) => q.id === sieged.besieged!.by)!;
+    return { x: besieger.x, y: besieger.y, army: besieger };
+  }
   // Our towns the enemy holds: free them.
   const ours = live(sim).filter((s) => friends.has(s.clan) && s.occupied && foes.has(s.occupied.by)).sort((p, q) => c.dist(a.x, a.y, p.x, p.y) - c.dist(a.x, a.y, q.x, q.y))[0];
   if (ours) return { x: ours.x, y: ours.y, town: ours };
@@ -504,15 +586,17 @@ function fieldBattle(c: WarContext, war: War, A: Army, B: Army): void {
 }
 
 /** An army falls on a town: its guards and townsfolk (behind walls), or the enemy holding it. Winning, the army takes it (or frees it). */
-function assault(c: WarContext, war: War, a: Army, st: Settlement): void {
+function assault(c: WarContext, war: War, a: Army, st: Settlement, wallsNow?: number): void {
   const { sim, lib } = c;
   const clan = sim.clans.find((q) => q.id === a.clan);
   const owner = sim.clans.find((q) => q.id === st.clan);
   const freeing = !!st.occupied && sideOf(war, st.clan) === sideOf(war, a.clan);
   const holder = freeing ? sim.clans.find((q) => q.id === st.occupied!.by) : owner;
   // The town's guards, and its townsfolk on the walls.
-  const guards = freeing ? st.occupied!.garrison : Math.max(1, st.warband + st.pop * 0.05);
-  const walls = !freeing ? wallsMight((id) => knows(lib, st, id)) : 1;
+  // Starving defenders fight the weaker.
+  const hunger = clamp(st.fed, 0.4, 1);
+  const guards = (freeing ? st.occupied!.garrison : Math.max(1, st.warband + st.pop * 0.05)) * hunger;
+  const walls = wallsNow ?? (!freeing ? WALL_MIGHT[wallLevel(lib, st, isCapital(sim, st))] : 1);
   const ground = groundAt(c, st.x, st.y);
   const sa = sideOfArmy(c, a, false);
   const race = holder && c.racial ? c.racial(holder.race) : { flies: false, mountains: false, specialty: '' };
@@ -547,9 +631,90 @@ function assault(c: WarContext, war: War, a: Army, st: Settlement): void {
   takeMen(a, garrison);
   st.occupied = { by: a.clan, war: war.id, since: sim.day, garrison };
   a.supply += takeFood(c, st, a.men * 2);
+  loot(c, st, a.clan, 0.3);
   if (owner && clan) noteBetween(sim, clan.culture, owner.culture, 'fights');
   const cap = owner?.realm?.capital === st.id;
   c.log(`The ${a.name} took ${st.name}${cap ? `, the capital of ${owner ? realmName(lib, owner) : '?'}` : ''} (${war.name}).`, st.x, st.y);
+}
+
+/** Carry off a share of a town's goods (not its food) to the taker's capital. Returns the worth taken. */
+function loot(c: WarContext, st: Settlement, by: number, share: number): number {
+  const to = capitalOf(c.sim, c.sim.clans.find((q) => q.id === by));
+  const S = st.economy?.stores;
+  if (!S) return 0;
+  let n = 0;
+  for (const [id, v] of Object.entries(S)) {
+    if (isFood(c.env, id) || v <= 0) continue;
+    const take = v * share;
+    S[id] = v - take;
+    n += take;
+    if (to?.economy) to.economy.stores[id] = (to.economy.stores[id] ?? 0) + take;
+  }
+  return n;
+}
+
+/**
+ * A siege, a day of it (REDESIGN.md 8.4i; Phase 10 step 3). The besieged town works only the
+ * fields within its walls and cannot trade, so it eats into its stores and starves; siege engines
+ * (or cannon) breach its walls; sickness creeps into the besiegers' camp. The besiegers storm it
+ * when the odds are good enough (or the walls are breached), or it surrenders when starving.
+ * An unwalled place is simply invested for a few days and assaulted.
+ */
+function siegeDay(c: WarContext, war: War, a: Army, st: Settlement): void {
+  const { sim, lib } = c;
+  const freeing = !!st.occupied && sideOf(war, st.clan) === sideOf(war, a.clan);
+  const level = freeing ? 0 : wallLevel(lib, st, isCapital(sim, st));
+  if (!a.siege || a.siege.town !== st.id) {
+    a.siege = { town: st.id, days: 0, breach: 0 };
+    if (level >= 1) {
+      const owner = sim.clans.find((q) => q.id === st.clan);
+      c.log(`The ${a.name} laid siege to ${st.name}${owner ? ` (${realmName(lib, owner)})` : ''}, behind ${WALL_NAMES[level]} (${war.name}).`, st.x, st.y);
+    }
+  }
+  const sg = a.siege;
+  sg.days++;
+  if (!freeing) st.besieged = { by: a.id, since: st.besieged?.by === a.id ? st.besieged.since : sim.day };
+  // Unwalled: a few days to invest it, then the assault.
+  if (level === 0) {
+    if (sg.days >= 7 + st.pop / 100 && sim.day - (a.lastFight ?? -1e9) >= 7) {
+      a.lastFight = sim.day;
+      delete a.siege;
+      assault(c, war, a, st, 1);
+    }
+    return;
+  }
+  // Engines breach the walls.
+  const clan = sim.clans.find((q) => q.id === a.clan);
+  const cap = capitalOf(sim, clan);
+  const engines = cap && knows(lib, cap, 'cannons') ? 0.08 : cap && knows(lib, cap, 'siege') ? 0.025 : 0.004;
+  sg.breach = Math.min(1, (sg.breach ?? 0) + engines / level);
+  const wallsNow = 1 + (WALL_MIGHT[level] - 1) * (1 - (sg.breach ?? 0));
+  // Sickness in a long siege.
+  if (sg.days > 60) scaleUnits(a, 0.999);
+  // Starved out: a town with nothing left may open its gates.
+  if (st.fed < 0.5 && sg.days >= 30 && c.rand() < 0.04) {
+    const owner = sim.clans.find((q) => q.id === st.clan);
+    const garrison = Math.max(20, Math.round(a.men * 0.1));
+    takeMen(a, garrison);
+    st.occupied = { by: a.clan, war: war.id, since: sim.day, garrison };
+    st.warband *= 0.5;
+    delete st.besieged;
+    delete a.siege;
+    loot(c, st, a.clan, 0.2);
+    c.log(`Starving after ${sg.days} days, ${st.name} surrendered to the ${a.name}${owner?.realm?.capital === st.id ? ` — the capital of ${realmName(lib, owner)}` : ''} (${war.name}).`, st.x, st.y);
+    return;
+  }
+  if (sg.days < 7 || sim.day - (a.lastFight ?? -1e9) < 7) return;
+  // Storm when the odds are good: breached walls, a starving garrison, or a long siege and still the stronger.
+  const holder = sim.clans.find((q) => q.id === st.clan);
+  const defence = Math.max(1, st.warband + st.pop * 0.05) * clamp(st.fed, 0.4, 1) * wallsNow * 1.2 * (holder ? c.might(holder.race, holder.culture) * armsOf(c, holder) : 1);
+  const attack = a.men * (clan ? c.might(clan.race, clan.culture) * armsOf(c, clan) : 1) * clamp(a.morale, 0.2, 1.2);
+  const odds = attack / defence;
+  if (odds >= 3 || (sg.breach ?? 0) >= 0.8 || (sg.days > 180 && odds >= 1.5)) {
+    a.lastFight = sim.day;
+    delete a.siege;
+    assault(c, war, a, st, wallsNow);
+  }
 }
 
 /** Each day: armies march, eat, forage or starve, and fight what they meet. */
@@ -557,6 +722,15 @@ export function armiesDay(c: WarContext): void {
   const { sim, env } = c;
   if (!sim.armies?.length) return;
   const sIdx = northernSummer(sim.day) ? 0 : 1;
+  // A siege ends when its army is gone, beaten off or has moved on.
+  for (const st of sim.settlements) {
+    if (!st.besieged) continue;
+    const by = sim.armies.find((q) => q.id === st.besieged!.by);
+    if (!by || by.siege?.town !== st.id || by.goal === 'home') {
+      delete st.besieged;
+      if (by?.goal === 'home' || !by) c.log(`The siege of ${st.name} is lifted.`, st.x, st.y);
+    }
+  }
   for (const a of [...sim.armies]) {
     if (!sim.armies.includes(a)) continue;
     const war = (sim.wars ?? []).find((w) => w.id === a.war);
@@ -632,18 +806,9 @@ export function armiesDay(c: WarContext): void {
       fieldBattle(c, war, a, enemy);
       continue;
     }
-    // At a town: invest it, then assault.
-    if (to.town && c.dist(a.x, a.y, to.town.x, to.town.y) < 5) {
-      if (!a.siege || a.siege.town !== to.town.id) a.siege = { town: to.town.id, days: 0 };
-      a.siege.days++;
-      // A week for a village, longer for a town, far longer behind walls (sieges proper come in step 3).
-      const need = (7 + to.town.pop / 50) * (to.town.occupied ? 1 : wallsMight((id) => knows(c.lib, to.town!, id)) ** 3);
-      if (a.siege.days >= need && rested(a)) {
-        a.lastFight = sim.day;
-        delete a.siege;
-        assault(c, war, a, to.town);
-      }
-    } else delete a.siege;
+    // At a town: besiege it (or, unwalled, invest it and assault).
+    if (to.town && c.dist(a.x, a.y, to.town.x, to.town.y) < 5) siegeDay(c, war, a, to.town);
+    else delete a.siege;
   }
 }
 
@@ -668,12 +833,116 @@ function cede(c: WarContext, st: Settlement, to: number): void {
   }
 }
 
+/** A realm swallowed whole: its towns, tribes, land, armies and ties pass to another (or end). */
+function absorb(c: WarContext, from: Clan, into: Clan): void {
+  const { sim } = c;
+  for (const st of towns(sim, from.id)) cede(c, st, into.id);
+  for (const t of sim.tribes) if (t.clan === from.id) t.clan = into.id;
+  for (let k = 0; k < sim.owner.length; k++) if (sim.owner[k] === from.id) sim.owner[k] = into.id;
+  for (const so of sim.sorties) if (so.clan === from.id) so.clan = into.id;
+  for (const cv of sim.caravans) if (cv.clan === from.id) cv.clan = into.id;
+  for (const a of [...(sim.armies ?? [])]) if (a.clan === from.id) disband(c, a);
+  into.techs = [...new Set([...(into.techs ?? []), ...(from.techs ?? [])])];
+  for (const st of sim.settlements) if (st.claimedBy?.includes(from.id)) st.claimedBy = st.claimedBy.filter((q) => q !== from.id);
+  for (const k of Object.keys(sim.realmRelations ?? {})) if (k.split('|').includes(String(from.id))) delete sim.realmRelations![k];
+  for (const w of activeWars(sim)) {
+    w.attackers = w.attackers.filter((q) => q !== from.id);
+    w.defenders = w.defenders.filter((q) => q !== from.id);
+  }
+  sim.clans = sim.clans.filter((q) => q !== from);
+}
+
+export type Fate = 'princes' | 'vassal' | 'killed' | 'exile';
+/**
+ * A realm conquered (REDESIGN.md 8.4b and the Phase 10 decisions): its ruling family is kept as
+ * high princes where its hold on its lands stays strong (more so under a victor whose rule has
+ * high princes, or holds land through lords); made a vassal (keeping its realm) under a feudal
+ * victor most of all; killed after a holy war or a war of vengeance, by a warlike people, or by an
+ * intolerant faith; or exiled to a realm that thinks well of it (from where its line may come back).
+ */
+export function conquer(c: WarContext, war: War, V: Clan, L: Clan, force?: Fate): string {
+  const { sim, lib } = c;
+  const lt = towns(sim, L.id);
+  const hold = (L.realm?.centralization ?? 0.3) * (lt.reduce((n, s) => n + (s.loyalty ?? 0.6), 0) / Math.max(1, lt.length));
+  const vg = govOf(lib, V.realm?.gov ?? '');
+  const feudal = vg?.land === 'Great lords with vassals (feudal)';
+  const princes = !!vg?.ruling.includes('High princes');
+  const fV = realmFaith(sim, V);
+  const fL = realmFaith(sim, L);
+  const hostileFaith = !!fV && !!fL && fV !== fL && (fV.tolerance === 'Hostile' || fV.tolerance === 'Intolerant');
+  const host = sim.clans
+    .filter((q) => q !== V && q !== L && q.realm && !enemiesOf(sim, q.id).has(L.id))
+    .map((q) => ({ q, op: relationOf(sim, q.id, L.id)?.opinion ?? -1 }))
+    .filter((x) => x.op >= 0)
+    .sort((a, b) => b.op - a.op)[0]?.q;
+  const weights: [Fate, number][] = [
+    ['princes', hold >= 0.3 ? (1 + 4 * hold) * (princes ? 2 : 1) * (feudal ? 1.3 : 1) : 0.1],
+    ['vassal', feudal ? 1.5 : 0.6],
+    ['killed', 0.3 + (war.reason === 'holy' || war.reason === 'revenge' ? 1 : 0) + (cultureOf(sim, V.culture)?.ethos === 'Warlike' ? 0.6 : 0) + (hostileFaith ? 0.8 : 0)],
+    ['exile', host ? 1 : 0],
+  ];
+  let fate: Fate = force ?? 'killed';
+  if (!force) {
+    let r = c.rand() * weights.reduce((n, [, w]) => n + w, 0);
+    for (const [f, w] of weights) if ((r -= w) <= 0) {
+      fate = f;
+      break;
+    }
+  }
+  if (fate === 'exile' && !host) fate = 'killed';
+  const ruler = L.realm!.ruler;
+  const was = realmName(lib, L);
+  const by = realmName(lib, V);
+  const cap = capitalOf(sim, L);
+  if (fate === 'vassal') {
+    for (const st of lt) if (st.occupied?.war === war.id) delete st.occupied;
+    relation(sim, V.id, L.id).pacts = [{ kind: 'vassal', since: sim.day, overlord: V.id }];
+    c.log(`${was} has bowed to ${by}: ${rulerTitleOf(lib, L)} ${ruler.name} keeps the throne as its vassal, paying tribute and following it to war.`, cap?.x, cap?.y);
+    return `${was} becomes its vassal`;
+  }
+  const house = ruler.house;
+  absorb(c, L, V);
+  if (fate === 'princes') {
+    for (const st of lt) st.prince = house;
+    (V.realm!.highPrinces ??= []).push({ house, name: ruler.name, since: sim.day, was });
+    c.log(`${was} has fallen to ${by}. Its house of ${house} still holds its lands: ${ruler.name} swears to ${by} as a high prince.`, cap?.x, cap?.y);
+    return `${was} is annexed, its house of ${house} ruling its lands as high princes`;
+  }
+  if (fate === 'exile') {
+    (V.realm!.claimants ??= []).push({ name: ruler.name, house, female: ruler.female, born: ruler.born, why: 'exile', hostedBy: host!.id, backing: 0.3, since: sim.day });
+    const rel = relation(sim, host!.id, V.id);
+    rel.memory = Math.max(-1, rel.memory - 0.2);
+    c.log(`${was} has fallen to ${by}. ${ruler.name} of the house of ${house} fled into exile with ${realmName(lib, host!)}, still claiming the throne.`, cap?.x, cap?.y);
+    return `${was} is annexed; its ruler fled to ${realmName(lib, host!)}`;
+  }
+  c.log(`${was} has fallen to ${by}. ${ruler.name} and the house of ${house} were put to the sword.`, cap?.x, cap?.y);
+  return `${was} is annexed and its ruling house destroyed`;
+}
+const rulerTitleOf = (lib: Library, clan: Clan) => rulerTitle(lib, clan);
+
 function makePeace(c: WarContext, war: War, winner: 'attackers' | 'defenders' | null): void {
   const { sim, lib } = c;
   const leader = (side: 'attackers' | 'defenders') => sim.clans.find((q) => q.id === war[side][0]);
   const A = leader('attackers');
   const D = leader('defenders');
   const terms: string[] = [];
+  // Conquest: a loser whose capital and most of its people are held by the winners falls whole.
+  if (winner && winner === 'attackers' && D && war.reason !== 'independence') {
+    const lt = towns(sim, D.id);
+    const pop = lt.reduce((n, s) => n + s.pop, 0);
+    const heldPop = lt.filter((s) => s.occupied && war.attackers.includes(s.occupied.by)).reduce((n, s) => n + s.pop, 0);
+    const cap = capitalOf(sim, D);
+    if (cap?.occupied && war.attackers.includes(cap.occupied.by) && pop > 0 && heldPop >= pop * 0.8) {
+      const V = sim.clans.find((q) => q.id === cap.occupied!.by)!;
+      terms.push(conquer(c, war, V, D));
+    }
+  }
+  // Independence won: the vassal is free.
+  if (winner === 'attackers' && war.reason === 'independence' && A && D) {
+    const rel = relation(sim, A.id, D.id);
+    rel.pacts = rel.pacts.filter((p) => p.kind !== 'vassal');
+    terms.push(`${realmName(lib, A)} is free of ${realmName(lib, D)}`);
+  }
   const held = live(sim).filter((s) => s.occupied?.war === war.id);
   if (winner) {
     const W = winner === 'attackers' ? war.attackers : war.defenders;
@@ -702,7 +971,7 @@ function makePeace(c: WarContext, war: War, winner: 'attackers' | 'defenders' | 
         D.realm.claimants = D.realm.claimants!.filter((x) => x !== q);
         D.realm.family = [];
         D.realm.reigns++;
-        terms.push(`${q.name} of the house of ${q.house} takes the throne of ${realmName(lib, D)}`);
+        terms.push(`${q.name} of the house of ${q.house} ${q.why === 'exile' ? 'returns from exile to' : 'takes'} the throne of ${realmName(lib, D)}`);
       }
     }
     // Payment, when little land changed hands.
@@ -731,9 +1000,6 @@ function makePeace(c: WarContext, war: War, winner: 'attackers' | 'defenders' | 
   war.outcome = who ? `${realmName(lib, who)} won${terms.length ? `: ${terms.join('; ')}` : ''}.` : 'A white peace: nothing changed hands.';
   const cap = capitalOf(sim, D);
   c.log(`The ${war.name} has ended. ${war.outcome}`, cap?.x, cap?.y);
-  // A realm left with no towns has fallen (its fate, and its rulers', come with conquest in step 3).
-  const loserClan = winner === 'attackers' ? D : winner === 'defenders' ? A : undefined;
-  if (loserClan && !towns(sim, loserClan.id).length && who) c.log(`${realmName(lib, loserClan)} has fallen to ${realmName(lib, who)}.`);
 }
 
 /** Each month: weariness grows; a worn-out or badly beaten side makes peace; realms at war without an army raise one. */
@@ -746,6 +1012,16 @@ export function warsMonth(c: WarContext): void {
     if (!war.attackers.length || !war.defenders.length) {
       makePeace(c, war, war.attackers.length ? 'attackers' : war.defenders.length ? 'defenders' : null);
       continue;
+    }
+    // Occupation: the occupier takes a share of the town's goods each month; the townsfolk may rise against a thin garrison.
+    for (const st of live(sim).filter((s) => s.occupied?.war === war.id)) {
+      loot(c, st, st.occupied!.by, 0.05);
+      st.unrest = (st.unrest ?? 0) + 1 / 12;
+      if (st.occupied!.garrison < st.pop * 0.03 && c.rand() < 0.08) {
+        const by = sim.clans.find((q) => q.id === st.occupied!.by);
+        delete st.occupied;
+        c.log(`The people of ${st.name} rose and threw out the garrison of ${by ? realmName(c.lib, by) : 'their occupiers'} (${war.name}).`, st.x, st.y);
+      }
     }
     // Score from towns held.
     const held = live(sim).filter((s) => s.occupied?.war === war.id);
