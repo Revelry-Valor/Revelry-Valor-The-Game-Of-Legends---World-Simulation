@@ -861,7 +861,8 @@ describe('politics', () => {
     stepDays(sim, env, lib, 1);
     sim.cultures!.find((c) => c.id === a.culture)!.behaviours.push('royal-court');
     const c = ctx(sim);
-    for (let y = 0; y < 40 && !(a.techs ?? []).includes('pottery'); y++) {
+    // Chance plays a part (a spy may not be sent, may watch instead, or be caught): a century is ample.
+    for (let y = 0; y < 100 && !(a.techs ?? []).includes('pottery'); y++) {
       nationsYear(c);
       politicsYear(c);
       for (let d = 0; d < 30; d++) spiesDay(c);
