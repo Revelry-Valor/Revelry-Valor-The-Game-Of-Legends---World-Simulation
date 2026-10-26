@@ -9,6 +9,7 @@ import type { ReferenceImage, World } from '../core/world';
 import { MapCache, type MapLook } from '../render/mapcache';
 import { tempColourF } from '../render/paintmap';
 import { h } from './dom';
+import type { InfoItem } from './info';
 
 /** Brush settings without a path: what the tool panel edits. */
 export type BrushSettings = Omit<Stroke, 'id' | 'pts'>;
@@ -78,6 +79,8 @@ export interface MapViewOptions {
   referenceKeepShape?(): boolean;
   setReference?(ref: ReferenceImage, done: boolean): void;
   overlay?(): MapOverlay | null;
+  /** What is under the cursor, as named fields (null when the pointer leaves the map). */
+  hover?(items: InfoItem[] | null): void;
 }
 
 /** Something drawn over the map and worked with the pointer (the peoples of the simulation). */
@@ -88,8 +91,8 @@ export interface MapOverlay {
   down?(x: number, y: number, pxKm: number): boolean;
   drag?(x: number, y: number): void;
   up?(x: number, y: number): void;
-  /** What it has at a place, for the readout. */
-  describe?(x: number, y: number): string | null;
+  /** What it has at a place, as named fields, for the "Under the cursor" panel. */
+  describe?(x: number, y: number): InfoItem[] | null;
   /** While shown, pressing the map never paints (it pans instead). */
   noPaint?: boolean;
 }
@@ -123,7 +126,6 @@ const GEO_LINE = { divide: '#d1347f', join: '#1f9e62' } as const;
 
 export function createMapView(o: MapViewOptions): MapView {
   const canvas = h('canvas', { class: 'map', 'aria-label': 'World map. Drag to paint with the selected brush.' });
-  const readout = h('div', { class: 'readout small', 'aria-live': 'off' }, 'Move over the map to see what is there.');
   const busy = h('div', { class: 'busy small', hidden: true }, 'Drawing…');
   // While placing points along a course (river, lava, current, wind): finish or cancel it.
   const finishBtn = h('button', { type: 'button', class: 'primary', hidden: true, title: 'Finish this course (Enter)', onclick: () => finishRoute() }, 'Finish');
@@ -1579,64 +1581,33 @@ export function createMapView(o: MapViewOptions): MapView {
       readoutPending = true;
       requestAnimationFrame(() => {
         readoutPending = false;
-        if (hover) readout.textContent = describe(hover.x, hover.y);
+        if (hover) o.hover?.(describe(hover.x, hover.y));
       });
     }
   });
   canvas.addEventListener('pointerleave', () => {
     hover = null;
-    readout.textContent = 'Move over the map to see what is there.';
+    o.hover?.(null);
     schedule();
   });
 
-  const describe = (x: number, y: number): string => {
+  const describe = (x: number, y: number): InfoItem[] => {
     const w = o.world();
     const s = w.settings;
-    if (y < 0 || y > s.heightKm || (s.edges === 'void' && (x < 0 || x > s.widthKm))) return 'Off the map';
+    if (y < 0 || y > s.heightKm || (s.edges === 'void' && (x < 0 || x > s.widthKm))) return [{ label: 'Place', value: 'Off the map' }];
     const xw = ((x % s.widthKm) + s.widthKm) % s.widthKm;
     const p = surfaceAt(w.surface, xw, y, { seed: s.seed, wrapKm: s.edges === 'wrap' ? s.widthKm : 0 });
-    const parts: string[] = [p.ground === 'land' ? 'Land' : p.ground === 'shallow' ? 'Shallow sea' : 'Deep sea'];
-    if (p.ground === 'land') {
-      if (p.zone) parts.push(ZONES[p.zone - 1].name);
-      if (p.plateau) parts.push('Plateau');
-      if (p.blocksTravel) parts.push(p.cliff ? 'Cliff (blocks travel)' : 'Canyon or ravine (blocks travel)');
-      const cover = Object.entries(p.cover).sort((a, b) => b[1] - a[1])[0];
-      if (cover) parts.push(brushInfo(cover[0] as BrushId).name);
-      if (p.water === 'river') {
-        const ft = p.riverWidth * 3280.84;
-        const rv = riverAt(w.surface, xw, y, 5);
-        const nm = rv ? geoNames(w.surface, o.climate()).river.get(rv.id) : undefined;
-        parts.push(`${nm ? `${nm} (river)` : 'River'}, ${ft < 5280 ? `${Math.round(ft / 10) * 10} ft (${Math.round(p.riverWidth * 1000)} m)` : formatDistance(p.riverWidth)} wide`);
-      }
-      if (p.water === 'lake') {
-        const id = lakeAt(w.surface, xw, y, 1 / view.scale + 3);
-        const nm = id >= 0 ? geoNames(w.surface, o.climate()).lake.get(id) : undefined;
-        parts.push(nm ? `${nm} (lake)` : 'Lake');
-      }
-      if (p.waterfall) parts.push('Waterfall');
-      if (p.wet > 0.4 && !p.water) parts.push('Well watered');
-      if (p.volcanic) parts.push('Volcanic');
-      if (p.ramp) parts.push('Ramp');
-    }
-    if (p.whirlpool) parts.push(p.whirlpool.dangerous ? 'Whirlpool (dangerous)' : 'Whirlpool');
-    const cl = o.climate();
-    if (cl) {
-      const c = climateAt(cl, xw, y);
-      const f = (t: number) => `${Math.round(cToF(t))}°F`;
-      if (p.ground === 'land') {
-        if (c.zone >= 0) parts.push(ZONE_INFO[c.zone].name);
-        const auto = Object.keys(p.cover).length ? null : autoCoverName(cl, nearestPoint(cl, xw, y));
-        if (auto) parts.push(auto);
-        parts.push(`Summer ${f(c.summerT)}, ${RAIN_NAMES[rainClass(c.summerRain)]}`, `Winter ${f(c.winterT)}, ${RAIN_NAMES[rainClass(c.winterRain)]}`);
-      } else {
-        parts.push(`Sea ${f(c.winterT)} to ${f(c.summerT)}`);
-        const k = nearestPoint(cl, xw, y);
-        if (cl.summer.ice[k] || cl.winter.ice[k]) parts.push(cl.summer.ice[k] ? 'Sea ice all year' : 'Sea ice in winter');
-        if (p.ground === 'shallow' && (p.reefPaint === 1 || (cl.reef[k] && p.reefPaint !== 2))) parts.push('Reef (hazard to ships)');
-        if (Math.max(cl.summer.upwell[k], cl.winter.upwell[k]) > 0.3) parts.push('Upwelling (rich fishing)');
-      }
-    }
+    const items: InfoItem[] = [];
+    const add = (label: string, value: string) => {
+      const had = items.find((i) => i.label === label);
+      if (had) had.value += `; ${value}`;
+      else items.push({ label, value });
+    };
+    items.push({ label: 'Latitude', value: formatLatitude(latitudeAt(s, y)) }, { label: 'From the west edge', value: formatDistance(xw) });
+    // What lives and happens here (the peoples of the simulation) first.
+    for (const i of o.overlay?.()?.describe?.(xw, y) ?? []) add(i.label, i.value);
     // Where it is: the landmass, region or water, with their names.
+    const cl = o.climate();
     const geo = cl?.geo;
     if (cl && geo) {
       const k = geoCell(cl, xw, y);
@@ -1652,12 +1623,51 @@ export function createMapView(o: MapViewOptions): MapView {
             where.push(named(geo.landmasses.find((f) => f.id === geo.land[k])?.kind ?? 'Land', names.land.get(geo.land[k])));
           }
         } else if (geo.water[k] >= 0) where.push(named(geo.waters.find((f) => f.id === geo.water[k])?.kind ?? 'Sea', names.water.get(geo.water[k])));
-        if (where.length) parts.unshift(where.join(', '));
+        if (where.length) add('Place', where.join(', '));
       }
     }
-    const people = o.overlay?.()?.describe?.(xw, y);
-    if (people) parts.unshift(people);
-    return `${formatLatitude(latitudeAt(s, y))} · ${formatDistance(xw)} from the west edge · ${parts.join(' · ')}`;
+    add('Ground', p.ground === 'land' ? 'Land' : p.ground === 'shallow' ? 'Shallow sea' : 'Deep sea');
+    if (p.ground === 'land') {
+      if (p.zone) add('Terrain', ZONES[p.zone - 1].name);
+      if (p.plateau) add('Terrain', 'Plateau');
+      if (p.volcanic) add('Terrain', 'Volcanic');
+      if (p.ramp) add('Terrain', 'Ramp');
+      if (p.blocksTravel) add('Hazard', p.cliff ? 'Cliff (blocks travel)' : 'Canyon or ravine (blocks travel)');
+      const cover = Object.entries(p.cover).sort((a, b) => b[1] - a[1])[0];
+      if (cover) add('Ground cover', brushInfo(cover[0] as BrushId).name);
+      if (p.water === 'river') {
+        const ft = p.riverWidth * 3280.84;
+        const rv = riverAt(w.surface, xw, y, 5);
+        const nm = rv ? geoNames(w.surface, cl).river.get(rv.id) : undefined;
+        add('Water', `${nm ? `${nm} (river)` : 'River'}, ${ft < 5280 ? `${Math.round(ft / 10) * 10} ft (${Math.round(p.riverWidth * 1000)} m)` : formatDistance(p.riverWidth)} wide`);
+      }
+      if (p.water === 'lake') {
+        const id = lakeAt(w.surface, xw, y, 1 / view.scale + 3);
+        const nm = id >= 0 ? geoNames(w.surface, cl).lake.get(id) : undefined;
+        add('Water', nm ? `${nm} (lake)` : 'Lake');
+      }
+      if (p.waterfall) add('Water', 'Waterfall');
+      if (p.wet > 0.4 && !p.water) add('Water', 'Well watered');
+    }
+    if (p.whirlpool) add('Hazard', p.whirlpool.dangerous ? 'Whirlpool (dangerous)' : 'Whirlpool');
+    if (cl) {
+      const c = climateAt(cl, xw, y);
+      const f = (t: number) => `${Math.round(cToF(t))}°F`;
+      if (p.ground === 'land') {
+        if (c.zone >= 0) add('Climate zone', ZONE_INFO[c.zone].name);
+        const auto = Object.keys(p.cover).length ? null : autoCoverName(cl, nearestPoint(cl, xw, y));
+        if (auto) add('Ground cover', auto);
+        add('Summer', `${f(c.summerT)}, ${RAIN_NAMES[rainClass(c.summerRain)]}`);
+        add('Winter', `${f(c.winterT)}, ${RAIN_NAMES[rainClass(c.winterRain)]}`);
+      } else {
+        add('Sea', `${f(c.winterT)} to ${f(c.summerT)}`);
+        const k = nearestPoint(cl, xw, y);
+        if (cl.summer.ice[k] || cl.winter.ice[k]) add('Sea ice', cl.summer.ice[k] ? 'All year' : 'In winter');
+        if (p.ground === 'shallow' && (p.reefPaint === 1 || (cl.reef[k] && p.reefPaint !== 2))) add('Hazard', 'Reef (hazard to ships)');
+        if (Math.max(cl.summer.upwell[k], cl.winter.upwell[k]) > 0.3) add('Fishing', 'Upwelling: rich fishing');
+      }
+    }
+    return items;
   };
 
   const keydown = (e: KeyboardEvent) => {
@@ -1701,7 +1711,6 @@ export function createMapView(o: MapViewOptions): MapView {
     { class: 'stage' },
     canvas,
     h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
-    readout,
   );
   requestAnimationFrame(fit);
 

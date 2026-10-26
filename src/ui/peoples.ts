@@ -22,6 +22,7 @@ import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
 import type { MapOverlay } from './mapview';
+import type { InfoItem, ResourceView } from './info';
 
 /**
  * The Peoples tab (Phase 6): choosing which races take part and placing their first tribes
@@ -41,6 +42,8 @@ export interface PeoplesDeps {
   openLibrary(): void;
   /** Whether the climate is being worked out again (the land the peoples see may be out of date). */
   climateBusy(): boolean;
+  /** The selected settlement or realm changed (or what it holds did). */
+  selectionChanged?(): void;
 }
 
 export interface Peoples {
@@ -52,6 +55,8 @@ export interface Peoples {
   climateChanged(): void;
   /** The simulation packed for saving (null if there is none). */
   pack(): PackedSim | null;
+  /** The selected settlement's or realm's resources (for the resource panel), or null. */
+  resources(): ResourceView | null;
   dispose(): void;
 }
 
@@ -749,6 +754,15 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           document.querySelector('.battle-report')?.scrollIntoView({ block: 'nearest' });
           return true;
         }
+        // A realm's land: select the realm (the map still pans).
+        const k = cellOf(x, y);
+        if (mode === 'select' && k >= 0 && s.owner[k] >= 0 && clanOf(s.owner[k])) {
+          selectedRealm = s.owner[k];
+          selected = null;
+          render();
+          d.redraw();
+          return false;
+        }
       }
       if (mode === 'add' && !hit && !hitCity) {
         if (!addRace) {
@@ -828,11 +842,12 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     describe(x, y) {
       if (!ready()) return null;
       const s = sim!;
-      const out: string[] = [];
+      const out: InfoItem[] = [];
+      const push = (label: string, value: string) => out.push({ label, value });
       const t = tribeAt(x, y, pxKm);
-      if (t) out.push(`${t.name} (${clanOf(t.clan) ? realmName(lib(), clanOf(t.clan)!) : '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
+      if (t) push('Tribe', `${t.name} (${clanOf(t.clan) ? realmName(lib(), clanOf(t.clan)!) : '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
       const st = t ? null : settlementAt(x, y, pxKm);
-      if (st) out.push(settlementLine(st));
+      if (st) push('Settlement', settlementLine(st));
       if (showTrade) for (const cv of s.caravans) {
         let dx = Math.abs(cv.x - x);
         if (env!.wrapKm) dx = Math.min(dx, env!.wrapKm - dx);
@@ -840,49 +855,49 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const from = s.settlements.find((q) => q.id === cv.from)?.name ?? '?';
         const to = s.settlements.find((q) => q.id === cv.to)?.name ?? '?';
         const goods = Object.entries(cv.cargo).map(([id, u]) => `${Math.round(u)} ${resInfoOf(env!, id)?.name.toLowerCase() ?? id}`).join(', ');
-        out.push(`${cv.train ? 'Train' : 'Caravan'} of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
+        push('Caravan', `${cv.train ? 'Train' : 'Caravan'} of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
         break;
       }
       const k = cellOf(x, y);
       for (const a of s.armies ?? []) {
-        if (Math.hypot(a.x - x, a.y - y) < pxKm * 12) out.push(armyLine(a));
+        if (Math.hypot(a.x - x, a.y - y) < pxKm * 12) push('Army', armyLine(a));
       }
       for (const b of s.battles ?? []) {
         if (s.day - b.day <= 720 && Math.hypot(b.x - x, b.y - y) < pxKm * 8) {
           const w = clanOf(b.winner);
-          out.push(`${b.name}, year ${yearOf(b.day)}: ${w ? realmName(lib(), w) : '?'} won (${b.a.lost} and ${b.b.lost} fell)`);
+          push('Battle', `${b.name}, year ${yearOf(b.day)}: ${w ? realmName(lib(), w) : '?'} won (${b.a.lost} and ${b.b.lost} fell)`);
         }
       }
       for (const f of s.faiths ?? []) for (const hs of f.holySites) {
-        if (Math.hypot(hs.x + 12 * pxKm - x, hs.y - 10 * pxKm - y) < pxKm * 8) out.push(`${hs.name}: holy site of the ${f.name}${hs.held ? '' : ' (lost to it)'}`);
+        if (Math.hypot(hs.x + 12 * pxKm - x, hs.y - 10 * pxKm - y) < pxKm * 8) push('Holy site', `${hs.name}: holy site of the ${f.name}${hs.held ? '' : ' (lost to it)'}`);
       }
       for (const sp of s.spies ?? []) {
         const [sx, sy] = [sp.x, sp.y];
         if (Math.hypot(sx - x, sy - y) < pxKm * 6) {
           const from = clanOf(sp.from);
           const tgt = s.settlements.find((q) => q.id === sp.target);
-          out.push(`${sp.name}, a spy of ${from ? realmName(lib(), from) : '?'}${sp.leg === 'out' ? `, on the way to ${tgt?.name ?? '?'}` : ', coming home'} (${({ steal: 'to steal its knowledge', unrest: 'to stir up unrest', sabotage: 'to burn its stores', watch: 'to watch and listen' } as const)[sp.mission]})`);
+          push('Spy', `${sp.name}, a spy of ${from ? realmName(lib(), from) : '?'}${sp.leg === 'out' ? `, on the way to ${tgt?.name ?? '?'}` : ', coming home'} (${({ steal: 'to steal its knowledge', unrest: 'to stir up unrest', sabotage: 'to burn its stores', watch: 'to watch and listen' } as const)[sp.mission]})`);
         }
       }
       if (k >= 0 && env!.land[k]) {
         const o = s.owner[k];
-        if (o >= 0) out.push(`Land of ${clanOf(o) ? realmName(lib(), clanOf(o)!) : 'a clan now gone'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 && clanOf(s.rival[k]) ? `, being taken by ${realmName(lib(), clanOf(s.rival[k])!)}` : ''}`);
+        if (o >= 0) push('Realm', `Land of ${clanOf(o) ? realmName(lib(), clanOf(o)!) : 'a clan now gone'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 && clanOf(s.rival[k]) ? `, being taken by ${realmName(lib(), clanOf(s.rival[k])!)}` : ''}`);
         if (s.way[k]) {
           const keeper = s.settlements.find((q) => q.id === s.wayKeeper[k]);
-          out.push(`${WAYS[s.way[k]].name}${keeper ? ` (kept by ${keeper.name})` : s.way[k] === 1 ? ' (worn by use)' : ''}`);
+          push('Way', `${WAYS[s.way[k]].name}${keeper ? ` (kept by ${keeper.name})` : s.way[k] === 1 ? ' (worn by use)' : ''}`);
         }
-        if (s.bridge?.[k]) out.push('A stone bridge');
-        else if (env!.fresh[k] && s.way[k]) out.push('A ford (no bridge yet: crossing is slow)');
+        if (s.bridge?.[k]) push('Crossing', 'A stone bridge');
+        else if (env!.fresh[k] && s.way[k]) push('Crossing', 'A ford (no bridge yet: crossing is slow)');
         if (showRes) {
           const r = env!.resInfo.find((q) => q.id === showRes);
-          if (r) out.push(env!.res[r.id][k] > 0.01 ? `${r.name} here (${Math.round(Math.min(1, env!.res[r.id][k]) * 100)}%)` : `No ${r.name.toLowerCase()} here`);
+          if (r) push('Resource', env!.res[r.id][k] > 0.01 ? `${r.name} here (${Math.round(Math.min(1, env!.res[r.id][k]) * 100)}%)` : `No ${r.name.toLowerCase()} here`);
         }
         if (showBeast) {
           const b = env!.beastInfo.find((q) => q.id === showBeast);
-          if (b) out.push(`${b.name}: ${Math.round((s.beasts[b.id][k] / Math.max(1e-6, env!.beastK[b.id][k] || 1)) * 100)}% of what the land carries`);
+          if (b) push('Beast', `${b.name}: ${Math.round((s.beasts[b.id][k] / Math.max(1e-6, env!.beastK[b.id][k] || 1)) * 100)}% of what the land carries`);
         }
       }
-      return out.length ? out.join(' · ') : null;
+      return out.length ? out : null;
     },
   };
   let dragging: Tribe | null = null;
@@ -1383,6 +1398,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
 
   const panel = h('section', { class: 'view-panel peoples' });
   const render = () => {
+    // The resource panel follows the selection (and what it holds).
+    queueMicrotask(() => d.selectionChanged?.());
     updateBar();
     const c = cl();
     if (!c || !env || !sim) {
@@ -1731,6 +1748,57 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     }
     panel.replaceChildren(...(parts.filter(Boolean) as HTMLElement[]));
   };
+  /** What the resource panel shows: the selected settlement (or its realm, for a tribe), or the selected realm. */
+  let landCache: { key: string; land: Record<string, number> } | null = null;
+  function resourceView(): ResourceView | null {
+    const s = sim;
+    const e = env;
+    if (!s || !e) return null;
+    const info = (id: string) => {
+      const r = resInfoOf(e, id);
+      return r ? { name: r.name, category: r.category } : undefined;
+    };
+    const landOf = (key: string, cells: () => number[]): Record<string, number> => {
+      if (landCache?.key === key) return landCache.land;
+      const land: Record<string, number> = {};
+      for (const k of cells()) for (const r of e.resInfo) {
+        const v = e.res[r.id]?.[k] ?? 0;
+        if (v > (land[r.id] ?? 0)) land[r.id] = v;
+      }
+      landCache = { key, land };
+      return land;
+    };
+    const st = s.settlements.find((q) => q.id === selected && !q.ruined);
+    if (st) {
+      const ri = raceInfo(lib(), st.race, st.culture, s.cultures);
+      const r = (ri?.range ?? 22) * (st.kind === 'dawn' ? 2.2 : 1.5);
+      const cells = () => {
+        const out: number[] = [];
+        const n = Math.ceil(r / e.step);
+        const ci = Math.round((st.x - e.x0) / e.step);
+        const cj = Math.round((st.y - e.y0) / e.step);
+        for (let dj = -n; dj <= n; dj++) for (let di = -n; di <= n; di++) {
+          const j = cj + dj;
+          const i = ((ci + di) % e.w + e.w) % e.w;
+          if (j < 0 || j >= e.h || di * di + dj * dj > n * n) continue;
+          if (e.land[j * e.w + i]) out.push(j * e.w + i);
+        }
+        return out;
+      };
+      return { kind: 'Settlement', name: st.name, stores: { ...(st.economy?.stores ?? {}) }, land: landOf(`s${st.id}`, cells), info };
+    }
+    const tribe = s.tribes.find((q) => q.id === selected);
+    const clan = clanOf(selectedRealm ?? tribe?.clan ?? -1);
+    if (!clan) return null;
+    const stores: Record<string, number> = {};
+    for (const q of s.settlements) if (!q.ruined && q.clan === clan.id) for (const [id, v] of Object.entries(q.economy?.stores ?? {})) stores[id] = (stores[id] ?? 0) + v;
+    const cells = () => {
+      const out: number[] = [];
+      for (let k = 0; k < e.n; k++) if (s.owner[k] === clan.id) out.push(k);
+      return out;
+    };
+    return { kind: 'Realm', name: realmName(lib(), clan), stores, land: landOf(`r${clan.id}:${Math.floor(s.day / 360)}`, cells), info };
+  }
   render();
 
   return {
@@ -1745,6 +1813,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     },
     climateChanged,
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),
+    resources: resourceView,
     dispose() {
       playing = false;
       cancelAnimationFrame(frame);

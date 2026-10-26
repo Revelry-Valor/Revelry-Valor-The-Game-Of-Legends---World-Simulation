@@ -16,6 +16,7 @@ import { degreeChoice, sizeMeter, worldLocator } from './worldsize';
 import { climateReport } from './report';
 import { createPeoples, type Peoples } from './peoples';
 import { loadSharedLibrary } from '../core/libstore';
+import { createInfoPanel, createResourcePanel } from './info';
 
 /**
  * The world screen: the map, the painting tools (Phase 1), the layer list, the world's
@@ -118,7 +119,11 @@ export function showWorld(app: App, start: World): () => void {
     if ((tools?.state.tool === 'high' || tools?.state.tool === 'wind') && look.view !== 'pressure') showPressureView?.();
     if (tools?.state.tool === 'itcz' && look.view !== 'rain' && look.view !== 'pressure') showRainView?.();
   }, () => map?.sketch ?? null, () => map?.high ?? null, () => nameOps);
+  // The right-hand readers: what is under the cursor, and the selection's resources.
+  const info = createInfoPanel();
+  const resources = createResourcePanel();
   const map = createMapView({
+    hover: (items) => info.show(items),
     world: () => world,
     tool: () => tools.state,
     look: () => look,
@@ -295,7 +300,7 @@ export function showWorld(app: App, start: World): () => void {
     const ref = world.reference;
     const pick = h('button', { type: 'button', class: 'ghost small', onclick: () => fileInput.click() }, ref ? 'Replace image…' : 'Import image…');
     if (!ref) {
-      refPanel.replaceChildren(h('h2', {}, 'Reference image'), h('p', { class: 'muted small' }, 'Lay a picture over the map to paint from: an atlas page, a sketch of your world, or a map of Earth. Stretch it, size it and fade it as you like. It is only for looking at; the world never reads it.'), pick, fileInput);
+      refPanel.replaceChildren(h('p', { class: 'muted small' }, 'Lay a picture over the map to paint from: an atlas page, a sketch of your world, or a map of Earth. Stretch it, size it and fade it as you like. It is only for looking at; the world never reads it.'), pick, fileInput);
       return;
     }
     const mi = (km: number) => Math.round(kmToMiles(km));
@@ -317,7 +322,6 @@ export function showWorld(app: App, start: World): () => void {
       numberField({ label, value: mi(ref[key]), min: -60000, max: 60000, step: 10, unit: 'miles', hint, change: (v) => { if (Number.isFinite(v)) setRef({ [key]: milesToKm(v) }); } });
     const s = world.settings;
     refPanel.replaceChildren(
-      h('h2', {}, 'Reference image'),
       h('p', { class: 'muted small' }, ref.name ? `“${ref.name}”` : 'A picture to paint from.'),
       choice<'on' | 'off'>('Show', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], ref.shown ? 'on' : 'off', (v) => { setRef({ shown: v === 'on' }); if (v === 'off') { refEdit = false; renderRef(); } }),
       numberField({ label: 'Opacity', value: Math.round(ref.opacity * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint: 'See-through at 0%, solid at 100%.', change: (v) => setRef({ opacity: Math.max(0, Math.min(100, v)) / 100 }) }),
@@ -415,7 +419,6 @@ export function showWorld(app: App, start: World): () => void {
   const lookPanel = h(
     'section',
     { class: 'view-panel' },
-    h('h2', {}, 'Map look'),
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
     choice<'all' | 'main' | 'off'>('Labels', [{ value: 'all', label: 'All' }, { value: 'main', label: 'Land & sea only' }, { value: 'off', label: 'Hidden' }], look.labels, (v) => { look.labels = v; map.redraw(); }),
@@ -458,7 +461,6 @@ export function showWorld(app: App, start: World): () => void {
   const mapPanel = h(
     'section',
     { class: 'view-panel' },
-    h('h2', {}, 'View'),
     mapChoice,
     seasonChoice,
     climateLegend,
@@ -692,7 +694,7 @@ export function showWorld(app: App, start: World): () => void {
   window.addEventListener('keydown', keydown);
 
   const sideToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true' }, 'Tools');
-  const layersPanel = h('section', {}, h('h2', {}, 'Layers'), layerList, h('p', { class: 'muted small' }, 'Other layers get their own views in a later phase.'));
+  const layersPanel = h('section', { class: 'view-panel' }, layerList, h('p', { class: 'muted small' }, 'Other layers get their own views in a later phase.'));
   // Tabs: each shows only the tools and options for one kind of work.
   // The World tab: temperature, rain and the rest of the world's climate, applied as you go.
   const worldPanel = h('div', {});
@@ -743,11 +745,13 @@ export function showWorld(app: App, start: World): () => void {
     setSeason(season) {
       if (look.season === season) return;
       look.season = season;
+      requestAnimationFrame(() => refreshDrops());
       seasonChoice.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-checked', (i === 0) === (season === 1) ? 'true' : 'false'));
       tools.refresh();
       map.redraw();
     },
     climateBusy: () => climateBusy,
+    selectionChanged: () => resources.show(peoples?.resources() ?? null),
     openLibrary: () => {
       save();
       app.library(world);
@@ -778,15 +782,41 @@ export function showWorld(app: App, start: World): () => void {
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
     map.redraw();
   };
-  const side = h('aside', { class: 'side' }, h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Tool sets' }, ...tabButtons), tabBody);
-  showTab('land');
-  sideToggle.addEventListener('click', () => {
-    const open = side.classList.toggle('closed');
-    sideToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+  // The creation panel folds away to the left; a slim tab on the map's edge brings it back.
+  const setSide = (open: boolean) => {
+    side.classList.toggle('closed', !open);
+    sideStrip.hidden = open;
+    sideToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     map.redraw();
-  });
+  };
+  const collapse = h('button', { type: 'button', class: 'ghost small collapse', title: 'Fold the creation panel away', 'aria-label': 'Fold the creation panel away', onclick: () => setSide(false) }, '«');
+  const side = h('aside', { class: 'side' }, h('div', { class: 'side-head' }, h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Tool sets' }, ...tabButtons), collapse), tabBody);
+  const sideStrip = h('button', { type: 'button', class: 'side-strip', hidden: true, title: 'Open the creation panel', onclick: () => setSide(true) }, 'Create »');
+  showTab('land');
+  sideToggle.addEventListener('click', () => setSide(side.classList.contains('closed')));
   // The View panel on the right: what you're looking at, kept apart from the tools for making.
-  const viewSide = h('aside', { class: 'side view-side', 'aria-label': 'View' }, mapPanel, lookPanel, refPanel, zonesPanel, layersPanel);
+  // Each section is a drop-down: its title and what it is set to now, opened to change it.
+  const MAP_NAMES: Record<string, string> = { land: 'Land', zones: 'Climate zones', temp: 'Temperature', rain: 'Rainfall', pressure: 'Pressure & winds', currents: 'Currents & sea', air: 'Air & moisture', geo: 'Geography' };
+  const drop = (title: string, now: () => string, open: boolean, ...body: HTMLElement[]) => {
+    const value = h('span', { class: 'drop-now' }, now());
+    const el = h('details', { class: 'drop', open }, h('summary', {}, h('span', { class: 'drop-title' }, title), value), h('div', { class: 'drop-body' }, ...body));
+    return { el, refresh: () => (value.textContent = now()) };
+  };
+  const drops = [
+    drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}`, false, mapPanel),
+    drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}`, false, lookPanel, zonesPanel),
+    drop('Layers', () => LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface', false, layersPanel),
+    drop('Reference image', () => (world.reference ? 'One laid over the map' : 'None'), false, refPanel),
+  ];
+  const refreshDrops = () => drops.forEach((d) => d.refresh());
+  const viewSide = h('aside', { class: 'side view-side', 'aria-label': 'View' },
+    resources.el,
+    h('div', { class: 'drops' }, ...drops.map((d) => d.el)),
+    info.el,
+  );
+  // The summaries follow any change made in them.
+  viewSide.addEventListener('click', () => requestAnimationFrame(refreshDrops));
+  viewSide.addEventListener('change', () => requestAnimationFrame(refreshDrops));
   const viewToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true', title: 'Show or hide the View panel' }, 'View');
   // On a phone the screen is too small for both panels and the map: the View panel starts hidden.
   if (window.matchMedia?.('(max-width: 720px)').matches) {
@@ -822,7 +852,7 @@ export function showWorld(app: App, start: World): () => void {
           h('button', { type: 'button', class: 'ghost', onclick: leave }, 'Main menu'),
         ),
       ),
-      h('div', { class: 'workspace' }, side, map.el, viewSide),
+      h('div', { class: 'workspace' }, side, sideStrip, map.el, viewSide),
       dialog,
     ),
   );
