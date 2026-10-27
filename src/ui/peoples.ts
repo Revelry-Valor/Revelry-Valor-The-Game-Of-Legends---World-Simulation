@@ -61,10 +61,10 @@ export interface Peoples {
 }
 
 const SPEEDS = [
-  { value: '1', label: 'Day/s', days: 1 },
-  { value: '7', label: 'Week/s', days: 7 },
-  { value: '30', label: 'Month/s', days: 30 },
-  { value: '360', label: 'Year/s', days: 360 },
+  { value: '1', label: 'Day', days: 1 },
+  { value: '7', label: 'Week', days: 7 },
+  { value: '30', label: 'Month', days: 30 },
+  { value: '360', label: 'Year', days: 360 },
 ];
 const SQ_MI = 0.386102;
 
@@ -242,7 +242,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     { label: '+1 year', days: 360 },
     { label: '+10 years', days: 3600 },
   ].map((s) => h('button', { type: 'button', class: 'ghost small', onclick: () => skip(s.days) }, s.label));
-  const speedSeg = choice('Speed', SPEEDS.map(({ value, label }) => ({ value, label })), String(speed), (v) => {
+  const speedSeg = choice('Speed (a second)', SPEEDS.map(({ value, label }) => ({ value, label })), String(speed), (v) => {
     speed = Number(v);
   });
   const bar = h('div', { class: 'sim-bar', hidden: true }, playBtn, speedSeg, ...skipBtns, dateEl);
