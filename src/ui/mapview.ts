@@ -127,6 +127,26 @@ const GEO_LINE = { divide: '#d1347f', join: '#1f9e62' } as const;
 export function createMapView(o: MapViewOptions): MapView {
   const canvas = h('canvas', { class: 'map', 'aria-label': 'World map. Drag to paint with the selected brush.' });
   const busy = h('div', { class: 'busy small', hidden: true }, 'Drawing…');
+  // Measuring: points placed along a path (left click), stopped with a right click; the total in miles.
+  let measure: { pts: [number, number][]; placing: boolean } | null = null;
+  const measureBox = h('div', { class: 'measure-box small', hidden: true });
+  const pathKm = (pts: [number, number][]) => pts.reduce((n, p, i) => (i ? n + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0);
+  const updateMeasure = () => {
+    measureBox.hidden = !measure;
+    measureBtn.setAttribute('aria-pressed', measure ? 'true' : 'false');
+    if (!measure) return;
+    const n = measure.pts.length;
+    measureBox.replaceChildren(
+      h('strong', {}, n > 1 ? `Path: ${formatDistance(pathKm(measure.pts))}` : 'Measure a path'),
+      h('div', { class: 'muted' }, n > 1 ? `${n} points, ${n - 1} leg${n === 2 ? '' : 's'}` : 'Left-click to place points along a path.'),
+      h('div', { class: 'muted' }, measure.placing ? 'Right-click to stop placing points.' : 'Stopped. Click to measure a new path; Esc clears.'),
+    );
+  };
+  const measureBtn = h('button', { type: 'button', class: 'ghost', 'aria-pressed': 'false', title: 'Measure the distance along a path you place (right-click to stop)', onclick: () => {
+    measure = measure ? null : { pts: [], placing: true };
+    updateMeasure();
+    schedule();
+  } }, 'Measure');
   // While placing points along a course (river, lava, current, wind): finish or cancel it.
   const finishBtn = h('button', { type: 'button', class: 'primary', hidden: true, title: 'Finish this course (Enter)', onclick: () => finishRoute() }, 'Finish');
   const cancelBtn = h('button', { type: 'button', class: 'ghost', hidden: true, title: 'Cancel this course (Esc)', onclick: () => { routing = null; o.notice('Cancelled.'); schedule(); } }, 'Cancel');
@@ -201,6 +221,7 @@ export function createMapView(o: MapViewOptions): MapView {
     drawBorder(g, x0, y0, x1, y1, s.edges === 'wrap');
     drawClimateTools(g, r, x0, span, copies);
     drawRoute(g, r);
+    drawMeasure(g, r);
     drawCursor(g, r);
     drawScale(g, r);
     busy.hidden = !cache.busy;
@@ -971,6 +992,43 @@ export function createMapView(o: MapViewOptions): MapView {
     g.restore();
   }
 
+  /** The path being measured: its legs, a dot at each point with the distance so far, and (while placing) a line to the cursor. */
+  function drawMeasure(g: CanvasRenderingContext2D, r: DOMRect) {
+    if (!measure || !measure.pts.length) return;
+    const pts = measure.placing && hover ? [...measure.pts, [hover.x, hover.y] as [number, number]] : measure.pts;
+    const scr = pts.map(([x, y]) => toScreen(x, y, r));
+    g.save();
+    g.lineJoin = 'round';
+    for (const [w, c] of [[5, 'rgba(0,0,0,0.75)'], [2.5, '#ffd34d']] as const) {
+      g.strokeStyle = c;
+      g.lineWidth = w;
+      g.beginPath();
+      scr.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+      g.stroke();
+    }
+    g.font = `bold 11px ${css('--mono')}`;
+    g.textBaseline = 'bottom';
+    let km = 0;
+    scr.forEach(([x, y], i) => {
+      if (i) km += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      const ghost = measure!.placing && i === scr.length - 1 && hover;
+      g.fillStyle = ghost ? 'rgba(255,211,77,0.6)' : '#ffd34d';
+      g.strokeStyle = 'rgba(0,0,0,0.85)';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(x, y, ghost ? 3 : 4.5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      if (!i) return;
+      const label = `${Math.round(kmToMiles(km)).toLocaleString('en-US')} mi`;
+      g.lineWidth = 3;
+      g.strokeText(label, x + 7, y - 4);
+      g.fillStyle = '#fff';
+      g.fillText(label, x + 7, y - 4);
+    });
+    g.restore();
+  }
+
   function drawScale(g: CanvasRenderingContext2D, r: DOMRect) {
     const miles = kmToMiles(140 / view.scale);
     const p = 10 ** Math.floor(Math.log10(miles));
@@ -1487,6 +1545,15 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     const r = rect();
     const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
+    // Measuring: a left click places a point (starting a new path once the last was stopped); a right click stops.
+    if (measure && !spaceDown && (e.button === 0 || e.button === 2)) {
+      if (e.button === 2) measure.placing = false;
+      else if (!measure.placing) measure = { pts: [[x, y]], placing: true };
+      else measure.pts.push([x, y]);
+      updateMeasure();
+      schedule();
+      return;
+    }
     const ov = o.overlay?.();
     if (ov && e.button === 0 && !spaceDown) {
       if (ov.down?.(wrapX(x), y, 1 / view.scale)) {
@@ -1681,6 +1748,11 @@ export function createMapView(o: MapViewOptions): MapView {
       spaceDown = true;
       e.preventDefault();
     }
+    if (measure && e.key === 'Escape' && !routing) {
+      measure = { pts: [], placing: true };
+      updateMeasure();
+      schedule();
+    }
     if (routing) {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -1712,7 +1784,8 @@ export function createMapView(o: MapViewOptions): MapView {
     'div',
     { class: 'stage' },
     canvas,
-    h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
+    h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, measureBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
+    measureBox,
   );
   requestAnimationFrame(fit);
 

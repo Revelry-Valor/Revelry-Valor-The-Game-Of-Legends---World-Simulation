@@ -559,10 +559,11 @@ function daily(sim: SimState, env: Env, info: Info, lib: Library): void {
       }
       if (!moved) t.target = null;
     }
-    // Land walked through is claimed if no one holds it; and the way gets worn.
+    // Land walked through is claimed if no one holds it (a band round the tribe as it goes, not a
+    // thin line: the land its people range over); and the way gets worn.
     const c = cellOf(env, t.x, t.y);
     if (c >= 0 && t.target) sim.traffic[c] += t.pop / 200;
-    if (c >= 0 && env.land[c] && sim.owner[c] < 0) sim.owner[c] = t.clan;
+    if (c >= 0) for (const q of cellsNear(env, t.x, t.y, Math.max(ri.range * 0.8, env.step * 1.1))) if (env.land[q] && sim.owner[q] < 0) sim.owner[q] = t.clan;
   }
   // Warbands on the move.
   for (const s of [...sim.sorties]) {
@@ -712,6 +713,41 @@ function forage(sim: SimState, env: Env, left: Float32Array, cells: number[], ra
   return got;
 }
 /** A clan uses land: unclaimed land becomes its own; another clan's is taken after a year of use while its owners are away. */
+/**
+ * Tidy the claims once a year, so lands are whole and their borders clean: unclaimed land almost
+ * surrounded by one realm's (5 of its 8 neighbours) joins it, and a lone speck of a realm's land
+ * inside another's (no neighbour of its own, 6 of 8 the other's) goes to the land round it.
+ */
+function tidyLand(sim: SimState, env: Env): void {
+  const { w, h } = env;
+  const next = Int32Array.from(sim.owner);
+  const count = new Map<number, number>();
+  for (let j = 1; j < h - 1; j++) for (let i = 0; i < w; i++) {
+    const k = j * w + i;
+    if (!env.land[k]) continue;
+    if (!env.wrapKm && (i === 0 || i === w - 1)) continue;
+    count.clear();
+    let own = 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      const m = (j + dj) * w + ((i + di + w) % w);
+      const o = env.land[m] ? sim.owner[m] : -1;
+      if (o === sim.owner[k]) own++;
+      if (o >= 0) count.set(o, (count.get(o) ?? 0) + 1);
+    }
+    let best = -1;
+    let n = 0;
+    for (const [o, c] of count) if (c > n) [best, n] = [o, c];
+    if (sim.owner[k] < 0 && n >= 5) next[k] = best;
+    else if (sim.owner[k] >= 0 && own === 0 && best !== sim.owner[k] && n >= 6) {
+      next[k] = best;
+      sim.rival[k] = -1;
+      sim.rivalUse[k] = 0;
+    }
+  }
+  sim.owner.set(next);
+}
+
 function useLand(sim: SimState, env: Env, cells: number[], clan: number, near: number): void {
   for (const c of cells) {
     if (!env.land[c]) continue;
@@ -976,6 +1012,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   cultureYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
   cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
+  // Clean claims: holes filled, stray specks absorbed.
+  tidyLand(sim, env);
   // Realms: capitals, governments, rulers, reach, culture pressed on their places (nations.ts).
   const nc = { ...rulerContext(sim, lib), env, lib, dist: (ax: number, ay: number, bx: number, by: number) => dist(env, ax, ay, bx, by), cellAt: (x: number, y: number) => cellOf(env, x, y), log: (text: string, x?: number, y?: number) => log(sim, text, x, y) };
   const { royalRoads } = nationsYear(nc);

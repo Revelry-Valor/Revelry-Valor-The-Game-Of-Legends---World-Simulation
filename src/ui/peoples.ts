@@ -261,6 +261,49 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let landDirty = true;
   let beastDirty = true;
   let landImg: HTMLCanvasElement | null = null;
+  /** Border lines (km): every edge between land held by different realms (or by one and no one), and each realm's own edges, set in a little from the line. */
+  let borders: { all: number[]; byClan: Map<number, number[]> } | null = null;
+  const borderLines = () => {
+    const s = sim!;
+    const e = env!;
+    const all: number[] = [];
+    const byClan = new Map<number, number[]>();
+    const half = e.step / 2;
+    const inset = e.step * 0.18;
+    const push = (clan: number, seg: number[]) => {
+      if (clan < 0) return;
+      const l = byClan.get(clan) ?? [];
+      l.push(...seg);
+      byClan.set(clan, l);
+    };
+    for (let j = 0; j < e.h; j++) for (let i = 0; i < e.w; i++) {
+      const k = j * e.w + i;
+      const a = e.land[k] ? s.owner[k] : -1;
+      const x = e.x0 + i * e.step;
+      const y = e.y0 + j * e.step;
+      // East edge.
+      if (i + 1 < e.w || e.wrapKm) {
+        const m = j * e.w + ((i + 1) % e.w);
+        const b = e.land[m] ? s.owner[m] : -1;
+        if (a !== b && (a >= 0 || b >= 0)) {
+          all.push(x + half, y - half, x + half, y + half);
+          push(a, [x + half - inset, y - half, x + half - inset, y + half]);
+          push(b, [x + half + inset, y - half, x + half + inset, y + half]);
+        }
+      }
+      // South edge.
+      if (j + 1 < e.h) {
+        const m = (j + 1) * e.w + i;
+        const b = e.land[m] ? s.owner[m] : -1;
+        if (a !== b && (a >= 0 || b >= 0)) {
+          all.push(x - half, y + half, x + half, y + half);
+          push(a, [x - half, y + half - inset, x + half, y + half - inset]);
+          push(b, [x - half, y + half + inset, x + half, y + half + inset]);
+        }
+      }
+    }
+    return { all, byClan };
+  };
   let beastImg: HTMLCanvasElement | null = null;
   const hex = (c: string) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
   const fieldImage = (paint: (data: Uint8ClampedArray) => void): HTMLCanvasElement => {
@@ -319,7 +362,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         }
         // Land being taken over: lighter.
         const contested = s.rival[k] >= 0 && s.rivalUse[k] > 0;
-        data.set([c[0], c[1], c[2], edge ? 225 : contested ? 70 : 130], k * 4);
+        data.set([c[0], c[1], c[2], contested ? 70 : edge ? 140 : 120], k * 4);
       }
     });
   };
@@ -359,9 +402,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const s = sim!;
       const e = env!;
       pxKm = 1 / scale;
-      const blit = (img: HTMLCanvasElement) => {
+      const blit = (img: HTMLCanvasElement, smooth = true) => {
         g.save();
-        g.imageSmoothingEnabled = true;
+        g.imageSmoothingEnabled = smooth;
         for (const c of copies) {
           const [sx, sy] = at(e.x0 - e.step / 2, e.y0 - e.step / 2, c);
           g.drawImage(img, sx, sy, e.w * e.step * scale, e.h * e.step * scale);
@@ -379,9 +422,43 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         blit(beastImg);
       }
       if (showLand && s.clans.length) {
-        if (landDirty || !landImg) landImg = drawLand();
+        if (landDirty || !landImg) {
+          landImg = drawLand();
+          borders = borderLines();
+        }
         landDirty = false;
-        blit(landImg);
+        blit(landImg, false);
+        // Borders: hard lines along the edges of each realm's land (dark, with the realm's colour inside).
+        if (borders) {
+          const w = Math.max(1.6, Math.min(3, e.step * scale * 0.35));
+          g.save();
+          g.lineCap = 'square';
+          for (const c of copies) {
+            g.strokeStyle = 'rgba(20,16,12,0.9)';
+            g.lineWidth = w + 1.4;
+            g.beginPath();
+            for (let i = 0; i < borders.all.length; i += 4) {
+              const [ax, ay] = at(borders.all[i], borders.all[i + 1], c);
+              const [bx, by] = at(borders.all[i + 2], borders.all[i + 3], c);
+              g.moveTo(ax, ay);
+              g.lineTo(bx, by);
+            }
+            g.stroke();
+            for (const [clan, segs] of borders.byClan) {
+              g.strokeStyle = clanOf(clan)?.colour ?? '#888';
+              g.lineWidth = Math.max(0.8, w * 0.45);
+              g.beginPath();
+              for (let i = 0; i < segs.length; i += 4) {
+                const [ax, ay] = at(segs[i], segs[i + 1], c);
+                const [bx, by] = at(segs[i + 2], segs[i + 3], c);
+                g.moveTo(ax, ay);
+                g.lineTo(bx, by);
+              }
+              g.stroke();
+            }
+          }
+          g.restore();
+        }
       }
       g.save();
       // Where the selected tribe is heading, and its two grounds.

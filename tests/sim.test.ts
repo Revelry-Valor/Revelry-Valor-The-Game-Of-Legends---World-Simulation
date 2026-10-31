@@ -1365,3 +1365,20 @@ describe('sieges, occupation and conquest', () => {
     expect(sim.clans.find((q) => q.id === b.clan)!.realm!.ruler.house).toBe(house);
   });
 });
+
+describe('claiming land', () => {
+  it('claims a band of land round a tribe as it walks, not a thin line', () => {
+    const sim = newSim(env, 801);
+    const t = addTribe(sim, env, lib, humanId(), 6000, yAt(-12), -1, 200)!;
+    for (const q of sim.owner.keys()) sim.owner[q] = -1;
+    const start = { x: t.x, y: t.y };
+    t.summer = t.winter = { x: t.x + 400, y: t.y };
+    t.target = { x: t.x + 400, y: t.y };
+    stepDays(sim, env, lib, 20);
+    const walked = Math.hypot(t.x - start.x, t.y - start.y);
+    expect(walked).toBeGreaterThan(150);
+    const owned = [...sim.owner].filter((o) => o === t.clan).length;
+    // A line would be about one point per step of the grid; a band is several points wide.
+    expect(owned).toBeGreaterThan((walked / env.step) * 2.5);
+  });
+});

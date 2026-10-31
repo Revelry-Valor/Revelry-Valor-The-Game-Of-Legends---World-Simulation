@@ -414,3 +414,6 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .info-list { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.6rem; margin: 0; font-size: 0.8rem; }
 .info-list dt { color: var(--muted, #777); font-weight: 600; white-space: nowrap; }
 .info-list dd { margin: 0; overflow-wrap: anywhere; }
+.stage-controls button[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.measure-box { position: absolute; top: 56px; right: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.4rem 0.6rem; box-shadow: 0 2px 8px rgba(0,0,0,0.2); max-width: 260px; }
+.measure-box[hidden] { display: none; }
