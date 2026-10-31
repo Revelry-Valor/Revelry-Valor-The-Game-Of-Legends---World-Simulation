@@ -364,7 +364,7 @@ function settleRange(ri: RaceInfo, st: Settlement): number {
   return ri.range * (st.kind === 'dawn' ? 2.2 : 1.5);
 }
 function claimAround(sim: SimState, env: Env, x: number, y: number, r: number, clan: number): void {
-  for (const c of cellsNear(env, x, y, r)) if (env.land[c] && sim.owner[c] < 0) sim.owner[c] = clan;
+  for (const c of cellsNear(env, x, y, r)) if (env.land[c] && sim.owner[c] < 0 && !beyondBarrier(env, x, y, c)) sim.owner[c] = clan;
 }
 
 /** Move a tribe (while setting up): it moves its grounds with it. */
@@ -563,7 +563,7 @@ function daily(sim: SimState, env: Env, info: Info, lib: Library): void {
     // thin line: the land its people range over); and the way gets worn.
     const c = cellOf(env, t.x, t.y);
     if (c >= 0 && t.target) sim.traffic[c] += t.pop / 200;
-    if (c >= 0) for (const q of cellsNear(env, t.x, t.y, Math.max(ri.range * 0.8, env.step * 1.1))) if (env.land[q] && sim.owner[q] < 0) sim.owner[q] = t.clan;
+    if (c >= 0) for (const q of cellsNear(env, t.x, t.y, Math.max(ri.range * 0.8, env.step * 1.1))) if (env.land[q] && sim.owner[q] < 0 && !beyondBarrier(env, t.x, t.y, q)) sim.owner[q] = t.clan;
   }
   // Warbands on the move.
   for (const s of [...sim.sorties]) {
@@ -714,6 +714,27 @@ function forage(sim: SimState, env: Env, left: Float32Array, cells: number[], ra
 }
 /** A clan uses land: unclaimed land becomes its own; another clan's is taken after a year of use while its owners are away. */
 /**
+ * Natural borders: is this point on the far side of a river or a high mountain range from (x, y)?
+ * Peoples ranging round them claim up to such a barrier; the land beyond is claimed by going there
+ * (or taken by use or war), so borders come to follow rivers and ridges.
+ */
+function beyondBarrier(env: Env, x: number, y: number, k: number): boolean {
+  const tx = xOf(env, k);
+  const ty = yOf(env, k);
+  let dx = tx - x;
+  if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
+  const dy = ty - y;
+  const n = Math.ceil(Math.hypot(dx, dy) / (env.step * 0.5));
+  const start = cellOf(env, x, y);
+  for (let i = 1; i < n; i++) {
+    const c = cellOf(env, x + (dx * i) / n, y + (dy * i) / n);
+    if (c < 0 || c === start || c === k) continue;
+    if (env.fresh[c] || env.mzone[c] >= 3) return true;
+  }
+  return false;
+}
+
+/**
  * Tidy the claims once a year, so lands are whole and their borders clean: unclaimed land almost
  * surrounded by one realm's (5 of its 8 neighbours) joins it, and a lone speck of a realm's land
  * inside another's (no neighbour of its own, 6 of 8 the other's) goes to the land round it.
@@ -748,11 +769,13 @@ function tidyLand(sim: SimState, env: Env): void {
   sim.owner.set(next);
 }
 
-function useLand(sim: SimState, env: Env, cells: number[], clan: number, near: number): void {
+function useLand(sim: SimState, env: Env, cells: number[], clan: number, near: number, from?: { x: number; y: number }): void {
   for (const c of cells) {
     if (!env.land[c]) continue;
     const o = sim.owner[c];
-    if (o < 0) sim.owner[c] = clan;
+    if (o < 0) {
+      if (!from || !beyondBarrier(env, from.x, from.y, c)) sim.owner[c] = clan;
+    }
     else if (o === clan) sim.rivalUse[c] = Math.max(0, sim.rivalUse[c] - 1);
     else {
       if (sim.rival[c] === clan) sim.rivalUse[c] += 1;
@@ -819,7 +842,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     t.warband = Math.max(t.away, Math.round(t.pop * ri.warShare));
     // Claims: the land it uses (forages, hunts, ranges over) is its clan's; another clan's land is
     // taken by using it long enough.
-    useLand(sim, env, cellsNear(env, t.x, t.y, ri.range * 1.6), t.clan, ri.range * 2.5);
+    useLand(sim, env, cellsNear(env, t.x, t.y, ri.range * 1.6), t.clan, ri.range * 2.5, t);
     // Fights over land and food: a warband goes out, and comes back.
     const home = t.warband - t.away;
     if (home >= 8 && !sim.sorties.some((s) => s.tribe === t.id)) {
@@ -882,7 +905,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * scfx.famine) / 12 : 0);
     st.pop = Math.max(0, st.pop + st.pop * (births - deaths));
     st.warband = Math.round(st.pop * ri.warShare * 0.6);
-    useLand(sim, env, cells, st.clan, R * 1.5);
+    useLand(sim, env, cells, st.clan, R * 1.5, st);
     if (st.pop < 25) {
       st.ruined = true;
       // What only its people knew is gone with them.

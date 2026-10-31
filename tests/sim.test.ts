@@ -9,6 +9,7 @@ import { buildEnv, type Env } from '../src/sim/env';
 import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
 import { DAYS_PER_YEAR, dateText, type Clan, type Hero, type Settlement, type SimState } from '../src/sim/state';
 import { fight, total, type Ground, type Side } from '../src/sim/battle';
+import { borderMap } from '../src/ui/borders';
 import { ensureRealm, nationsYear, type NationContext } from '../src/sim/nations';
 import { hasPact, noteAttack, politicsYear, relationOf, spiesDay, type PoliticsContext } from '../src/sim/politics';
 import { waysYear } from '../src/sim/ways';
@@ -1380,5 +1381,57 @@ describe('claiming land', () => {
     const owned = [...sim.owner].filter((o) => o === t.clan).length;
     // A line would be about one point per step of the grid; a band is several points wide.
     expect(owned).toBeGreaterThan((walked / env.step) * 2.5);
+  });
+});
+
+describe('natural borders', () => {
+  it('claims up to a river, not over it, when ranging round', () => {
+    const sim = newSim(env, 803);
+    const t = addTribe(sim, env, lib, humanId(), 6000, yAt(-12), -1, 200)!;
+    for (const q of sim.owner.keys()) sim.owner[q] = -1;
+    // A river running north–south a little east of the tribe.
+    const river: number[] = [];
+    for (let k = 0; k < env.n; k++) {
+      const x = env.x0 + (k % env.w) * env.step;
+      const y = env.y0 + ((k / env.w) | 0) * env.step;
+      if (Math.abs(x - (t.x + env.step * 1.5)) < env.step / 2 && Math.abs(y - t.y) < 300 && !env.fresh[k]) river.push(k);
+    }
+    for (const k of river) env.fresh[k] = 1;
+    try {
+      t.summer = t.winter = { x: t.x, y: t.y };
+      t.target = null;
+      stepDays(sim, env, lib, 45);
+      let near = 0;
+      let beyond = 0;
+      for (let k = 0; k < env.n; k++) {
+        if (sim.owner[k] !== t.clan) continue;
+        const x = env.x0 + (k % env.w) * env.step;
+        if (x < t.x + env.step) near++;
+        if (x > t.x + env.step * 2.2) beyond++;
+      }
+      expect(near).toBeGreaterThan(3);
+      expect(beyond).toBe(0);
+    } finally {
+      for (const k of river) env.fresh[k] = 0;
+    }
+  });
+
+  it('traces one shared border between two realms, and closed outlines for each', () => {
+    const w = 12;
+    const hh = 8;
+    const land = new Uint8Array(w * hh).fill(1);
+    // A sea strip along the bottom.
+    for (let i = 0; i < w; i++) land[(hh - 1) * w + i] = 0;
+    const owner = new Int32Array(w * hh).map((_, k) => (land[k] ? (k % w < 6 ? 0 : 1) : -1));
+    const bm = borderMap({ w, h: hh, wrap: false, land, owner, occupied: new Set(), F: 2, fineLand: null });
+    const shared = bm.chains.filter((c) => (c.left === 0 && c.right === 1) || (c.left === 1 && c.right === 0));
+    expect(shared.length).toBe(1);
+    expect(bm.chains.some((c) => c.left === -2 || c.right === -2)).toBe(true);
+    for (const who of [0, 1]) {
+      const rings = bm.rings.get(who)!;
+      expect(rings.length).toBe(1);
+      const r = rings[0];
+      expect(Math.hypot(r[0] - r[r.length - 2], r[1] - r[r.length - 1])).toBeLessThan(1e-6);
+    }
   });
 });

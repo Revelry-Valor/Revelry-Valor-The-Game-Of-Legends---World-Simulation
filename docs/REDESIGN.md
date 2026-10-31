@@ -1093,6 +1093,8 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 **God mode:** directly set opinions, force treaties and marriages, and start or end wars.
 
 ### 8.6 Territory
+- **Borders (decided, drawn like Crusader Kings 3):** no fill. A solid black line along every border, the coast included (following the painted coastline); just inside it a strip of the realm's colour, one on each side where two realms meet; a selected realm's strip widens and its land is lightly washed so it stands out. Land taken in a war is outlined with a dashed black line with a red strip inside it. Disputed land (being taken by another realm's use) is hatched in the taker's colour. Wandering clans and settled realms both have hard borders.
+- **Borders follow natural features:** peoples ranging round them claim up to a river or a high mountain range, not over it; land beyond is claimed by going there, by use over time, or by war (the AI crossing on purpose). Walking tribes claim a band of land round them; each year small unclaimed holes inside a realm join it and lone specks go to the land round them. Claims do not fade.
 - Claimed by moving through land (see 8.4). Territory and settlements will get much more work.
 - **Rivers** can be claimed and lie inside territories and nations like any land. Fighting commonly ends at rivers because fortresses, or an army holding the far bank, stop the advance there.
 - Land regions to be designed later.

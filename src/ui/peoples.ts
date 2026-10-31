@@ -22,7 +22,8 @@ import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
 import type { MapOverlay } from './mapview';
-import { naturalLands } from './borders';
+import { borderMap, holder, isOcc, OUTSIDE } from './borders';
+import { evaluate } from '../core/terrain';
 import type { InfoItem, ResourceView } from './info';
 
 /**
@@ -265,9 +266,12 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let beastDirty = true;
   let landImg: HTMLCanvasElement | null = null;
   /** Border lines (km): polylines along the natural edges of the realms' lands; and when the land was last drawn. */
-  let borders: number[][] | null = null;
-  let landShapes: { fill: string; rings: number[][] }[] = [];
+  let borderChains: { pts: number[]; left: number; right: number }[] = [];
+  let borderRings = new Map<number, number[][]>();
+  /** The painted land on the borders' fine grid (kept until the painting or the grid changes). */
+  let fineLandCache: { surface: unknown; W: number; H: number; land: Uint8Array } | null = null;
   let landBuilt = 0;
+  let landColours = new Map<number, number[]>();
   let beastImg: HTMLCanvasElement | null = null;
   const hex = (c: string) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
   const fieldImage = (paint: (data: Uint8ClampedArray) => void): HTMLCanvasElement => {
@@ -307,43 +311,49 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         if (s.owner[k] === st.clan) occupiedBy.set(k, st.occupied.by);
       }
     }
-    // Natural borders: the claims smoothed and gently meandering, on a finer grid (borders.ts).
-    const nat = naturalLands({ w: e.w, h: e.h, wrap: !!e.wrapKm, land: e.land, owner: s.owner, seed: s.seed }, e.w * e.h > 120000 ? 2 : e.w * e.h > 40000 ? 3 : 4);
-    const cv = h('canvas', { width: nat.W, height: nat.H }) as HTMLCanvasElement;
+    // Borders (borders.ts): the claims on a finer grid, the coast from the painting itself.
+    const F = e.w * e.h > 120000 ? 2 : e.w * e.h > 40000 ? 3 : 4;
+    const W = e.w * F;
+    const H = e.h * F;
+    const surface = d.surface();
+    if (!fineLandCache || fineLandCache.surface !== surface || fineLandCache.W !== W || fineLandCache.H !== H) {
+      const wsets = d.world().settings;
+      const px = e.step / F;
+      const f = evaluate(surface, { x0: e.x0 - e.step / 2 + px / 2, y0: e.y0 - e.step / 2 + px / 2, px, w: W, h: H }, { seed: wsets.seed, wrapKm: e.wrapKm, noRelief: true });
+      const land = new Uint8Array(W * H);
+      for (let q = 0; q < land.length; q++) land[q] = f.ground[q] >= 1.5 ? 1 : 0;
+      fineLandCache = { surface, W, H, land };
+    }
+    const bm = borderMap({ w: e.w, h: e.h, wrap: !!e.wrapKm, land: e.land, owner: s.owner, occupied: new Set(occupiedBy.keys()), F, fineLand: fineLandCache.land });
+    // Disputed land (being taken by another's use): hatched in the taker's colour.
+    const cv = h('canvas', { width: bm.W, height: bm.H }) as HTMLCanvasElement;
     const g = cv.getContext('2d')!;
-    const img = g.createImageData(nat.W, nat.H);
+    const img = g.createImageData(bm.W, bm.H);
     const data = img.data;
-    const stripe = Math.max(3, nat.F * 2);
-    for (let q = 0; q < nat.label.length; q++) {
-      const o = nat.label[q];
+    const stripe = Math.max(2, F);
+    for (let q = 0; q < bm.label.length; q++) {
+      const o = holder(bm.label[q]);
       if (o < 0) continue;
-      const k = nat.cell[q];
-      const X = q % nat.W;
-      const Y = (q / nat.W) | 0;
-      // Held by an enemy: striped in the occupier's colour.
-      const occ = occupiedBy.get(k);
-      if (occ !== undefined && s.owner[k] === o && (X + Y) % (stripe * 2) < stripe) {
-        const oc = hex(clanOf(occ)?.colour ?? '#000000');
-        data.set([oc[0], oc[1], oc[2], 200], q * 4);
-        continue;
-      }
-      // Land being taken over: a pale wash over its colour.
-      if (s.owner[k] === o && s.rival[k] >= 0 && s.rivalUse[k] > 0) data.set([255, 250, 235, 70], q * 4);
+      const k = bm.cell[q];
+      if (s.owner[k] !== o || s.rival[k] < 0 || s.rivalUse[k] <= 0) continue;
+      const X = q % bm.W;
+      const Y = (q / bm.W) | 0;
+      if ((X + Y) % (stripe * 2) >= stripe) continue;
+      const rc = hex(clanOf(s.rival[k])?.colour ?? '#888888');
+      data.set([rc[0], rc[1], rc[2], 150], q * 4);
     }
     g.putImageData(img, 0, 0);
-    // The border lines, in km.
-    const fx = e.step / nat.F;
+    // Lines and rings in km.
+    const fx = e.step / F;
     const ox = e.x0 - e.step / 2;
     const oy = e.y0 - e.step / 2;
     const toKm = (l: number[]) => l.map((v, i) => (i % 2 ? oy + v * fx : ox + v * fx));
-    borders = nat.lines.map(toKm);
-    // Each realm's land as smooth shapes, filled in its colour.
-    landShapes = [...nat.rings].map(([o, rings]) => {
-      const c = colours.get(o) ?? [128, 128, 128];
-      return { fill: `rgba(${c[0]},${c[1]},${c[2]},0.5)`, rings: rings.map(toKm) };
-    });
+    borderChains = bm.chains.map((c) => ({ pts: toKm(c.pts), left: c.left, right: c.right }));
+    borderRings = new Map([...bm.rings].map(([who, rings]) => [who, rings.map(toKm)]));
+    landColours = colours;
     return cv;
   };
+
   const drawBeast = (id: string) => {
     const D = sim!.beasts[id];
     const e = env!;
@@ -407,47 +417,60 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           landBuilt = now;
           landDirty = false;
         }
-        // The realms' lands: smooth shapes (holes cut out), then occupation stripes and contested land over them.
-        g.save();
-        for (const c of copies) for (const sh of landShapes) {
-          g.beginPath();
-          for (const l of sh.rings) {
-            for (let i = 0; i < l.length; i += 2) {
-              const [x, y] = at(l[i], l[i + 1], c);
-              if (i) g.lineTo(x, y);
-              else g.moveTo(x, y);
-            }
-            g.closePath();
+        blit(landImg, false);
+        // Crusader Kings borders: no fill; a strip of each realm's colour just inside its border
+        // (clipped to its own land, so it never crosses the line), then a solid black line on every
+        // border, dashed where land has been taken in a war (whose strip is red).
+        const selRealm = selectedRealm ?? s.settlements.find((q) => q.id === selected)?.clan ?? s.tribes.find((t) => t.id === selected)?.clan ?? -1;
+        const strip = Math.max(2.5, Math.min(5, e.step * scale * 0.5));
+        const trace = (l: number[], c: number) => {
+          for (let i = 0; i < l.length; i += 2) {
+            const [x, y] = at(l[i], l[i + 1], c);
+            if (i) g.lineTo(x, y);
+            else g.moveTo(x, y);
           }
-          g.fillStyle = sh.fill;
-          g.fill('evenodd');
+        };
+        g.save();
+        g.lineJoin = 'round';
+        g.lineCap = 'round';
+        for (const c of copies) {
+          for (const [who, rings] of borderRings) {
+            const o = holder(who);
+            const chosen = o === selRealm;
+            const rgb = isOcc(who) ? [205, 30, 30] : landColours.get(o) ?? [128, 128, 128];
+            g.save();
+            g.beginPath();
+            for (const r of rings) {
+              trace(r, c);
+              g.closePath();
+            }
+            g.clip('evenodd');
+            // A soft wash over the chosen realm, so it stands out.
+            if (chosen) {
+              g.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.18)`;
+              g.fill('evenodd');
+            }
+            g.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${chosen ? 1 : 0.85})`;
+            g.lineWidth = (chosen ? strip * 2.2 : strip) * 2;
+            g.stroke();
+            g.restore();
+          }
+          // The black lines (not along the map's own edge).
+          for (const dashed of [false, true]) {
+            g.beginPath();
+            for (const ch of borderChains) {
+              if (ch.left === OUTSIDE || ch.right === OUTSIDE) continue;
+              const taken = holder(ch.left) >= 0 && holder(ch.left) === holder(ch.right);
+              if (taken !== dashed) continue;
+              trace(ch.pts, c);
+            }
+            g.setLineDash(dashed ? [6, 4] : []);
+            g.strokeStyle = 'rgba(10,8,6,0.95)';
+            g.lineWidth = 1.6;
+            g.stroke();
+          }
         }
         g.restore();
-        blit(landImg, true);
-        // Borders: hard dark lines, following the land's natural shapes.
-        if (borders) {
-          const w = Math.max(1.6, Math.min(3, e.step * scale * 0.3));
-          g.save();
-          g.lineJoin = 'round';
-          g.lineCap = 'round';
-          for (const c of copies) {
-            g.beginPath();
-            for (const l of borders) {
-              for (let i = 0; i < l.length; i += 2) {
-                const [x, y] = at(l[i], l[i + 1], c);
-                if (i) g.lineTo(x, y);
-                else g.moveTo(x, y);
-              }
-            }
-            g.strokeStyle = 'rgba(20,16,12,0.9)';
-            g.lineWidth = w;
-            g.stroke();
-            g.strokeStyle = 'rgba(255,248,232,0.35)';
-            g.lineWidth = Math.max(0.6, w * 0.3);
-            g.stroke();
-          }
-          g.restore();
-        }
       }
       g.save();
       // Where the selected tribe is heading, and its two grounds.

@@ -1,134 +1,99 @@
 /**
- * Natural borders for the realms' lands (drawn, not simulated: the claims themselves stay on the
- * simulation's grid).
+ * Borders for the realms' lands, drawn the way Crusader Kings draws them (the claims themselves
+ * stay on the simulation's grid): a solid black line along every border, a strip of the realm's
+ * colour just inside it (one on each side where two realms meet), the coast as a border too, and
+ * no fill. Land taken in a war is its own region, outlined with a dashed line and a red strip.
  *
- * Each realm's claim is blurred into a smooth field, the fields are sampled on a finer grid at
- * places nudged by gentle low-frequency noise (so edges wander the way real borders do, rather
- * than running along the grid), and each fine point goes to the realm whose field is strongest
- * there. The border lines between them are traced and smoothed into curves.
+ * The claims are sampled on a finer grid (each fine point to the claim strongest round it, the
+ * land and sea from the painted coast itself), the edges between different holders are traced
+ * into chains running junction to junction, and each chain is smoothed once, so both sides of a
+ * border, and its line, use the very same curve.
  */
 
-export interface LandInput {
+export interface BorderInput {
   w: number;
   h: number;
   wrap: boolean;
+  /** The grid's land, and who claims each grid point (−1 none). */
   land: Uint8Array;
   owner: Int32Array;
-  seed: number;
+  /** Grid points held by an enemy in a war (their land shown as taken). */
+  occupied: Set<number>;
+  /** Fine points per grid point along each side, and the painted land at each fine point (null: from the grid). */
+  F: number;
+  fineLand: Uint8Array | null;
 }
 
-export interface NaturalLands {
-  /** Fine points per grid point along each side. */
+export interface Chain {
+  /** Points [x, y, x, y…] in fine units (the wrap seam unrolled). */
+  pts: number[];
+  /** Who is on each side (left as the chain runs). */
+  left: number;
+  right: number;
+}
+
+export interface BorderMap {
   F: number;
   W: number;
   H: number;
-  /** Who holds each fine point: a realm (clan id), −1 unclaimed land, −2 sea. */
   label: Int32Array;
-  /** The cell each fine point lies in (for things kept per cell: occupation, contested land). */
+  /** The grid point each fine point lies in. */
   cell: Int32Array;
-  /** Border lines, as polylines of [x, y] in fine units (0 … W, 0 … H); between realms, and a realm and unclaimed land (not the coast). */
-  lines: number[][];
-  /** Each realm's land as closed smooth rings (fine units), to fill with the even-odd rule (holes are rings too). */
+  chains: Chain[];
+  /** Each holder's land as closed rings (fine units), for clipping its colour strip inside the border. */
   rings: Map<number, number[][]>;
 }
 
-const SEA = -2;
+export const UNCLAIMED = -1;
+export const SEA = -2;
+export const OUTSIDE = -3;
+/** Land of realm `o` held by an enemy in a war. */
+export const occ = (o: number) => -1000 - o;
+export const isOcc = (l: number) => l <= -1000;
+/** Whose land a label is (a realm, or a realm's land held by an enemy), or −1. */
+export const holder = (l: number) => (l >= 0 ? l : l <= -1000 ? -1000 - l : -1);
 
-function hash(seed: number, x: number, y: number): number {
-  let t = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 2147483647)) | 0;
-  t = Math.imul(t ^ (t >>> 13), 1274126177);
-  return (((t ^ (t >>> 16)) >>> 0) / 4294967296) * 2 - 1;
-}
-/** Smooth value noise in −1 … 1, period-free, at a given scale (grid points per wave). */
-function noise(seed: number, x: number, y: number, scale: number): number {
-  const u = x / scale;
-  const v = y / scale;
-  const i = Math.floor(u);
-  const j = Math.floor(v);
-  const fu = u - i;
-  const fv = v - j;
-  const s = (t: number) => t * t * (3 - 2 * t);
-  const a = hash(seed, i, j);
-  const b = hash(seed, i + 1, j);
-  const c = hash(seed, i, j + 1);
-  const d = hash(seed, i + 1, j + 1);
-  const su = s(fu);
-  return a + (b - a) * su + (c - a + (d - c - b + a) * su) * s(fv);
-}
-
-export function naturalLands(inp: LandInput, fine = 4): NaturalLands {
-  const { w, h, wrap, land, owner, seed } = inp;
-  const F = Math.max(2, Math.min(4, fine));
+export function borderMap(inp: BorderInput): BorderMap {
+  const { w, h, wrap, land, owner, occupied, F, fineLand } = inp;
   const W = w * F;
   const H = h * F;
   const col = (i: number) => (wrap ? ((i % w) + w) % w : Math.max(0, Math.min(w - 1, i)));
-  const rowOk = (j: number) => Math.max(0, Math.min(h - 1, j));
-  // Each cell's blurred claims: up to 9 (label, weight) pairs from its 3×3 neighbourhood (sea not counted), in flat arrays.
-  const K = [1, 2, 1, 2, 4, 2, 1, 2, 1];
+  const row = (j: number) => Math.max(0, Math.min(h - 1, j));
+  const lab = (k: number) => (owner[k] >= 0 && occupied.has(k) ? occ(owner[k]) : owner[k]);
+  // Each grid point's claims, blurred over its 3×3 neighbours (sea not counted).
+  const KW = [1, 2, 1, 2, 4, 2, 1, 2, 1];
   const CL = new Int32Array(w * h * 9);
   const CV = new Float32Array(w * h * 9);
   const CN = new Uint8Array(w * h);
+  const uni = new Int32Array(w * h).fill(-99);
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    const base = (j * w + i) * 9;
+    const k = j * w + i;
+    const base = k * 9;
     let cnt = 0;
     let n = 0;
+    let same = !!land[k];
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      const m = rowOk(j + dj) * w + col(i + di);
-      if (!land[m]) continue;
-      const lab = owner[m];
-      const wt = K[(dj + 1) * 3 + (di + 1)];
+      const m = row(j + dj) * w + col(i + di);
+      if (!land[m]) {
+        same = false;
+        continue;
+      }
+      const l = lab(m);
+      if (l !== lab(k)) same = false;
+      const wt = KW[(dj + 1) * 3 + (di + 1)];
       n += wt;
       let q = 0;
-      while (q < cnt && CL[base + q] !== lab) q++;
+      while (q < cnt && CL[base + q] !== l) q++;
       if (q < cnt) CV[base + q] += wt;
       else {
-        CL[base + cnt] = lab;
+        CL[base + cnt] = l;
         CV[base + cnt] = wt;
         cnt++;
       }
     }
     for (let q = 0; q < cnt; q++) CV[base + q] /= n || 1;
-    CN[j * w + i] = cnt;
-  }
-  // The noise that nudges where claims are sampled, worked out at each grid corner and blended between.
-  const NW = w + 2;
-  const NH = h + 2;
-  const DX = new Float32Array(NW * NH);
-  const DY = new Float32Array(NW * NH);
-  for (let j = 0; j < NH; j++) for (let i = 0; i < NW; i++) {
-    const u = i - 1;
-    const v = j - 1;
-    DX[j * NW + i] = 0.55 * noise(seed, u, v, 3.2) + 0.25 * noise(seed + 17, u, v, 1.3);
-    DY[j * NW + i] = 0.55 * noise(seed + 31, u, v, 3.2) + 0.25 * noise(seed + 47, u, v, 1.3);
-  }
-  const lerp2 = (A: Float32Array, u: number, v: number) => {
-    const i = Math.max(0, Math.min(NW - 2, Math.floor(u) + 1));
-    const j = Math.max(0, Math.min(NH - 2, Math.floor(v) + 1));
-    const fu = u + 1 - i;
-    const fv = v + 1 - j;
-    const a = A[j * NW + i];
-    const b = A[j * NW + i + 1];
-    const c = A[(j + 1) * NW + i];
-    const d = A[(j + 1) * NW + i + 1];
-    return a + (b - a) * fu + (c - a + (d - c - b + a) * fu) * fv;
-  };
-  // Cells deep inside one holding (all land, the same holder within two cells every way): nothing
-  // there can wander, so their fine points need no sampling.
-  const NONE = -9;
-  const uni = new Int32Array(w * h).fill(NONE);
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    const k = j * w + i;
-    if (!land[k]) continue;
-    const o = owner[k];
-    let same = true;
-    for (let dj = -2; dj <= 2 && same; dj++) for (let di = -2; di <= 2; di++) {
-      const m = rowOk(j + dj) * w + col(i + di);
-      if (!land[m] || owner[m] !== o) {
-        same = false;
-        break;
-      }
-    }
-    if (same) uni[k] = o;
+    CN[k] = cnt;
+    if (same) uni[k] = lab(k);
   }
   const label = new Int32Array(W * H);
   const cell = new Int32Array(W * H);
@@ -137,160 +102,211 @@ export function naturalLands(inp: LandInput, fine = 4): NaturalLands {
   let accN = 0;
   const addCell = (ii: number, jj: number, wt: number) => {
     if (wt <= 0) return;
-    const c = rowOk(jj) * w + col(ii);
-    const base = c * 9;
+    const c = row(jj) * w + col(ii);
     for (let q = 0; q < CN[c]; q++) {
-      const lab = CL[base + q];
+      const l = CL[c * 9 + q];
       let r = 0;
-      while (r < accN && accL[r] !== lab) r++;
-      if (r < accN) accV[r] += CV[base + q] * wt;
+      while (r < accN && accL[r] !== l) r++;
+      if (r < accN) accV[r] += CV[c * 9 + q] * wt;
       else {
-        accL[accN] = lab;
-        accV[accN] = CV[base + q] * wt;
+        accL[accN] = l;
+        accV[accN] = CV[c * 9 + q] * wt;
         accN++;
       }
     }
   };
-  const L = (ii: number, jj: number) => land[rowOk(jj) * w + col(ii)];
   for (let Y = 0; Y < H; Y++) for (let X = 0; X < W; X++) {
-    // In cell units, cell centres at whole numbers.
-    const u0 = (X + 0.5) / F - 0.5;
-    const v0 = (Y + 0.5) / F - 0.5;
     const q0 = Y * W + X;
-    const c0 = rowOk(Math.round(v0)) * w + col(Math.round(u0));
+    const u = (X + 0.5) / F - 0.5;
+    const v = (Y + 0.5) / F - 0.5;
+    const ci = col(Math.round(u));
+    const cj = row(Math.round(v));
+    const c0 = cj * w + ci;
     cell[q0] = c0;
-    if (uni[c0] !== NONE) {
-      label[q0] = uni[c0];
-      continue;
-    }
-    // Land or sea: the land smoothly interpolated (no wandering: the coast is the map's own).
-    let i0 = Math.floor(u0);
-    let j0 = Math.floor(v0);
-    let fu = u0 - i0;
-    let fv = v0 - j0;
-    const lv = L(i0, j0) * (1 - fu) * (1 - fv) + L(i0 + 1, j0) * fu * (1 - fv) + L(i0, j0 + 1) * (1 - fu) * fv + L(i0 + 1, j0 + 1) * fu * fv;
-    if (lv < 0.5) {
+    // Land or sea: the painted coast where we have it.
+    const isLand = fineLand ? !!fineLand[q0] : !!land[c0];
+    if (!isLand) {
       label[q0] = SEA;
       continue;
     }
-    // Where the claims are sampled: nudged by the noise.
-    const u = u0 + lerp2(DX, u0, v0);
-    const v = v0 + lerp2(DY, u0, v0);
-    i0 = Math.floor(u);
-    j0 = Math.floor(v);
-    fu = u - i0;
-    fv = v - j0;
+    if (uni[c0] !== -99 && (!fineLand || land[c0])) {
+      label[q0] = uni[c0];
+      continue;
+    }
+    const i0 = Math.floor(u);
+    const j0 = Math.floor(v);
+    const fu = u - i0;
+    const fv = v - j0;
     accN = 0;
     addCell(i0, j0, (1 - fu) * (1 - fv));
     addCell(i0 + 1, j0, fu * (1 - fv));
     addCell(i0, j0 + 1, (1 - fu) * fv);
     addCell(i0 + 1, j0 + 1, fu * fv);
-    let best = -1;
-    let bv = 0;
-    for (let q = 0; q < accN; q++) if (accV[q] > bv) {
-      best = accL[q];
-      bv = accV[q];
+    if (!accN) {
+      // Painted land the grid counts as sea: whoever claims the nearest grid land.
+      let best = UNCLAIMED;
+      let bd = 9;
+      for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) {
+        const m = row(cj + dj) * w + col(ci + di);
+        const d = di * di + dj * dj;
+        if (land[m] && d < bd) [best, bd] = [lab(m), d];
+      }
+      label[q0] = best;
+      continue;
     }
-    label[q0] = accN ? best : -1;
+    let best = UNCLAIMED;
+    let bv = 0;
+    for (let q = 0; q < accN; q++) if (accV[q] > bv) [best, bv] = [accL[q], accV[q]];
+    label[q0] = best;
   }
-  return { F, W, H, label, cell, lines: traceBorders(label, W, H, wrap), rings: traceRings(label, W, H) };
+  const chains = traceChains(label, W, H, wrap);
+  return { F, W, H, label, cell, chains, rings: assembleRings(chains, W, wrap) };
 }
 
-/** The edges between differing fine points (not the coast), chained into polylines and smoothed. */
-function traceBorders(label: Int32Array, W: number, H: number, wrap: boolean): number[][] {
-  const segs: number[] = [];
-  const border = (a: number, b: number) => a !== b && a !== SEA && b !== SEA;
-  for (let Y = 0; Y < H; Y++) for (let X = 0; X < W; X++) {
-    const a = label[Y * W + X];
-    if (X + 1 < W || wrap) {
-      const b = label[Y * W + ((X + 1) % W)];
-      if (border(a, b)) segs.push(X + 1, Y, X + 1, Y + 1);
+const held = (l: number) => l >= 0 || l <= -1000;
+
+/** Every edge between two different holders (at least one a realm), chained junction to junction and smoothed. */
+function traceChains(label: Int32Array, W: number, H: number, wrap: boolean): Chain[] {
+  const L = (X: number, Y: number) => {
+    if (Y < 0 || Y >= H) return OUTSIDE;
+    if (X < 0 || X >= W) {
+      if (!wrap) return OUTSIDE;
+      X = ((X % W) + W) % W;
     }
-    if (Y + 1 < H) {
-      const b = label[(Y + 1) * W + X];
-      if (border(a, b)) segs.push(X, Y + 1, X + 1, Y + 1);
+    return label[Y * W + X];
+  };
+  // Unit edges, each with its two ends and who is on its left and right as stored.
+  const ex: number[] = [];
+  const el: number[] = [];
+  const er: number[] = [];
+  const add = (x1: number, y1: number, x2: number, y2: number, left: number, right: number) => {
+    if (left === right || (!held(left) && !held(right))) return;
+    ex.push(x1, y1, x2, y2);
+    el.push(left);
+    er.push(right);
+  };
+  for (let Y = -1; Y < H; Y++) for (let X = -1; X < W; X++) {
+    const a = L(X, Y);
+    // The edge east of (X, Y), running down: the east point on its left.
+    if (Y >= 0) {
+      const b = L(X + 1, Y);
+      if (!(wrap && X < 0)) add(X + 1, Y, X + 1, Y + 1, b, a);
     }
+    // The edge south of (X, Y), running east: the north point on its left.
+    if (X >= 0) add(X, Y + 1, X + 1, Y + 1, a, L(X, Y + 1));
   }
-  // Chain the edges at their shared corners.
-  const key = (x: number, y: number) => y * (W + 2) + x;
+  // Ends meet at lattice points (the wrap seam folds x = W onto x = 0).
+  const n = el.length;
+  const kx = (x: number) => (wrap ? ((x % W) + W) % W : x);
+  const key = (x: number, y: number) => (y + 1) * (W + 3) + kx(x) + 1;
   const at = new Map<number, number[]>();
-  const n = segs.length / 4;
-  for (let s = 0; s < n; s++) for (const e of [0, 1]) {
-    const k = key(segs[s * 4 + e * 2], segs[s * 4 + e * 2 + 1]);
+  for (let e = 0; e < n; e++) for (const s of [0, 1]) {
+    const k = key(ex[e * 4 + s * 2], ex[e * 4 + s * 2 + 1]);
     const l = at.get(k);
-    if (l) l.push(s);
-    else at.set(k, [s]);
+    if (l) l.push(e);
+    else at.set(k, [e]);
   }
   const used = new Uint8Array(n);
-  const other = (s: number, x: number, y: number): [number, number] => (segs[s * 4] === x && segs[s * 4 + 1] === y ? [segs[s * 4 + 2], segs[s * 4 + 3]] : [segs[s * 4], segs[s * 4 + 1]]);
-  const lines: number[][] = [];
-  for (let s0 = 0; s0 < n; s0++) {
-    if (used[s0]) continue;
-    used[s0] = 1;
-    const pts: [number, number][] = [[segs[s0 * 4], segs[s0 * 4 + 1]], [segs[s0 * 4 + 2], segs[s0 * 4 + 3]]];
-    // Grow from both ends while the way on is unbranched.
-    for (const front of [true, false]) {
-      for (;;) {
-        const [x, y] = front ? pts[pts.length - 1] : pts[0];
-        const here = at.get(key(x, y)) ?? [];
-        if (here.length !== 2) break;
-        const next = here.find((q) => !used[q]);
-        if (next === undefined) break;
-        used[next] = 1;
-        const p = other(next, x, y);
-        if (front) pts.push(p);
-        else pts.unshift(p);
-      }
+  const pair = (e: number) => (el[e] < er[e] ? `${el[e]}|${er[e]}` : `${er[e]}|${el[e]}`);
+  const chains: Chain[] = [];
+  // Walk on from a point along the edge that continues the same border (a junction stops it).
+  const step = (x: number, y: number, p: string): number | undefined => {
+    const here = at.get(key(x, y)) ?? [];
+    if (here.length !== 2) return undefined;
+    const e = here.find((q) => !used[q]);
+    return e !== undefined && pair(e) === p ? e : undefined;
+  };
+  const near = (x: number, ref: number) => (wrap ? x + Math.round((ref - x) / W) * W : x);
+  for (let e0 = 0; e0 < n; e0++) {
+    if (used[e0]) continue;
+    used[e0] = 1;
+    const p = pair(e0);
+    // Forward from its end, then backward from its start.
+    const fwd: number[] = [ex[e0 * 4], ex[e0 * 4 + 1], ex[e0 * 4 + 2], ex[e0 * 4 + 3]];
+    const left = el[e0];
+    const right = er[e0];
+    for (;;) {
+      const x = fwd[fwd.length - 2];
+      const y = fwd[fwd.length - 1];
+      const e = step(x, y, p);
+      if (e === undefined) break;
+      used[e] = 1;
+      const s0x = near(ex[e * 4], x);
+      const startsHere = kx(ex[e * 4]) === kx(x) && ex[e * 4 + 1] === y;
+      const nx = startsHere ? near(ex[e * 4 + 2], x) : s0x;
+      const ny = startsHere ? ex[e * 4 + 3] : ex[e * 4 + 1];
+      fwd.push(nx, ny);
     }
-    lines.push(smooth(simplify(pts, 0.75)));
+    const back: number[] = [];
+    for (;;) {
+      const x = back.length ? back[back.length - 2] : fwd[0];
+      const y = back.length ? back[back.length - 1] : fwd[1];
+      const e = step(x, y, p);
+      if (e === undefined) break;
+      used[e] = 1;
+      const startsHere = kx(ex[e * 4]) === kx(x) && ex[e * 4 + 1] === y;
+      back.push(startsHere ? near(ex[e * 4 + 2], x) : near(ex[e * 4], x), startsHere ? ex[e * 4 + 3] : ex[e * 4 + 1]);
+    }
+    const pts: [number, number][] = [];
+    for (let i = back.length - 2; i >= 0; i -= 2) pts.push([back[i], back[i + 1]]);
+    for (let i = 0; i < fwd.length; i += 2) pts.push([fwd[i], fwd[i + 1]]);
+    chains.push({ pts: smooth(simplify(pts, 0.7)), left, right });
   }
-  return lines;
+  return chains;
 }
 
-/** The outline of each realm's land: its pixel edges chained into closed rings, then straightened and rounded. */
-function traceRings(label: Int32Array, W: number, H: number): Map<number, number[][]> {
-  // Directed edges with the land on one side; the map's edges (and the wrap seam) close the rings.
-  const ex: number[] = [];
-  const lab: number[] = [];
-  const L = (X: number, Y: number) => (X < 0 || Y < 0 || X >= W || Y >= H ? SEA - 1 : label[Y * W + X]);
-  for (let Y = 0; Y < H; Y++) for (let X = 0; X < W; X++) {
-    const o = label[Y * W + X];
-    if (o < 0) continue;
-    if (L(X, Y - 1) !== o) ex.push(X + 1, Y, X, Y), lab.push(o);
-    if (L(X + 1, Y) !== o) ex.push(X + 1, Y + 1, X + 1, Y), lab.push(o);
-    if (L(X, Y + 1) !== o) ex.push(X, Y + 1, X + 1, Y + 1), lab.push(o);
-    if (L(X - 1, Y) !== o) ex.push(X, Y, X, Y + 1), lab.push(o);
-  }
-  const key = (x: number, y: number) => y * (W + 2) + x;
-  const from = new Map<number, number[]>();
-  for (let e = 0; e < lab.length; e++) {
-    const k = key(ex[e * 4], ex[e * 4 + 1]);
-    const l = from.get(k);
-    if (l) l.push(e);
-    else from.set(k, [e]);
-  }
-  const used = new Uint8Array(lab.length);
-  const out = new Map<number, number[][]>();
-  for (let e0 = 0; e0 < lab.length; e0++) {
-    if (used[e0]) continue;
-    const o = lab[e0];
-    const pts: [number, number][] = [[ex[e0 * 4], ex[e0 * 4 + 1]]];
-    let e = e0;
-    for (let guard = 0; guard < lab.length; guard++) {
-      used[e] = 1;
-      const x = ex[e * 4 + 2];
-      const y = ex[e * 4 + 3];
-      pts.push([x, y]);
-      const next = (from.get(key(x, y)) ?? []).find((q) => !used[q] && lab[q] === o);
-      if (next === undefined) break;
-      e = next;
+/** Each holder's rings: its chains (turned so it is on their left) joined end to start. */
+function assembleRings(chains: Chain[], W: number, wrap: boolean): Map<number, number[][]> {
+  const byHolder = new Map<number, number[][]>();
+  for (const c of chains) {
+    for (const [who, flip] of [[c.left, false], [c.right, true]] as const) {
+      if (!held(who)) continue;
+      const pts = flip ? reverse(c.pts) : c.pts;
+      const l = byHolder.get(who);
+      if (l) l.push(pts);
+      else byHolder.set(who, [pts]);
     }
-    if (pts.length < 4) continue;
-    const ring = smooth(simplify(pts, 0.75));
-    const l = out.get(o);
-    if (l) l.push(ring);
-    else out.set(o, [ring]);
   }
+  const kx = (x: number) => (wrap ? ((Math.round(x) % W) + W) % W : Math.round(x));
+  const key = (x: number, y: number) => `${kx(x)},${Math.round(y)}`;
+  const out = new Map<number, number[][]>();
+  for (const [who, parts] of byHolder) {
+    const starts = new Map<string, number[]>();
+    parts.forEach((p, i) => {
+      const k = key(p[0], p[1]);
+      const l = starts.get(k);
+      if (l) l.push(i);
+      else starts.set(k, [i]);
+    });
+    const used = new Uint8Array(parts.length);
+    const rings: number[][] = [];
+    for (let i0 = 0; i0 < parts.length; i0++) {
+      if (used[i0]) continue;
+      used[i0] = 1;
+      const ring = [...parts[i0]];
+      const startKey = key(ring[0], ring[1]);
+      for (let guard = 0; guard < parts.length; guard++) {
+        const ex = ring[ring.length - 2];
+        const ey = ring[ring.length - 1];
+        if (key(ex, ey) === startKey && ring.length > 4) break;
+        const next = (starts.get(key(ex, ey)) ?? []).find((q) => !used[q]);
+        if (next === undefined) break;
+        used[next] = 1;
+        const p = parts[next];
+        // Shift a part across the wrap seam to meet the ring's end.
+        const shift = wrap ? Math.round((ex - p[0]) / W) * W : 0;
+        for (let i = 2; i < p.length; i += 2) ring.push(p[i] + shift, p[i + 1]);
+      }
+      rings.push(ring);
+    }
+    out.set(who, rings);
+  }
+  return out;
+}
+
+function reverse(p: number[]): number[] {
+  const out: number[] = [];
+  for (let i = p.length - 2; i >= 0; i -= 2) out.push(p[i], p[i + 1]);
   return out;
 }
 
@@ -318,25 +334,23 @@ function simplify(pts: [number, number][], tol: number): [number, number][] {
       stack.push([a, far], [far, b]);
     }
   }
-  // A closed ring with its first and last points the same stays closed.
   return pts.filter((_, i) => keep[i]);
 }
 
-/** Chaikin's corner cutting (three rounds), keeping the ends of an open line where they are. */
+/** Chaikin's corner cutting (three rounds); both ends stay where they are (they are junctions). */
 function smooth(pts: [number, number][]): number[] {
-  const closed = pts.length > 3 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1];
-  let p = closed ? pts.slice(0, -1) : pts;
+  let p = pts;
+  const closed = p.length > 3 && p[0][0] === p[p.length - 1][0] && p[0][1] === p[p.length - 1][1];
   for (let r = 0; r < 3 && p.length > 2; r++) {
-    const out: [number, number][] = closed ? [] : [p[0]];
-    const m = closed ? p.length : p.length - 1;
-    for (let i = 0; i < m; i++) {
+    const out: [number, number][] = [p[0]];
+    for (let i = 0; i < p.length - 1; i++) {
       const a = p[i];
-      const b = p[(i + 1) % p.length];
-      out.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]], [0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
+      const b = p[i + 1];
+      if (i > 0 || closed) out.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]]);
+      if (i < p.length - 2 || closed) out.push([0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
     }
-    if (!closed) out.push(p[p.length - 1]);
+    out.push(p[p.length - 1]);
     p = out;
   }
-  if (closed) p.push(p[0]);
   return p.flat();
 }
