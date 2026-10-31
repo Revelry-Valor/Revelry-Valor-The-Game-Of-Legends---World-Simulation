@@ -17,7 +17,7 @@ export interface InfoItem {
 /** The fields, in groups, for choosing what the panel shows. */
 export const INFO_GROUPS: { name: string; labels: string[] }[] = [
   { name: 'Position', labels: ['Latitude', 'From the west edge'] },
-  { name: 'Place', labels: ['Place'] },
+  { name: 'Place', labels: ['Place', 'Province'] },
   { name: 'Land and water', labels: ['Ground', 'Terrain', 'Ground cover', 'Water', 'Hazard'] },
   { name: 'Climate', labels: ['Climate zone', 'Summer', 'Winter', 'Sea', 'Sea ice', 'Fishing'] },
   { name: 'Peoples', labels: ['Tribe', 'Settlement', 'Realm'] },

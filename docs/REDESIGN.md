@@ -1099,6 +1099,43 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 - **Rivers** can be claimed and lie inside territories and nations like any land. Fighting commonly ends at rivers because fortresses, or an army holding the far bank, stop the advance there.
 - Land regions to be designed later.
 
+### 8.6a Provinces (decided; replacing grid claims)
+Like Crusader Kings 3: the world is split into provinces, and much of the simulation's information will live on them.
+
+**Decided with the designer**
+- **The province generator** runs any time after the world is built (the Provinces tab). It splits the land and sea into hundreds to many thousands of provinces. *Province size* is a slider, 10–150 miles across (default 40); sea provinces are larger (*Sea provinces*, default 3× as wide).
+- **Provinces follow the terrain:** a province never crosses a coast, a big river, the edge of a natural region (forest, desert and so on), or a change between lowland, highlands, mountains, impassable peaks and plateaus. Mountains and plateaus have provinces of their own. Lakes are provinces of their own. Every province is one piece: no part of it is cut off by another.
+- **Peaks are impassable wasteland** provinces that nobody can own.
+- **Repainting:** provinces stay as they are and the tab says they are out of date. *Update to the map* fits them to the new map, keeping each province and its id where it was; *Generate new provinces* makes a fresh set.
+- **Editing by hand** will be done with a paint tool (painting ground from one province into another to reshape or merge them), not by drawing cut lines.
+- **Holders:** realms and tribes will own whole provinces, and borders will run along province outlines (replacing the grid claims). Each province has at most one town or city, with villages inside it; a new town needs a province without one. Wandering tribes claim the province they are in and its neighbours.
+- **What a province holds:** terrain, ground cover, climate, resources, population, development, buildings, culture, faith and holder, shown when a province is selected.
+- **Above provinces:** provinces group into counties of a few provinces first; bigger levels come later.
+- **Roads, trade and armies** will travel province to province along the links between them, with costs for crossing rivers, hills and so on; roads are drawn between province middles following the terrain. Sea provinces carry sea trade and, later, fleets.
+- **Old saves** made before provinces are not carried over: their simulations need restarting.
+- **Steps:**
+  1. Fix the geography regions, then build the generator and the province map.
+  2. The simulation runs on provinces: claims, settlements, tribes and borders.
+  3. Roads, trade and armies travel on province links, and provinces can be inspected and edited with the paint tool.
+
+**Built (step 1)**
+- *Fine geography:* the natural regions and waters are worked out on the climate's points as before, then carried down to a fine grid (about four points to each climate step). Each fine point takes the region of the cover drawn there, using the same jittered lookup the map uses to draw climate cover. Painted mountains go to a nearby mountain or highland region, and lowland goes to the lowland round it. Each region and each water is kept in one piece: a stray fragment joins the region it borders most. The Geography map, the readout and Name pins all use the fine regions.
+- *Zones:* the fine ground is split into zones that no province may cross. Land zones follow natural region and relief band (lowland and hills together; highlands; mountains; peaks; plateaus). Each lake is a zone, and each water body is a zone. Big rivers (about 1 km wide or more) are walls between zones; their own points join the land beside them. Slivers smaller than about a fifth of a province join the zone they border most: land with land, water with water. A lake under about 4% of a lake province becomes land, and a speck of land a few points across joins the sea round it.
+- *Generation:*
+  - Each zone gets seeds about a province apart, one per cell of a jittered lattice where the zone fills enough of the cell.
+  - All provinces grow out together. Each step costs more uphill and a little more or less by noise, and growth never leaves its zone. Steps go straight, across corners and as knight's moves, so borders can run at any angle.
+  - On a fresh set, the seeds then move to their provinces' middles and the provinces grow again, which evens out their sizes.
+  - A piece left cut off at a corner joins the province it borders most in its zone.
+- *Fine grid:* about six points to a province across, with at most 3 million points. On a very big map the smallest sizes come out blocky, and the tab says from what size.
+- *Saved with the world:* only the settings and the seeds (km), each with its province's id. When the world opens, the provinces grow again from them. Updating after repainting keeps every seed that is still on ground of its kind, and adds new seeds only where new ground needs them.
+- *Each province:* id, kind (land, sea, lake, impassable), terrain name (e.g. "Forest", "Steppe hills", "Mountains", "Ocean"), area, middle, natural region or water, coastal, on a river, and its neighbours.
+- *Map:*
+  - Province borders are traced and smoothed like realm borders.
+  - The View panel's Map look has a Provinces choice: Hidden, Outlines or Coloured. Outlines are the default.
+  - While the Provinces tab is open, provinces are coloured by terrain, and pressing the map pans instead of painting.
+  - The Under the cursor panel has a Province field.
+- *Speed:* the generator works in the background. On a test continent about 9,000 by 9,000 miles at 40-mile provinces (about 16,000 provinces), it takes about 8 seconds; at the smallest sizes it takes about 20 seconds. Working out the climate takes about 1.5 seconds longer, for the fine geography.
+
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.
@@ -1193,7 +1230,7 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 **Both kinds of region**
 - **Natural regions (geography):** the land is split automatically along natural lines: mountain crests, major rivers, coastlines, and changes of climate or ground cover. Each gets a kind (Highlands, Steppe, Forest, Marshes, Desert and so on) and is named when a culture first settles or claims it. A **Region tool** redraws their borders.
 - **Built (Phase 4):** worked out with the climate, on its points. *Landmasses:* connected land; at least the "Smallest continent" size (default 1 million sq mi) is a continent, smaller is an island; three or more islands within a short sail are an archipelago. *Waters:* a watershed on distance from land, split where a passage is narrow for the smaller water (under half its open width); water meeting at the map's edge carries on past it. At least 3 million sq mi (or open water reaching the map's edge) is an ocean, the rest seas; water mostly ringed by land (rays reaching land in about 60% of directions) is a gulf (over about 46,000 sq mi) or a bay. *Natural regions:* land of one kind (Mountains, Highlands, Icefield, Tundra, Taiga, Forest, Jungle, Savanna, Plains, Steppe, Scrubland, Desert, from height, zone and ground cover), parted by big rivers and Divide lines, small specks joined to their neighbours, large stretches cut into about region-sized pieces with wandering borders (Region size, default 250 miles). *Mountains first:* height decides before climate (snowcapped peaks are Mountains, Icefield is only ice on low ground); mountains and highlands are never smoothed away or folded into lowland regions, and a range stays one region however long, so it carries one name. *Lakes and rivers:* named from what is painted (touching lake strokes are one lake; each river stroke is one river), lake pins snap into the lake and river pins onto the river; named rivers are lettered along their course, unnamed rivers are left unlabelled. *Tools (Geography tab):* Divide (cut), Join (make one), Name (pins that name what lies under them, so names stay with the land; continents, islands, archipelagos, oceans, seas, gulfs, bays, ranges, regions, lakes and rivers). Named places are labelled before unnamed ones and keep readable lettering whenever they can be seen. *Map:* labels sized by importance (continents and oceans grandest), unnamed places shown by kind in plainer lettering, a Labels choice and a Geography map in the View panel; the readout and climate report name places.
-- **Political regions (provinces):** drawn by nations as they grow, often but not always following natural regions. They change with conquest, and every change is recorded in the history.
+- **Provinces:** see 8.6a. They are made by the province generator from the natural regions, the relief and the waters, and nest inside the natural regions.
 
 ---
 

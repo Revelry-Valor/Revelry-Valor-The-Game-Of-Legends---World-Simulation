@@ -1,0 +1,180 @@
+import { beforeAll, describe, expect, it } from 'vitest';
+import { computeClimate, type Climate } from '../src/core/climate';
+import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/core/paint';
+import { defaultSettings } from '../src/core/settings';
+import { KM_PER_DEGREE } from '../src/core/units';
+import { fineGeography, sampleGround } from '../src/core/finegeo';
+import { generateProvinces, type ProvinceMap } from '../src/core/provinces';
+import { createWorld } from '../src/core/world';
+import { parseWorld } from '../src/core/storage';
+
+/** A continent with a mountain range, a forest, a big river and a lake. */
+const north = 40;
+const settings = defaultSettings({ widthKm: 6000, heightKm: 50 * KM_PER_DEGREE, northLatitude: north, edges: 'wrap', seed: 11 });
+const yAt = (lat: number) => (north - lat) * KM_PER_DEGREE;
+const line = (pts: [number, number][], step = 60) => {
+  const out: number[] = [];
+  for (let k = 0; k < pts.length - 1; k++) {
+    const [ax, ay] = pts[k];
+    const [bx, by] = pts[k + 1];
+    const n = Math.ceil(Math.hypot(bx - ax, by - ay) / step);
+    for (let i = 0; i < n; i++) out.push(ax + ((bx - ax) * i) / n, ay + ((by - ay) * i) / n);
+  }
+  out.push(...pts[pts.length - 1]);
+  return out;
+};
+const surface: Surface = { strokes: [], nextId: 1 };
+const add = (brush: BrushId, pts: number[], o: Partial<Stroke> = {}) => surface.strokes.push({ ...brushDefaults(brush), id: surface.nextId++, pts, roughness: 0.2, ...o } as Stroke);
+add('land', line([[3000, yAt(30)], [3000, yAt(-5)]]), { size: 2200 });
+add('mountains', line([[2300, yAt(28)], [2300, yAt(12)]], 25), { size: 200, strength: 1 });
+add('forest', line([[3300, yAt(25)], [3500, yAt(15)]]), { size: 500 });
+add('river', line([[2600, yAt(20)], [3200, yAt(10)], [4100, yAt(5)]]), { width: 2 });
+add('lake', line([[3700, yAt(22)], [3760, yAt(22)]]), { size: 120 });
+
+let cl: Climate;
+let pm: ProvinceMap;
+const SIZE_MI = 50;
+beforeAll(() => {
+  cl = computeClimate(surface, settings);
+  pm = generateProvinces(surface, settings, cl, { sizeMi: SIZE_MI, seaFactor: 3 });
+}, 120000);
+
+/** Connected pieces (4 neighbours, wrapping east–west) of each label. */
+function pieces(label: Int32Array, w: number, h: number): Map<number, number> {
+  const seen = new Uint8Array(w * h);
+  const out = new Map<number, number>();
+  for (let k = 0; k < w * h; k++) {
+    if (seen[k] || label[k] < 0) continue;
+    const l = label[k];
+    out.set(l, (out.get(l) ?? 0) + 1);
+    const st = [k];
+    seen[k] = 1;
+    while (st.length) {
+      const c = st.pop()!;
+      const i = c % w;
+      const j = (c / w) | 0;
+      for (const m of [i > 0 ? c - 1 : c + w - 1, i < w - 1 ? c + 1 : c - w + 1, j > 0 ? c - w : -1, j < h - 1 ? c + w : -1]) {
+        if (m >= 0 && !seen[m] && label[m] === l) {
+          seen[m] = 1;
+          st.push(m);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+describe('fine geography', () => {
+  it('keeps every region and water in one piece', () => {
+    const fine = cl.geo!.fine!;
+    for (const arr of [fine.region, fine.water]) {
+      const split = [...pieces(arr, fine.grid.w, fine.grid.h)].filter(([, c]) => c > 1);
+      expect(split).toEqual([]);
+    }
+  });
+  it('puts painted mountains in a mountain or highland region', () => {
+    const fine = cl.geo!.fine!;
+    const g = sampleGround(surface, settings, fine.grid);
+    let high = 0;
+    let inRange = 0;
+    for (let k = 0; k < g.band.length; k++) {
+      if (g.band[k] < 3 || g.band[k] === 5) continue;
+      high++;
+      const kind = cl.geo!.regions[fine.region[k]]?.kind;
+      if (kind === 'Mountains' || kind === 'Highlands') inRange++;
+    }
+    expect(high).toBeGreaterThan(20);
+    expect(inRange / high).toBeGreaterThan(0.9);
+  });
+});
+
+describe('provinces', () => {
+  it('splits land and sea into provinces about the size asked for', () => {
+    const land = pm.provinces.filter((p) => p.kind === 'land');
+    const sea = pm.provinces.filter((p) => p.kind === 'sea');
+    expect(land.length).toBeGreaterThan(100);
+    expect(sea.length).toBeGreaterThan(10);
+    const across = land.map((p) => Math.sqrt(p.area) / 1.609344).sort((a, b) => a - b);
+    const median = across[Math.floor(across.length / 2)];
+    expect(median).toBeGreaterThan(SIZE_MI * 0.75);
+    expect(median).toBeLessThan(SIZE_MI * 1.25);
+    // Sea provinces are bigger.
+    const seaMedian = sea.map((p) => p.area).sort((a, b) => a - b)[Math.floor(sea.length / 2)];
+    expect(seaMedian).toBeGreaterThan(land[Math.floor(land.length / 2)].area * 3);
+  });
+  it('makes every province one piece', () => {
+    const split = [...pieces(pm.label, pm.grid.w, pm.grid.h)].filter(([, c]) => c > 1);
+    expect(split).toEqual([]);
+  });
+  it('never mixes land and sea, or crosses a region border', () => {
+    const g = sampleGround(surface, settings, pm.grid);
+    const fg = fineGeography(cl, g, settings.seed);
+    let mixed = 0;
+    let crossed = 0;
+    let landPts = 0;
+    for (let k = 0; k < pm.label.length; k++) {
+      const p = pm.provinces[pm.label[k]];
+      if (g.land[k] && !g.lake[k]) {
+        landPts++;
+        if (p.kind === 'sea') mixed++;
+        else if (p.kind === 'land' && fg.region[k] !== p.region) crossed++;
+      } else if (!g.land[k] && p.kind !== 'sea') mixed++;
+    }
+    // Only slivers too small to stand alone are folded in.
+    expect(mixed / pm.label.length).toBeLessThan(0.002);
+    expect(crossed / landPts).toBeLessThan(0.01);
+  });
+  it('gives mountains, lakes and big rivers their due', () => {
+    expect(pm.provinces.some((p) => p.terrain === 'Mountains' || p.terrain === 'Highlands' || p.kind === 'wasteland')).toBe(true);
+    expect(pm.provinces.some((p) => p.kind === 'lake')).toBe(true);
+    expect(pm.provinces.some((p) => p.river)).toBe(true);
+    // No province holds land on both banks of the big river: walk across it and the province changes.
+    const g = sampleGround(surface, settings, pm.grid);
+    const { w } = pm.grid;
+    let crossings = 0;
+    let same = 0;
+    for (let k = 0; k < pm.label.length - 3 * w; k++) {
+      // A straight run north–south: land, big river, land.
+      if (!g.land[k] || g.river[k] || g.lake[k]) continue;
+      let q = k + w;
+      let wide = 0;
+      while (q < pm.label.length && g.river[q] === 2 && wide < 6) {
+        q += w;
+        wide++;
+      }
+      if (!wide || q >= pm.label.length || !g.land[q] || g.river[q] || g.lake[q]) continue;
+      crossings++;
+      if (pm.label[k] === pm.label[q]) same++;
+    }
+    expect(crossings).toBeGreaterThan(10);
+    expect(same / crossings).toBeLessThan(0.05);
+  });
+  it('lists each province’s neighbours both ways', () => {
+    for (let i = 0; i < pm.provinces.length; i++) for (const j of pm.provinces[i].neighbours) expect(pm.provinces[j].neighbours).toContain(i);
+    expect(pm.provinces.some((p) => p.coastal)).toBe(true);
+  });
+  it('keeps each province (and its id) in place when updated after repainting', () => {
+    const more: Surface = { strokes: [...surface.strokes, { ...brushDefaults('land'), id: 999, pts: line([[4400, yAt(10)], [4700, yAt(12)]]), size: 400, roughness: 0.2 } as Stroke], nextId: 1000 };
+    const cl2 = computeClimate(more, settings);
+    const next = generateProvinces(more, settings, cl2, { sizeMi: SIZE_MI, seaFactor: 3, saved: pm.saved });
+    const idAt = (m: ProvinceMap, k: number) => m.provinces[m.label[k]].id;
+    // Away from the new land, provinces stay as they were.
+    let kept = 0;
+    let total = 0;
+    for (let k = 0; k < pm.label.length; k++) {
+      const x = pm.grid.x0 + (k % pm.grid.w) * pm.grid.px;
+      if (x > 3900) continue;
+      total++;
+      if (idAt(pm, k) === idAt(next, k)) kept++;
+    }
+    expect(kept / total).toBeGreaterThan(0.95);
+    expect(next.saved.nextId).toBeGreaterThan(pm.saved.nextId);
+  }, 60000);
+  it('is saved with the world', () => {
+    const w = { ...createWorld(settings), surface, provinces: pm.saved };
+    const back = parseWorld(JSON.stringify(w));
+    expect(back.provinces?.ids.length).toBe(pm.saved.ids.length);
+    expect(back.provinces?.seeds).toEqual(pm.saved.seeds);
+    expect(parseWorld(JSON.stringify({ ...w, provinces: { v: 1, sizeMi: 40 } })).provinces).toBeUndefined();
+  });
+});

@@ -2,6 +2,7 @@ import type { PackedSim } from '../sim/pack';
 import { centreLatitude, kmPerDegree, southLatitude, validateSettings, type WorldSettings } from './settings';
 import { emptySurface, shiftSurface, type Surface } from './paint';
 import type { Library } from './library';
+import type { SavedProvinces } from './provinces';
 
 /** The world's layers, bottom to top (REDESIGN.md, section 5). Only the surface is always on. */
 export const LAYERS = [
@@ -57,6 +58,8 @@ export interface World {
   reference?: ReferenceImage | null;
   /** This world's copy of the library (peoples, beasts, traits, resources); the shared one until it has its own. */
   library?: Library;
+  /** Its provinces: their size settings and seeds (the provinces are grown again from them when the world opens). */
+  provinces?: SavedProvinces | null;
   /** The simulation of its peoples (Phase 6), packed for saving. */
   sim?: PackedSim | null;
   createdAt: number;
@@ -106,6 +109,11 @@ onMapShift((w, dx, dy) => {
 // The reference picture stays over the land it was lined up with.
 onMapShift((w, dx, dy) => {
   if (w.reference) w.reference = { ...w.reference, x: w.reference.x + dx, y: w.reference.y + dy };
+});
+
+// Province seeds stay on the land they were sown on.
+onMapShift((w, dx, dy) => {
+  if (w.provinces) w.provinces = { ...w.provinces, seeds: w.provinces.seeds.map((v, i) => v + (i % 2 ? dy : dx)) };
 });
 
 /**

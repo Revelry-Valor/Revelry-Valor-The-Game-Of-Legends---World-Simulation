@@ -2,6 +2,7 @@ import { CLIMATE_DEFAULTS, defaultSettings, validateSettings } from './settings'
 import { newWorldId, WORLD_FORMAT, type ReferenceImage, type World } from './world';
 import { BRUSHES, emptySurface, type Surface } from './paint';
 import { upgradeLibrary } from './libstore';
+import type { SavedProvinces } from './provinces';
 
 /** Where saved worlds live: the browser's local storage, or anything shaped like it (tests). */
 export interface KeyValueStore {
@@ -81,10 +82,21 @@ export function parseWorld(text: string): World {
     surface: readSurface(w.surface),
     ...(reference ? { reference } : {}),
     ...(w.library ? { library: upgradeLibrary(w.library) } : {}),
+    ...(readProvinces(w.provinces) ? { provinces: readProvinces(w.provinces) } : {}),
     ...(w.sim && typeof w.sim === 'object' && (w.sim as { v?: number }).v === 1 ? { sim: w.sim } : {}),
     createdAt: typeof w.createdAt === 'number' ? w.createdAt : now,
     updatedAt: typeof w.updatedAt === 'number' ? w.updatedAt : now,
   };
+}
+
+/** Saved provinces, if whole: their settings and seeds. */
+function readProvinces(p: unknown): SavedProvinces | null {
+  const v = p as Partial<SavedProvinces> | null | undefined;
+  if (!v || typeof v !== 'object' || v.v !== 1) return null;
+  if (typeof v.sizeMi !== 'number' || typeof v.seaFactor !== 'number' || typeof v.nextId !== 'number') return null;
+  if (!Array.isArray(v.seeds) || !Array.isArray(v.ids) || v.seeds.length !== v.ids.length * 2) return null;
+  if (!v.seeds.every((x) => typeof x === 'number' && Number.isFinite(x)) || !v.ids.every((x) => Number.isInteger(x))) return null;
+  return { v: 1, sizeMi: v.sizeMi, seaFactor: v.seaFactor, seeds: v.seeds, ids: v.ids, nextId: v.nextId };
 }
 
 /** The reference picture from a save, if it is whole. */

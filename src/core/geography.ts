@@ -2,6 +2,7 @@ import type { Climate } from './climate';
 import { COVER_BRUSHES, sketchCourse, type Stroke, type Surface } from './paint';
 import type { WorldSettings } from './settings';
 import { flowAt, riverNetwork, widthForFlow } from './water';
+import { regionAt, waterAt, type FineGeo } from './finegeo';
 
 /**
  * Geography (REDESIGN.md, section 8.13): the land split into continents, islands and
@@ -44,6 +45,8 @@ export interface Geography {
   archipelagos: GeoFeature[];
   waters: GeoFeature[];
   regions: GeoFeature[];
+  /** The regions and waters on a fine grid, following what is painted (see finegeo.ts). */
+  fine?: FineGeo;
 }
 
 export const GEO_DEFAULTS = { continentMinSqMi: 1_000_000, regionMi: 250 };
@@ -849,8 +852,8 @@ export function geoNames(surface: Surface, cl: Climate | null): Record<NameOf, M
     if (k < 0) continue;
     if (of === 'land' && g.land[k] >= 0) out.land.set(g.land[k], st.label);
     else if (of === 'archipelago' && g.land[k] >= 0 && g.archipelagoOf.has(g.land[k])) out.archipelago.set(g.archipelagoOf.get(g.land[k])!, st.label);
-    else if (of === 'water' && g.water[k] >= 0) out.water.set(g.water[k], st.label);
-    else if (of === 'region' && g.region[k] >= 0) out.region.set(g.region[k], st.label);
+    else if (of === 'water' && waterAt(cl, x, y) >= 0) out.water.set(waterAt(cl, x, y), st.label);
+    else if (of === 'region' && regionAt(cl, x, y) >= 0) out.region.set(regionAt(cl, x, y), st.label);
   }
   return out;
 }

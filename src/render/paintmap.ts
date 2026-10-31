@@ -1,6 +1,7 @@
 import { fbm, noise2 } from '../core/noise';
 import { COVER_BRUSHES, type CoverBrush, type Surface } from '../core/paint';
 import { REGION_KINDS } from '../core/geography';
+import { coverPoint, fineIndex } from '../core/finegeo';
 import { evaluate, whirlpools, type Whirlpool } from '../core/terrain';
 import { nearestPoint, RAIN_VERY_WET, RAIN_WET, sampleField, ZONE_INFO, type Climate } from '../core/climate';
 
@@ -128,27 +129,7 @@ export function renderPicture(surface: Surface, job: RenderJob, cl: Climate | nu
   const se = cl ? (job.season > 0 ? cl.summer : cl.winter) : null;
   curClimate = cl && se ? { cl, se } : null;
   /** The nearest climate point, nudged by noise so zone edges look natural; land only if `onLand`. */
-  const climatePoint = (x: number, y: number, onLand: boolean): number => {
-    if (!cl) return -1;
-    // Two scales of wobble: broad bends (so borders never run straight) and fine ragged edges.
-    const big = Math.max(cl.step * 3, 60);
-    const jx = x + big * fbm(x, y, big * 3, Math.max(px, big * 0.15), seed + 203, 3) + cl.step * 0.7 * fbm(x, y, cl.step * 1.4, Math.max(px, cl.step * 0.08), seed + 201, 4);
-    const jy = y + big * fbm(x, y, big * 3, Math.max(px, big * 0.15), seed + 204, 3) + cl.step * 0.7 * fbm(x, y, cl.step * 1.4, Math.max(px, cl.step * 0.08), seed + 202, 4);
-    let k = nearestPoint(cl, jx, jy);
-    if (onLand && !cl.land[k]) {
-      // Coast: borrow the nearest land point's climate.
-      const k2 = nearestPoint(cl, x, y);
-      k = cl.land[k2] ? k2 : -1;
-      if (k < 0) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
-        const k3 = nearestPoint(cl, x + dx * cl.step, y + dy * cl.step);
-        if (cl.land[k3]) {
-          k = k3;
-          break;
-        }
-      }
-    }
-    return k;
-  };
+  const climatePoint = (x: number, y: number, onLand: boolean): number => (cl ? coverPoint(cl, x, y, px, seed, onLand) : -1);
 
   for (let j = 0; j < h; j++) {
     const y = job.y0 + (j + 0.5) * px;
@@ -515,7 +496,24 @@ function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer']
       const geo = cl.geo;
       if (!geo) return col;
       const onLand = land >= 0.5;
+      const fine = geo.fine;
+      // Region (on land) or water at a place: from the fine geography, which follows what is painted.
+      const fineAt = (xx: number, yy: number): number => {
+        if (!fine) return -1;
+        const k = fineIndex(fine.grid, fine.wrapKm, xx, yy);
+        if (k < 0) return -1;
+        const arr = onLand ? fine.region : fine.water;
+        if (arr[k] >= 0) return arr[k];
+        // The painted coast and the fine points differ a little: look beside it.
+        const fw = fine.grid.w;
+        for (const d of [1, -1, fw, -fw, fw + 1, fw - 1, -fw + 1, -fw - 1]) {
+          const m = k + d;
+          if (m >= 0 && m < arr.length && arr[m] >= 0) return arr[m];
+        }
+        return -1;
+      };
       const idAt = (xx: number, yy: number) => {
+        if (fine) return fineAt(xx, yy);
         const k = climatePoint(xx, yy, onLand);
         if (k < 0) return -1;
         return onLand ? geo.region[k] * 4096 + geo.land[k] : geo.water[k];
@@ -524,17 +522,18 @@ function climateView(col: RGB, view: MapView, cl: Climate, se: Climate['summer']
       if (id < 0) return col;
       const d = px * 1.5;
       const border = idAt(x + d, y) !== id || idAt(x, y + d) !== id;
-      const k = climatePoint(x, y, onLand);
       let c: RGB;
       if (onLand) {
-        const f = geo.regions[geo.region[k]];
+        const r = fine ? id : geo.region[climatePoint(x, y, onLand)];
+        const f = geo.regions[r];
         const base = hex(REGION_KINDS[f?.kind ?? ''] ?? '#a8a08a');
-        const v = 0.86 + 0.28 * hash01(geo.region[k]);
+        const v = 0.86 + 0.28 * hash01(r);
         c = [base[0] * v * shade, base[1] * v * shade, base[2] * v * shade];
       } else {
-        const lv = geo.waters[geo.water[k]]?.level;
+        const wt = id;
+        const lv = geo.waters[wt]?.level;
         const base: RGB = lv === 'ocean' ? [46, 88, 140] : lv === 'sea' ? [70, 122, 178] : lv === 'gulf' ? [96, 156, 200] : [126, 186, 216];
-        const v = 0.9 + 0.2 * hash01(geo.water[k]);
+        const v = 0.9 + 0.2 * hash01(wt);
         c = [base[0] * v, base[1] * v, base[2] * v];
       }
       return border ? mix(c, [30, 24, 18], 0.75) : c;

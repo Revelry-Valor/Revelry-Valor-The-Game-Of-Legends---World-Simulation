@@ -17,6 +17,9 @@ import { climateReport } from './report';
 import { createPeoples, type Peoples } from './peoples';
 import { loadSharedLibrary } from '../core/libstore';
 import { createInfoPanel, createResourcePanel } from './info';
+import { regionAt, waterAt } from '../core/finegeo';
+import { createProvinces, type ProvinceDisplay, type Provinces } from './provinces';
+import type { MapOverlay } from './mapview';
 
 /**
  * The world screen: the map, the painting tools (Phase 1), the layer list, the world's
@@ -25,7 +28,7 @@ import { createInfoPanel, createResourcePanel } from './info';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off' };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -40,6 +43,7 @@ export function showWorld(app: App, start: World): () => void {
     status.textContent = 'Unsaved changes';
   };
   let peoples: Peoples | null = null;
+  let provinces: Provinces | null = null;
   let climateBusy = true;
   const autosave = window.setInterval(() => dirty && save(), 30000);
 
@@ -119,6 +123,25 @@ export function showWorld(app: App, start: World): () => void {
     if ((tools?.state.tool === 'high' || tools?.state.tool === 'wind') && look.view !== 'pressure') showPressureView?.();
     if (tools?.state.tool === 'itcz' && look.view !== 'rain' && look.view !== 'pressure') showRainView?.();
   }, () => map?.sketch ?? null, () => map?.high ?? null, () => nameOps);
+  // What is drawn over the map: provinces under the peoples (their lands, towns, armies).
+  const layers: MapOverlay = {
+    draw(g, at, scale, copies) {
+      provinces?.overlay.draw(g, at, scale, copies);
+      peoples?.overlay.draw(g, at, scale, copies);
+    },
+    down: (x, y, pxKm) => peoples?.overlay.down?.(x, y, pxKm) ?? false,
+    drag: (x, y) => peoples?.overlay.drag?.(x, y),
+    up: (x, y) => peoples?.overlay.up?.(x, y),
+    describe(x, y) {
+      const a = peoples?.overlay.describe?.(x, y) ?? [];
+      const b = provinces?.overlay.describe?.(x, y) ?? [];
+      return a.length || b.length ? [...a, ...b] : null;
+    },
+    pick: (x, y, pxKm) => peoples?.overlay.pick?.(x, y, pxKm) ?? false,
+    get noPaint() {
+      return !!(peoples?.overlay.noPaint || provinces?.overlay.noPaint);
+    },
+  };
   // The right-hand readers: what is under the cursor, and the selection's resources.
   const info = createInfoPanel();
   const resources = createResourcePanel();
@@ -166,7 +189,7 @@ export function showWorld(app: App, start: World): () => void {
       changed();
       if (done) renderRef();
     },
-    overlay: () => peoples?.overlay ?? null,
+    overlay: () => layers,
   });
 
   // ---- Names: pins on the map that name the feature under them ----
@@ -181,8 +204,8 @@ export function showWorld(app: App, start: World): () => void {
     if (k < 0) return -1;
     if (of === 'land') return g.land[k];
     if (of === 'archipelago') return g.land[k] >= 0 ? g.archipelagoOf.get(g.land[k]) ?? -1 : -1;
-    if (of === 'water') return g.water[k];
-    return g.region[k];
+    if (of === 'water') return waterAt(cl, x, y);
+    return regionAt(cl, x, y);
   };
   const nameOps: NameOps = {
     picked: () => map.namePick(),
@@ -204,8 +227,10 @@ export function showWorld(app: App, start: World): () => void {
         const a = g.archipelagoOf.get(g.land[k]);
         if (a !== undefined) out.push({ of: 'archipelago', kind: 'Islands', name: names.archipelago.get(a) ?? '' });
       }
-      if (g.water[k] >= 0) out.push({ of: 'water', kind: g.waters.find((q) => q.id === g.water[k])?.kind ?? 'Sea', name: names.water.get(g.water[k]) ?? '' });
-      if (g.region[k] >= 0) out.push({ of: 'region', kind: g.regions[g.region[k]]?.kind ?? 'Region', name: names.region.get(g.region[k]) ?? '' });
+      const wt = waterAt(cl, x, y);
+      const rg = regionAt(cl, x, y);
+      if (g.land[k] < 0 && wt >= 0) out.push({ of: 'water', kind: g.waters.find((q) => q.id === wt)?.kind ?? 'Sea', name: names.water.get(wt) ?? '' });
+      if (g.land[k] >= 0 && rg >= 0) out.push({ of: 'region', kind: g.regions[rg]?.kind ?? 'Region', name: names.region.get(rg) ?? '' });
       return out;
     },
     set(x, y, of, label) {
@@ -351,6 +376,7 @@ export function showWorld(app: App, start: World): () => void {
     () => {
       map.climateChanged();
       peoples?.climateChanged();
+      provinces?.climateChanged();
     },
     (st) => {
       climateBusy = st !== 'idle';
@@ -422,6 +448,7 @@ export function showWorld(app: App, start: World): () => void {
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
     choice<'all' | 'main' | 'off'>('Labels', [{ value: 'all', label: 'All' }, { value: 'main', label: 'Land & sea only' }, { value: 'off', label: 'Hidden' }], look.labels, (v) => { look.labels = v; map.redraw(); }),
+    choice<ProvinceDisplay>('Provinces', [{ value: 'off', label: 'Hidden' }, { value: 'lines', label: 'Outlines' }, { value: 'colour', label: 'Coloured' }], look.provinces, (v) => { look.provinces = v; map.redraw(); }),
   );
   const zonesPanel = h(
     'section',
@@ -759,6 +786,19 @@ export function showWorld(app: App, start: World): () => void {
     },
   });
   map.el.append(peoples.bar);
+  // The Provinces tab: the province generator.
+  provinces = createProvinces({
+    world: () => world,
+    setSaved(saved) {
+      world = { ...world, provinces: saved };
+      changed();
+    },
+    climate: () => climate.climate,
+    climateBusy: () => climateBusy,
+    redraw: () => map.redraw(),
+    display: () => look.provinces,
+  });
+  if (climate.climate) provinces.climateChanged();
   if (climate.climate) peoples.climateChanged();
   const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
     { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
@@ -767,6 +807,7 @@ export function showWorld(app: App, start: World): () => void {
     { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
     { id: 'geo', name: 'Geography', groups: ['Geography'], extra: [geoPanel] },
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
+    { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel] },
     { id: 'peoples', name: 'Peoples', groups: [], extra: [peoples.panel] },
   ];
   const tabBody = h('div', { class: 'tab-body' });
@@ -778,6 +819,7 @@ export function showWorld(app: App, start: World): () => void {
     if (t.id === 'world') renderWorldTab();
     if (t.id === 'geo') renderGeoPanel();
     peoples?.setActive(t.id === 'peoples');
+    provinces?.setActive(t.id === 'provinces');
     tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
     if (t.groups.length) tools.showGroups(t.groups);
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
@@ -805,7 +847,7 @@ export function showWorld(app: App, start: World): () => void {
   };
   const drops = [
     drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}`, false, mapPanel),
-    drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}`, false, lookPanel, zonesPanel),
+    drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}${look.provinces === 'lines' ? ' · province outlines' : look.provinces === 'colour' ? ' · provinces coloured' : ''}`, false, lookPanel, zonesPanel),
     drop('Layers', () => LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface', false, layersPanel),
     drop('Reference image', () => (world.reference ? 'One laid over the map' : 'None'), false, refPanel),
   ];
@@ -868,6 +910,7 @@ export function showWorld(app: App, start: World): () => void {
     clearTimeout(noticeTimer);
     climate.dispose();
     peoples?.dispose();
+    provinces?.dispose();
     map.dispose();
     window.removeEventListener('beforeunload', beforeUnload);
     window.removeEventListener('keydown', keydown);

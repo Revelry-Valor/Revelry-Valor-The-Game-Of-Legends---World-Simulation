@@ -2,6 +2,7 @@ import { CLIMATE_DEFAULTS, kmPerDegree, type WorldSettings } from './settings';
 import { BRUSHES, COVER_BRUSHES, inSeason, type CoverBrush, type Stroke, type Surface } from './paint';
 import { evaluate } from './terrain';
 import { flowAt, riverNetwork, widthForFlow } from './water';
+import { climateFineGeo } from './finegeo';
 import { computeGeography, type Geography } from './geography';
 
 /**
@@ -292,6 +293,7 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
     delete se.major;
   }
   cl.geo = computeGeography(surface, s, cl);
+  cl.geo.fine = climateFineGeo(surface, s, cl);
   return cl;
 }
 

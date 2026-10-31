@@ -1,4 +1,5 @@
 import { freshWaters, geoCell, geoNames, lakeAt, riverAt, type GeoFeature } from '../core/geography';
+import { regionAt, waterAt } from '../core/finegeo';
 import { autoCoverName, climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
 import { brushInfo, inSeason, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
@@ -1708,13 +1709,17 @@ export function createMapView(o: MapViewOptions): MapView {
         const named = (kind: string, name?: string) => (name ? `${name} (${kind.toLowerCase()})` : kind);
         const where: string[] = [];
         if (p.ground === 'land') {
-          if (geo.region[k] >= 0) where.push(named(geo.regions[geo.region[k]]?.kind ?? 'Region', names.region.get(geo.region[k])));
+          const rg = regionAt(cl, xw, y);
+          if (rg >= 0) where.push(named(geo.regions[rg]?.kind ?? 'Region', names.region.get(rg)));
           if (geo.land[k] >= 0) {
             const a = geo.archipelagoOf.get(geo.land[k]);
             if (a !== undefined) where.push(named('Islands', names.archipelago.get(a)));
             where.push(named(geo.landmasses.find((f) => f.id === geo.land[k])?.kind ?? 'Land', names.land.get(geo.land[k])));
           }
-        } else if (geo.water[k] >= 0) where.push(named(geo.waters.find((f) => f.id === geo.water[k])?.kind ?? 'Sea', names.water.get(geo.water[k])));
+        } else {
+          const wt = waterAt(cl, xw, y);
+          if (wt >= 0) where.push(named(geo.waters.find((f) => f.id === wt)?.kind ?? 'Sea', names.water.get(wt)));
+        }
         if (where.length) add('Place', where.join(', '));
       }
     }
