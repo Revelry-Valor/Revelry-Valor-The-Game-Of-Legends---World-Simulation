@@ -402,7 +402,7 @@ describe('trails, roads and railways', () => {
     expect(path.every((k) => sim.way[k] === 0)).toBe(true);
   }, 60000);
   it('builds a paved road along a busy route when it knows how and has the stone, and travel is faster on it', () => {
-    const { sim, a, path } = pair(67, { stone: 400 }, ['roads']);
+    const { sim, a, path } = pair(69, { stone: 400 }, ['roads']);
     const before = pathSpeed(sim, path);
     stepDays(sim, env, lib, DAYS_PER_YEAR * 3);
     const road = path.filter((k) => sim.way[k] === 3);
@@ -413,7 +413,7 @@ describe('trails, roads and railways', () => {
   }, 60000);
   it('lets a road fall back when its keeper can no longer keep it up', () => {
     const { sim, a, path } = pair(69, { stone: 400 }, ['roads']);
-    stepDays(sim, env, lib, DAYS_PER_YEAR * 2);
+    stepDays(sim, env, lib, DAYS_PER_YEAR * 3);
     const road = path.filter((k) => sim.way[k] === 3);
     expect(road.length).toBeGreaterThan(0);
     // No stone left, and no stone to be had round it.

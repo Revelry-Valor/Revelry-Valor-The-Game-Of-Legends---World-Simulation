@@ -323,9 +323,28 @@ function dropUnusedClans(sim: SimState): void {
 }
 
 /** A race's dawn city: where it woke, holy to all of that race. One per race (placing another moves it). */
+/**
+ * Where a settlement stands: the nearest point of the grid that is land. The grid's points are
+ * where the painted land was sampled, so a settlement there is always on the painted land (a spot
+ * between them, by a coast, can be painted sea).
+ */
+export function landPoint(env: Env, x: number, y: number): { x: number; y: number } {
+  const k = cellOf(env, x, y);
+  if (k >= 0 && env.land[k]) return { x: xOf(env, k), y: yOf(env, k) };
+  let best: { x: number; y: number } | null = null;
+  let bd = Infinity;
+  for (const c of cellsNear(env, x, y, env.step * 3)) {
+    if (!env.land[c]) continue;
+    const d = dist(env, x, y, xOf(env, c), yOf(env, c));
+    if (d < bd) [best, bd] = [{ x: xOf(env, c), y: yOf(env, c) }, d];
+  }
+  return best ?? { x, y };
+}
+
 export function addDawnCity(sim: SimState, env: Env, lib: Library, raceId: string, x: number, y: number, pop = 800, techs: string[] = []): Settlement | null {
   const ri = raceInfo(lib, raceId);
   if (!ri) return null;
+  ({ x, y } = landPoint(env, x, y));
   const old = sim.settlements.find((s) => s.kind === 'dawn' && s.holyTo.includes(raceId));
   if (old) {
     moveSettlement(sim, env, lib, old.id, x, y);
@@ -348,6 +367,7 @@ export function moveSettlement(sim: SimState, env: Env, lib: Library, id: number
   const ri = raceInfo(lib, st.race, st.culture);
   // Its old land is let go (while setting up), and the land round the new place taken.
   if (!sim.started) for (let k = 0; k < env.n; k++) if (sim.owner[k] === st.clan) sim.owner[k] = -1;
+  ({ x, y } = landPoint(env, x, y));
   st.x = x;
   st.y = y;
   if (ri) claimAround(sim, env, x, y, settleRange(ri, st), st.clan);
@@ -1091,7 +1111,8 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
   for (const o of sim.tribes) if (o !== t && dist(env, o.x, o.y, t.x, t.y) < ri.range * 3) crowd += o.pop / 300;
   const p = ri.lifestyle === 'Settled' ? (score >= 0.8 ? 0.3 : 0.05) : ri.lifestyle === 'Nomadic' ? (rich === 1 ? 0.01 : 0) : 0.02 + 0.08 * rich + 0.06 * Math.min(1, crowd);
   if (rand(sim) >= p) return false;
-  const v: Settlement = { id: sim.nextId++, name: t.name, kind: 'village', clan: t.clan, species: t.species, race: t.race, culture: t.culture, x: t.winter.x, y: t.winter.y, pop: t.pop, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(t.pop, ri.need, foundingMonths(env, t.winter.x, t.winter.y, sim.day)), techs: [...(clan?.techs ?? [])] };
+  const at = landPoint(env, t.winter.x, t.winter.y);
+  const v: Settlement = { id: sim.nextId++, name: t.name, kind: 'village', clan: t.clan, species: t.species, race: t.race, culture: t.culture, x: at.x, y: at.y, pop: t.pop, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(t.pop, ri.need, foundingMonths(env, t.winter.x, t.winter.y, sim.day)), techs: [...(clan?.techs ?? [])] };
   sim.settlements.push(v);
   sim.tribes = sim.tribes.filter((q) => q !== t);
   sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
@@ -1104,6 +1125,8 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
  * race's way of life); ruins are rebuilt by those who come to them, the race they are holy to most of all.
  */
 function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): void {
+  // Every settlement on the painted land (older ones set down between the grid's points moved onto it).
+  for (const st of sim.settlements) Object.assign(st, landPoint(env, st.x, st.y));
   for (const st of [...sim.settlements]) {
     if (st.ruined) continue;
     const ri = info(st);
@@ -1131,6 +1154,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     if (!clan) continue;
     if (village && spot && spot.s > 0) {
       st.pop -= n;
+      Object.assign(spot, landPoint(env, spot.x, spot.y));
       const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: spot.x, y: spot.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, spot.x, spot.y, sim.day)), techs: [...(st.techs ?? [])] };
       sim.settlements.push(v);
       log(sim, `People of ${st.name} founded the village of ${v.name}.`, v.x, v.y);
