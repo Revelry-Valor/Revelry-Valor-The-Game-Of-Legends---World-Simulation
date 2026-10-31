@@ -95,6 +95,8 @@ export interface MapOverlay {
   describe?(x: number, y: number): InfoItem[] | null;
   /** While shown, pressing the map never paints (it pans instead). */
   noPaint?: boolean;
+  /** The hand tool: select what is at a place (a city, a tribe…) without moving or changing anything. */
+  pick?(x: number, y: number, pxKm: number): boolean;
 }
 
 export interface MapView {
@@ -144,9 +146,23 @@ export function createMapView(o: MapViewOptions): MapView {
   };
   const measureBtn = h('button', { type: 'button', class: 'ghost', 'aria-pressed': 'false', title: 'Measure the distance along a path you place (right-click to stop)', onclick: () => {
     measure = measure ? null : { pts: [], placing: true };
+    if (measure) setHand(false);
     updateMeasure();
     schedule();
   } }, 'Measure');
+  // The hand: pressing the map only selects (cities, tribes, battles, a realm's land) and drags only pan; nothing is painted or moved.
+  let hand = false;
+  const handBtn = h('button', { type: 'button', class: 'ghost', 'aria-pressed': 'false', title: 'Hand: click to select cities and tribes, drag to pan; nothing is painted or moved', onclick: () => setHand(!hand) }, 'Hand');
+  const setHand = (on: boolean) => {
+    hand = on;
+    handBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    canvas.classList.toggle('hand', on);
+    if (on && measure) {
+      measure = null;
+      updateMeasure();
+    }
+    schedule();
+  };
   // While placing points along a course (river, lava, current, wind): finish or cancel it.
   const finishBtn = h('button', { type: 'button', class: 'primary', hidden: true, title: 'Finish this course (Enter)', onclick: () => finishRoute() }, 'Finish');
   const cancelBtn = h('button', { type: 'button', class: 'ghost', hidden: true, title: 'Cancel this course (Esc)', onclick: () => { routing = null; o.notice('Cancelled.'); schedule(); } }, 'Cancel');
@@ -1554,6 +1570,13 @@ export function createMapView(o: MapViewOptions): MapView {
       schedule();
       return;
     }
+    if (hand && e.button === 0) {
+      o.overlay?.()?.pick?.(wrapX(x), y, 1 / view.scale);
+      panning = true;
+      canvas.classList.add('panning');
+      schedule();
+      return;
+    }
     const ov = o.overlay?.();
     if (ov && e.button === 0 && !spaceDown) {
       if (ov.down?.(wrapX(x), y, 1 / view.scale)) {
@@ -1784,7 +1807,7 @@ export function createMapView(o: MapViewOptions): MapView {
     'div',
     { class: 'stage' },
     canvas,
-    h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, measureBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
+    h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, handBtn, measureBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
     measureBox,
   );
   requestAnimationFrame(fit);

@@ -22,6 +22,7 @@ import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
 import type { MapOverlay } from './mapview';
+import { naturalLands } from './borders';
 import type { InfoItem, ResourceView } from './info';
 
 /**
@@ -44,6 +45,8 @@ export interface PeoplesDeps {
   climateBusy(): boolean;
   /** The selected settlement or realm changed (or what it holds did). */
   selectionChanged?(): void;
+  /** Open the Peoples tab (to show what the hand tool picked). */
+  openPeoples?(): void;
 }
 
 export interface Peoples {
@@ -261,49 +264,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let landDirty = true;
   let beastDirty = true;
   let landImg: HTMLCanvasElement | null = null;
-  /** Border lines (km): every edge between land held by different realms (or by one and no one), and each realm's own edges, set in a little from the line. */
-  let borders: { all: number[]; byClan: Map<number, number[]> } | null = null;
-  const borderLines = () => {
-    const s = sim!;
-    const e = env!;
-    const all: number[] = [];
-    const byClan = new Map<number, number[]>();
-    const half = e.step / 2;
-    const inset = e.step * 0.18;
-    const push = (clan: number, seg: number[]) => {
-      if (clan < 0) return;
-      const l = byClan.get(clan) ?? [];
-      l.push(...seg);
-      byClan.set(clan, l);
-    };
-    for (let j = 0; j < e.h; j++) for (let i = 0; i < e.w; i++) {
-      const k = j * e.w + i;
-      const a = e.land[k] ? s.owner[k] : -1;
-      const x = e.x0 + i * e.step;
-      const y = e.y0 + j * e.step;
-      // East edge.
-      if (i + 1 < e.w || e.wrapKm) {
-        const m = j * e.w + ((i + 1) % e.w);
-        const b = e.land[m] ? s.owner[m] : -1;
-        if (a !== b && (a >= 0 || b >= 0)) {
-          all.push(x + half, y - half, x + half, y + half);
-          push(a, [x + half - inset, y - half, x + half - inset, y + half]);
-          push(b, [x + half + inset, y - half, x + half + inset, y + half]);
-        }
-      }
-      // South edge.
-      if (j + 1 < e.h) {
-        const m = (j + 1) * e.w + i;
-        const b = e.land[m] ? s.owner[m] : -1;
-        if (a !== b && (a >= 0 || b >= 0)) {
-          all.push(x - half, y + half, x + half, y + half);
-          push(a, [x - half, y + half - inset, x + half, y + half - inset]);
-          push(b, [x - half, y + half + inset, x + half, y + half + inset]);
-        }
-      }
-    }
-    return { all, byClan };
-  };
+  /** Border lines (km): polylines along the natural edges of the realms' lands; and when the land was last drawn. */
+  let borders: number[][] | null = null;
+  let landShapes: { fill: string; rings: number[][] }[] = [];
+  let landBuilt = 0;
   let beastImg: HTMLCanvasElement | null = null;
   const hex = (c: string) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
   const fieldImage = (paint: (data: Uint8ClampedArray) => void): HTMLCanvasElement => {
@@ -343,28 +307,42 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         if (s.owner[k] === st.clan) occupiedBy.set(k, st.occupied.by);
       }
     }
-    return fieldImage((data) => {
-      for (let k = 0; k < e.n; k++) {
-        const o = s.owner[k];
-        if (o < 0 || !e.land[k]) continue;
-        const c = colours.get(o) ?? [128, 128, 128];
-        const i = k % e.w;
-        const j = (k / e.w) | 0;
-        // Borders: next to land that is someone else's (or no one's).
-        const nb = [i > 0 ? k - 1 : e.wrapKm ? k + e.w - 1 : -1, i < e.w - 1 ? k + 1 : e.wrapKm ? k - e.w + 1 : -1, j > 0 ? k - e.w : -1, j < e.h - 1 ? k + e.w : -1];
-        const edge = nb.some((m) => m >= 0 && e.land[m] && s.owner[m] !== o);
-        // Held by an enemy: striped in the occupier's colour.
-        const occ = occupiedBy.get(k);
-        if (occ !== undefined && (i + j) % 6 < 3) {
-          const oc = hex(clanOf(occ)?.colour ?? '#000000');
-          data.set([oc[0], oc[1], oc[2], 200], k * 4);
-          continue;
-        }
-        // Land being taken over: lighter.
-        const contested = s.rival[k] >= 0 && s.rivalUse[k] > 0;
-        data.set([c[0], c[1], c[2], contested ? 70 : edge ? 140 : 120], k * 4);
+    // Natural borders: the claims smoothed and gently meandering, on a finer grid (borders.ts).
+    const nat = naturalLands({ w: e.w, h: e.h, wrap: !!e.wrapKm, land: e.land, owner: s.owner, seed: s.seed }, e.w * e.h > 120000 ? 2 : e.w * e.h > 40000 ? 3 : 4);
+    const cv = h('canvas', { width: nat.W, height: nat.H }) as HTMLCanvasElement;
+    const g = cv.getContext('2d')!;
+    const img = g.createImageData(nat.W, nat.H);
+    const data = img.data;
+    const stripe = Math.max(3, nat.F * 2);
+    for (let q = 0; q < nat.label.length; q++) {
+      const o = nat.label[q];
+      if (o < 0) continue;
+      const k = nat.cell[q];
+      const X = q % nat.W;
+      const Y = (q / nat.W) | 0;
+      // Held by an enemy: striped in the occupier's colour.
+      const occ = occupiedBy.get(k);
+      if (occ !== undefined && s.owner[k] === o && (X + Y) % (stripe * 2) < stripe) {
+        const oc = hex(clanOf(occ)?.colour ?? '#000000');
+        data.set([oc[0], oc[1], oc[2], 200], q * 4);
+        continue;
       }
+      // Land being taken over: a pale wash over its colour.
+      if (s.owner[k] === o && s.rival[k] >= 0 && s.rivalUse[k] > 0) data.set([255, 250, 235, 70], q * 4);
+    }
+    g.putImageData(img, 0, 0);
+    // The border lines, in km.
+    const fx = e.step / nat.F;
+    const ox = e.x0 - e.step / 2;
+    const oy = e.y0 - e.step / 2;
+    const toKm = (l: number[]) => l.map((v, i) => (i % 2 ? oy + v * fx : ox + v * fx));
+    borders = nat.lines.map(toKm);
+    // Each realm's land as smooth shapes, filled in its colour.
+    landShapes = [...nat.rings].map(([o, rings]) => {
+      const c = colours.get(o) ?? [128, 128, 128];
+      return { fill: `rgba(${c[0]},${c[1]},${c[2]},0.5)`, rings: rings.map(toKm) };
     });
+    return cv;
   };
   const drawBeast = (id: string) => {
     const D = sim!.beasts[id];
@@ -422,40 +400,51 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         blit(beastImg);
       }
       if (showLand && s.clans.length) {
-        if (landDirty || !landImg) {
+        // Rebuilt when the claims change (at most once a second while the years run).
+        const now = performance.now();
+        if (!landImg || (landDirty && (!playing || now - landBuilt > 1000))) {
           landImg = drawLand();
-          borders = borderLines();
+          landBuilt = now;
+          landDirty = false;
         }
-        landDirty = false;
-        blit(landImg, false);
-        // Borders: hard lines along the edges of each realm's land (dark, with the realm's colour inside).
+        // The realms' lands: smooth shapes (holes cut out), then occupation stripes and contested land over them.
+        g.save();
+        for (const c of copies) for (const sh of landShapes) {
+          g.beginPath();
+          for (const l of sh.rings) {
+            for (let i = 0; i < l.length; i += 2) {
+              const [x, y] = at(l[i], l[i + 1], c);
+              if (i) g.lineTo(x, y);
+              else g.moveTo(x, y);
+            }
+            g.closePath();
+          }
+          g.fillStyle = sh.fill;
+          g.fill('evenodd');
+        }
+        g.restore();
+        blit(landImg, true);
+        // Borders: hard dark lines, following the land's natural shapes.
         if (borders) {
-          const w = Math.max(1.6, Math.min(3, e.step * scale * 0.35));
+          const w = Math.max(1.6, Math.min(3, e.step * scale * 0.3));
           g.save();
-          g.lineCap = 'square';
+          g.lineJoin = 'round';
+          g.lineCap = 'round';
           for (const c of copies) {
-            g.strokeStyle = 'rgba(20,16,12,0.9)';
-            g.lineWidth = w + 1.4;
             g.beginPath();
-            for (let i = 0; i < borders.all.length; i += 4) {
-              const [ax, ay] = at(borders.all[i], borders.all[i + 1], c);
-              const [bx, by] = at(borders.all[i + 2], borders.all[i + 3], c);
-              g.moveTo(ax, ay);
-              g.lineTo(bx, by);
-            }
-            g.stroke();
-            for (const [clan, segs] of borders.byClan) {
-              g.strokeStyle = clanOf(clan)?.colour ?? '#888';
-              g.lineWidth = Math.max(0.8, w * 0.45);
-              g.beginPath();
-              for (let i = 0; i < segs.length; i += 4) {
-                const [ax, ay] = at(segs[i], segs[i + 1], c);
-                const [bx, by] = at(segs[i + 2], segs[i + 3], c);
-                g.moveTo(ax, ay);
-                g.lineTo(bx, by);
+            for (const l of borders) {
+              for (let i = 0; i < l.length; i += 2) {
+                const [x, y] = at(l[i], l[i + 1], c);
+                if (i) g.lineTo(x, y);
+                else g.moveTo(x, y);
               }
-              g.stroke();
             }
+            g.strokeStyle = 'rgba(20,16,12,0.9)';
+            g.lineWidth = w;
+            g.stroke();
+            g.strokeStyle = 'rgba(255,248,232,0.35)';
+            g.lineWidth = Math.max(0.6, w * 0.3);
+            g.stroke();
           }
           g.restore();
         }
@@ -915,6 +904,27 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       dragging = null;
       d.changed();
       render();
+    },
+    pick(x, y, pk) {
+      if (!ready()) return false;
+      const s = sim!;
+      const t = tribeAt(x, y, pk);
+      const st = t ? null : settlementAt(x, y, pk);
+      const b = t || st ? undefined : [...(s.battles ?? [])].reverse().find((q) => s.day - q.day <= 720 && Math.hypot(q.x - x, q.y - y) < pk * 9);
+      const k = cellOf(x, y);
+      const realm = t || st || b || k < 0 || s.owner[k] < 0 ? null : clanOf(s.owner[k]);
+      if (!t && !st && !b && !realm) return false;
+      selected = t?.id ?? st?.id ?? null;
+      selectedRealm = realm ? realm.id : null;
+      if (b) selectedBattle = b.id;
+      if (!active) d.openPeoples?.();
+      render();
+      d.redraw();
+      // Bring its card into view in the panel.
+      const name = t?.name ?? st?.name;
+      if (name) requestAnimationFrame(() => [...panel.querySelectorAll('h3')].filter((x) => x.textContent === name).pop()?.scrollIntoView({ block: 'start' }));
+      if (b) requestAnimationFrame(() => document.querySelector('.battle-report')?.scrollIntoView({ block: 'nearest' }));
+      return true;
     },
     describe(x, y) {
       if (!ready()) return null;

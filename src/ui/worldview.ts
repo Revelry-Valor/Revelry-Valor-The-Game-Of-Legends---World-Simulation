@@ -752,6 +752,7 @@ export function showWorld(app: App, start: World): () => void {
     },
     climateBusy: () => climateBusy,
     selectionChanged: () => resources.show(peoples?.resources() ?? null),
+    openPeoples: () => showTab('peoples'),
     openLibrary: () => {
       save();
       app.library(world);
