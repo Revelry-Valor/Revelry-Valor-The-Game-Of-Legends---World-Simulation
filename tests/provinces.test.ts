@@ -125,7 +125,11 @@ describe('provinces', () => {
     expect(crossed / landPts).toBeLessThan(0.01);
   });
   it('gives mountains, lakes and big rivers their due', () => {
-    expect(pm.provinces.some((p) => p.terrain === 'Mountains' || p.terrain === 'Highlands' || p.kind === 'wasteland')).toBe(true);
+    // A range is split into mountain provinces (only the heart of a wide one is impassable).
+    const mountains = pm.provinces.filter((p) => p.kind === 'land' && (p.terrain === 'Mountains' || p.terrain === 'Highlands'));
+    const waste = pm.provinces.filter((p) => p.kind === 'wasteland');
+    expect(mountains.length).toBeGreaterThan(2);
+    expect(mountains.reduce((a, p) => a + p.area, 0)).toBeGreaterThan(waste.reduce((a, p) => a + p.area, 0));
     expect(pm.provinces.some((p) => p.kind === 'lake')).toBe(true);
     expect(pm.provinces.some((p) => p.river)).toBe(true);
     // No province holds land on both banks of the big river: walk across it and the province changes.

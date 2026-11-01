@@ -1187,6 +1187,12 @@ Like Crusader Kings 3: the world is split into provinces, and much of the simula
   - Painting reuses the provinces as last grown, so only the last steps run again.
 - *Stability:* generating fresh and then updating an unchanged map gives the same provinces. A long, thin zone gets enough seeds the first time, so an update adds none.
 
+**Fixed after testing (mountains):**
+- Painted ranges are mostly the Peaks zone. Every peak used to be impassable, which left a range as a strip of wasteland with a thin rim of mountain provinces.
+- Now highlands, high mountains and peaks form one mountain zone. Mountain provinces run from the foot of a range to its crest, cutting across it, and a range is one zone however many natural regions it spans.
+- Only peaks at least a province's width from lower ground are impassable: the heart of a wide range.
+- Ways can cross mountain provinces, at peak ground's roughness of 3.5.
+
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.

@@ -123,9 +123,16 @@ export function smallestProvinceMi(s: WorldSettings): number {
   return Math.max(PROVINCE_SIZE_MI.min, Math.ceil(kmToMiles(Math.sqrt((s.widthKm * s.heightKm) / MAX_FINE_POINTS) * 6)));
 }
 
-/** Zone groups by relief band: lowland and hills together, then each higher band and plateaus on their own. */
-const GROUP_OF_BAND = [0, 0, 1, 2, 3, 4];
+/**
+ * Zone groups by relief band: lowland and hills together; highlands, high mountains and peaks
+ * together (mountain provinces run from the foot of a range up to its crest, as in Crusader
+ * Kings); plateaus on their own. Only the heart of a wide range of peaks, well away from any
+ * lower ground, is impassable wasteland.
+ */
+const GROUP_OF_BAND = [0, 0, 1, 1, 1, 4];
 const PEAKS_GROUP = 3;
+/** Peaks at least this many province widths from lower ground are impassable (the heart of a wide range). */
+const WASTE_DEPTH = 1;
 const LAND = 0;
 const LAKE = 1;
 const SEA = 2;
@@ -164,12 +171,35 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   // Keys: land by region and band group, lakes, and each water; big rivers are walls (−1).
   const key = new Int32Array(n);
   const medium = (k: number) => (!g.land[k] ? SEA : g.lake[k] ? LAKE : LAND);
+  // Each point's group; the heart of a wide range of peaks (far from lower ground) is wasteland.
+  const grp = new Uint8Array(n);
+  {
+    const depth = new Float32Array(n).fill(Infinity);
+    const queue: number[] = [];
+    for (let k = 0; k < n; k++) {
+      grp[k] = GROUP_OF_BAND[g.band[k]];
+      if (!(g.land[k] && g.band[k] === BAND.peaks)) {
+        depth[k] = 0;
+        queue.push(k);
+      }
+    }
+    for (let q = 0; q < queue.length; q++) {
+      const k = queue[q];
+      for (const m of nb(k, buf)) if (depth[m] === Infinity) {
+        depth[m] = depth[k] + px;
+        queue.push(m);
+      }
+    }
+    const deep = milesToKm(sizeMi) * WASTE_DEPTH;
+    for (let k = 0; k < n; k++) if (g.land[k] && g.band[k] === BAND.peaks && depth[k] > deep) grp[k] = PEAKS_GROUP;
+  }
   for (let k = 0; k < n; k++) {
     const m = medium(k);
     if (m === SEA) key[k] = -100 - (fg.water[k] + 1);
     else if (m === LAKE) key[k] = -10;
     else if (g.river[k] === 2) key[k] = -1;
-    else key[k] = (fg.region[k] + 1) * 8 + GROUP_OF_BAND[g.band[k]];
+    // Lowland by natural region; a mountain range or plateau is one zone however many regions it spans.
+    else key[k] = (grp[k] === 0 ? fg.region[k] + 1 : 0) * 8 + grp[k];
   }
   const zone = new Int32Array(n).fill(-1);
   let zones = 0;
@@ -208,7 +238,7 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
     const z = zone[k];
     if (z < 0 || key[k] === -1) continue;
     zMedium[z] = medium(k);
-    zGroup[z] = medium(k) === LAND ? GROUP_OF_BAND[g.band[k]] : 0;
+    zGroup[z] = medium(k) === LAND ? grp[k] : 0;
   }
   const pxArea = px * px;
   const landTarget = (sizeKm * sizeKm) / pxArea;
@@ -416,7 +446,7 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
       kind === 'sea' ? geo?.waters[water]?.kind ?? 'Sea'
       : kind === 'lake' ? 'Lake'
       : kind === 'wasteland' ? 'Impassable peaks'
-      : band === BAND.mountains ? 'Mountains'
+      : band === BAND.mountains || band === BAND.peaks ? 'Mountains'
       : band === BAND.highlands ? 'Highlands'
       : band === BAND.plateau ? 'Plateau'
       : band === BAND.hills && regionKind !== 'Mountains' && regionKind !== 'Highlands' ? `${regionKind} hills`
