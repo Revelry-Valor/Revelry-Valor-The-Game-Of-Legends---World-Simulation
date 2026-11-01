@@ -5,6 +5,7 @@ import { isFood, NEEDS, resInfoOf } from './economy';
 import type { RaceInfo } from './sim';
 import type { Caravan, Settlement, SimState } from './state';
 import { allRail, knows, pathCells, pathSpeed, TRAIN_COAL_PER_100KM, WAYS } from './ways';
+import { nextWaypoint, routePlan, SHIP_PACE, type RoutePlan } from './routes';
 import { cultureFx, note } from './culture';
 import { acceptance, noteBetween } from './cultureChange';
 
@@ -202,6 +203,20 @@ function pathBetween(c: TradeContext, a: Settlement, b: Settlement): number[] {
   if (!p) m.set(key, (p = pathCells(c.env, a.x, a.y, b.x, b.y, c.cellAt)));
   return p;
 }
+/** The way by sea between two coastal settlements (kept like the paths), if it goes by sea at all. */
+const seaPlans = new WeakMap<SimState, Map<string, RoutePlan>>();
+function seaPlanBetween(c: TradeContext, a: Settlement, b: Settlement): RoutePlan {
+  let m = seaPlans.get(c.sim);
+  if (!m) seaPlans.set(c.sim, (m = new Map()));
+  const key = `${a.id}:${b.id}`;
+  let p = m.get(key);
+  if (!p) m.set(key, (p = routePlan(c.env, a.x, a.y, b.x, b.y, true)));
+  return p;
+}
+const coastal = (c: TradeContext, st: Settlement) => {
+  const k = c.cellAt(st.x, st.y);
+  return k >= 0 && !!c.env.coast[k];
+};
 
 /** Each month: settlements look for a good trade, and send a caravan if one is worth the road. */
 export function tradeMonth(c: TradeContext): void {
@@ -243,18 +258,26 @@ export function tradeMonth(c: TradeContext): void {
     if (workers < people * 3) continue;
     const animals = animalsHere ? people * 2 : 0;
     const baseCapacity = (people * CARRY_PERSON + animals * CARRY_ANIMAL) * (wagons ? 1.5 : 1);
-    let best: { b: Settlement; cargo: Record<string, number>; gain: number; worth: number; train: boolean; coal: number } | null = null;
+    let best: { b: Settlement; cargo: Record<string, number>; gain: number; worth: number; train: boolean; coal: number; ship: boolean } | null = null;
+    // Coastal towns that know sailing may send their goods by ship, through the sea provinces.
+    const sails = env.prov.real && coastal(c, a) && knows(c.lib, a, 'sailing');
     for (const b of live) {
       if (b === a) continue;
       const d = c.dist(a.x, a.y, b.x, b.y);
-      if (d > speed * fastest * 25) continue;
+      if (d > speed * Math.max(fastest, sails ? SHIP_PACE : 1) * 25) continue;
       // Days on the road, faster along trails, roads and railways; up to about 25 days away.
       const cells = pathBetween(c, a, b);
-      const days = d / (speed * pathSpeed(sim, cells, env.fresh));
+      let days = d / (speed * pathSpeed(sim, cells, env.fresh));
+      let ship = false;
+      if (sails && coastal(c, b)) {
+        const sp = seaPlanBetween(c, a, b);
+        const sd = sp.landKm / speed + sp.seaKm / (speed * SHIP_PACE);
+        if (sp.seaKm > 0 && sd < days) [days, ship] = [sd, true];
+      }
       if (days > 25) continue;
       // A train, where the whole way is railway and there is coal to burn there and back.
       const coal = (2 * d * TRAIN_COAL_PER_100KM) / 100;
-      const train = allRail(sim, cells) && (a.economy!.stores.coal ?? 0) >= coal + 1;
+      const train = !ship && allRail(sim, cells) && (a.economy!.stores.coal ?? 0) >= coal + 1;
       const capacity = baseCapacity * (train ? 10 : 1);
       const w = willingness(c, a, b);
       if (w <= 0) continue;
@@ -286,14 +309,14 @@ export function tradeMonth(c: TradeContext): void {
       let got = 0;
       for (const [id, u] of Object.entries(back)) got += u * (pA[id] ?? baseWorth(env, id));
       const gain = (got / cost - given) * w;
-      if (gain > 2 && (!best || gain > best.gain)) best = { b, cargo, gain, worth: given, train, coal };
+      if (gain > 2 && (!best || gain > best.gain)) best = { b, cargo, gain, worth: given, train, coal, ship };
     }
     if (!best) continue;
     // Off it goes.
     for (const [id, u] of Object.entries(best.cargo)) a.economy!.stores[id] -= u;
     if (best.train) a.economy!.stores.coal -= best.coal;
     a.economy!.away = (a.economy!.away ?? 0) + people;
-    const cv: Caravan = { id: sim.nextId++, from: a.id, to: best.b.id, clan: a.clan, x: a.x, y: a.y, leg: 'out', cargo: best.cargo, people, animals, speed, worth: best.worth, started: sim.day, ...(best.train ? { train: true } : {}) };
+    const cv: Caravan = { id: sim.nextId++, from: a.id, to: best.b.id, clan: a.clan, x: a.x, y: a.y, leg: 'out', cargo: best.cargo, people, animals, speed, worth: best.worth, started: sim.day, ...(best.train ? { train: true } : {}), ...(best.ship ? { ship: true } : {}) };
     sim.caravans.push(cv);
     traded(a, sim.day).out += best.worth;
     traded(a, sim.day).caravans++;
@@ -324,14 +347,32 @@ export function caravansDay(c: TradeContext): void {
     }
     // Feet on the ground: the way gets worn.
     const k = c.cellAt(cv.x, cv.y);
-    if (k >= 0) sim.traffic[k] += (cv.people + cv.animals) / 10;
+    if (k >= 0 && env.land[k]) sim.traffic[k] += (cv.people + cv.animals) / 10;
     const d = c.dist(cv.x, cv.y, goal.x, goal.y);
-    // Faster along the way it is on.
-    const step = cv.speed * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
-    if (d > step) {
-      let dx = goal.x - cv.x;
+    // Faster along the way it is on (or under sail).
+    const step = cv.ship ? cv.speed * SHIP_PACE : cv.speed * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
+    if (d > step && cv.ship) {
+      // Under sail: straight from one sea province's middle to the next.
+      const way = nextWaypoint(env, cv.x, cv.y, goal.x, goal.y, true);
+      let dx = way.x - cv.x;
       if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
-      const a0 = Math.atan2(goal.y - cv.y, dx);
+      const dw = Math.hypot(dx, way.y - cv.y);
+      const f = dw > step ? step / dw : 1;
+      cv.x = cv.x + dx * f;
+      cv.y = cv.y + (way.y - cv.y) * f;
+      if (env.wrapKm) cv.x = ((cv.x % env.wrapKm) + env.wrapKm) % env.wrapKm;
+      if (sim.day - cv.started > 200) {
+        if (cv.leg === 'out') cv.leg = 'home';
+        else arriveHome(c, cv, home);
+      }
+      continue;
+    }
+    if (d > step) {
+      // Province to province on land (routes.ts).
+      const way = nextWaypoint(env, cv.x, cv.y, goal.x, goal.y);
+      let dx = way.x - cv.x;
+      if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
+      const a0 = Math.atan2(way.y - cv.y, dx);
       let moved = false;
       for (const turn of [0, 0.5, -0.5, 1, -1, 1.5, -1.5]) {
         const nx = cv.x + Math.cos(a0 + turn) * step;

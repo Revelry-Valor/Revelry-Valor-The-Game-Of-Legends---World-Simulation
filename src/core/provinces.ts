@@ -1,5 +1,5 @@
 import type { Climate } from './climate';
-import { BAND, fineGeography, fineGrid, fineIndex, neighbours4, sampleGround } from './finegeo';
+import { BAND, fineGeography, fineGrid, fineIndex, keepWhole, neighbours4, sampleGround } from './finegeo';
 import { fbm } from './noise';
 import type { Surface } from './paint';
 import type { WorldSettings } from './settings';
@@ -37,6 +37,33 @@ export interface SavedProvinces {
   seeds: number[];
   ids: number[];
   nextId: number;
+  /** Changes painted by hand, in order (applied after the provinces grow). */
+  edits?: ProvinceEdit[];
+}
+
+/** A stroke of the province paint tool: the ground under it (within `r` km of its line) goes to province `id`. */
+export interface ProvinceEdit {
+  id: number;
+  r: number;
+  pts: number[];
+}
+
+/** What a run keeps for the next (the provinces as grown, before hand edits), so painting needs only the last steps again. */
+export interface ProvinceCache {
+  key?: string;
+  stage?: Stage;
+}
+interface Stage {
+  grid: Grid;
+  g: ReturnType<typeof sampleGround>;
+  fg: ReturnType<typeof fineGeography>;
+  zone: Int32Array;
+  zm: Uint8Array;
+  zg: Uint8Array;
+  seedPix: number[];
+  seedId: number[];
+  nextId: number;
+  label: Int32Array;
 }
 
 export type ProvinceKind = 'land' | 'sea' | 'lake' | 'wasteland';
@@ -104,9 +131,25 @@ const LAKE = 1;
 const SEA = 2;
 
 /** Split the world into provinces. With `saved`, they grow from its seeds (keeping their ids); otherwise from new ones. */
-export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climate, opts: { sizeMi: number; seaFactor: number; saved?: SavedProvinces | null }): ProvinceMap {
+export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climate, opts: { sizeMi: number; seaFactor: number; saved?: SavedProvinces | null }, cache?: ProvinceCache): ProvinceMap {
   const sizeMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, opts.sizeMi));
   const seaFactor = Math.max(1, Math.min(8, opts.seaFactor));
+  const fresh = !opts.saved || opts.saved.sizeMi !== sizeMi || opts.saved.seaFactor !== seaFactor;
+  const keyBase = `${s.seed}|${s.widthKm}|${s.heightKm}|${s.edges}|${surface.nextId}|${surface.strokes.length}|${sizeMi}|${seaFactor}|`;
+  const stage = !fresh && cache?.stage && cache.key === keyBase + seedSig(opts.saved!) ? cache.stage : growStage(surface, s, cl, sizeMi, seaFactor, fresh, opts.saved ?? null);
+  const map = finish(stage, cl, sizeMi, seaFactor, opts.saved?.edits ?? []);
+  if (cache) {
+    cache.key = keyBase + seedSig(map.saved);
+    cache.stage = stage;
+  }
+  return map;
+}
+
+const seedSig = (sv: SavedProvinces) => `${sv.nextId}:${sv.ids.length}:${Math.round(sv.seeds.reduce((a, b) => a + b, 0) * 100)}`;
+
+/** Zones, seeds and growth: the provinces as grown, before hand edits. */
+function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: number, seaFactor: number, fresh: boolean, saved: SavedProvinces | null): Stage {
+  const opts = { saved };
   const sizeKm = milesToKm(sizeMi);
   const grid = fineGrid(s, provinceGridKm(s, sizeMi));
   const g = sampleGround(surface, s, grid);
@@ -116,7 +159,6 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
   const wrap = g.wrapKm > 0;
   const nb = neighbours4(w, h, wrap);
   const buf: number[] = [];
-  const geo = cl.geo;
 
   // ---- Zones: what no province crosses ----
   // Keys: land by region and band group, lakes, and each water; big rivers are walls (−1).
@@ -210,7 +252,6 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
   const seedId: number[] = [];
   const taken = new Set<number>();
   let nextId = opts.saved?.nextId ?? 1;
-  const fresh = !opts.saved || opts.saved.sizeMi !== sizeMi || opts.saved.seaFactor !== seaFactor;
   const zoneSeeds: number[][] = Array.from({ length: Z }, () => []);
   if (!fresh && opts.saved) {
     const sv = opts.saved;
@@ -230,9 +271,9 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
   };
   for (let z = 0; z < Z; z++) {
     const size = zoneSize[z];
-    const want = Math.max(1, Math.round(size / target(z)));
     const have = zoneSeeds[z].length;
-    if (have >= Math.max(1, Math.floor(want * 0.6))) continue;
+    // Updating: new seeds only where provinces would otherwise come out over twice the size.
+    if (have > 0 && size / have <= 2 * target(z)) continue;
     // About one seed to each cell of a lattice a province across (jittered), where the zone fills enough of the cell.
     const sp = Math.sqrt(target(z));
     const offX = hash(z, 1, 7) * sp;
@@ -257,23 +298,22 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
     }
     const old = zoneSeeds[z].map((si) => seedPix[si]);
     const farFromOld = (k: number) => old.every((o) => sq(dxWrap(xOf(o) - xOf(k))) + sq(yOf(o) - yOf(k)) > sq(sp * px * 0.6));
-    let added = 0;
-    let fallback: { count: number; best: number } | null = null;
-    for (const c of cells.values()) {
-      if (!fallback || c.count > fallback.count) fallback = c;
-      if (c.count < 0.35 * sp * sp || taken.has(c.best) || !farFromOld(c.best)) continue;
-      taken.add(c.best);
+    // Cells the zone fills enough of first; then, while its provinces would still come out over
+    // twice the size (a long, thin zone), the fullest of the rest; and at least one seed.
+    const list = [...cells.values()].sort((p, q) => q.count - p.count);
+    const sow = (k: number) => {
+      taken.add(k);
+      old.push(k);
       zoneSeeds[z].push(seedPix.length);
-      seedPix.push(c.best);
+      seedPix.push(k);
       seedId.push(nextId++);
-      added++;
+    };
+    for (const c of list) if (c.count >= 0.35 * sp * sp && !taken.has(c.best) && farFromOld(c.best)) sow(c.best);
+    for (const c of list) {
+      if (zoneSeeds[z].length && size / zoneSeeds[z].length <= 2 * target(z)) break;
+      if (!taken.has(c.best) && farFromOld(c.best)) sow(c.best);
     }
-    if (!added && !have && fallback && !taken.has(fallback.best)) {
-      taken.add(fallback.best);
-      zoneSeeds[z].push(seedPix.length);
-      seedPix.push(fallback.best);
-      seedId.push(nextId++);
-    }
+    if (!zoneSeeds[z].length && list.length && !taken.has(list[0].best)) sow(list[0].best);
   }
 
   // ---- Growth ----
@@ -308,6 +348,24 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
   }
   // Each province in one piece (growing across corners can leave a corner cut off).
   wholeProvinces(label, zone, w, h, wrap);
+  return { grid, g, fg, zone, zm, zg, seedPix, seedId, nextId, label };
+}
+
+/** Hand edits, then each province's record, borders and outline. */
+function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits: ProvinceEdit[]): ProvinceMap {
+  const { grid, g, fg, zone, zm, zg, seedPix, seedId, nextId } = st;
+  const label = st.label.slice();
+  const { w, h, px, x0, y0 } = grid;
+  const n = w * h;
+  const wrap = g.wrapKm > 0;
+  const nb = neighbours4(w, h, wrap);
+  const buf: number[] = [];
+  const geo = cl.geo;
+  const pxArea = px * px;
+  const xOf = (k: number) => x0 + (k % w) * px;
+  const yOf = (k: number) => y0 + ((k / w) | 0) * px;
+  const dxWrap = (dx: number) => (wrap ? dx - Math.round(dx / g.wrapKm) * g.wrapKm : dx);
+  if (edits.length) applyEdits(label, edits, seedId, g, grid);
 
   // ---- The provinces ----
   const S = seedPix.length;
@@ -340,9 +398,12 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
     neighbours[a].push(b);
     neighbours[b].push(a);
   }
+  // A province painted away entirely is gone (its seed stays, so the edit holds when the provinces are grown again).
+  const rep = Int32Array.from(seedPix);
+  for (let k = 0; k < n; k++) if (label[k] >= 0 && label[rep[label[k]]] !== label[k]) rep[label[k]] = k;
   const provinces: Province[] = [];
   for (let l = 0; l < S; l++) {
-    const k0 = seedPix[l];
+    const k0 = rep[l];
     const z = zone[k0];
     const md = zm[z];
     let band = 0;
@@ -360,7 +421,7 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
       : band === BAND.plateau ? 'Plateau'
       : band === BAND.hills && regionKind !== 'Mountains' && regionKind !== 'Highlands' ? `${regionKind} hills`
       : regionKind;
-    let x = xOf(k0) + (cnt[l] ? sx[l] / cnt[l] : 0);
+    let x = xOf(seedPix[l]) + (cnt[l] ? sx[l] / cnt[l] : 0);
     if (wrap) x = ((x % g.wrapKm) + g.wrapKm) % g.wrapKm;
     let y = cnt[l] ? sy[l] / cnt[l] : yOf(k0);
     // A crescent's middle can lie outside it: then its seed stands in.
@@ -385,6 +446,24 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
   const ringMap = assembleRings(chains, w, wrap, held);
   const borders = chains.map((c) => ({ pts: toKm(c.pts), a: c.left, b: c.right }));
   const rings = provinces.map((_, l) => (ringMap.get(l) ?? []).map(toKm));
+  // Drop the provinces painted away, renumbering the rest.
+  if (provinces.some((_, l) => !cnt[l])) {
+    const to = new Int32Array(S).fill(-1);
+    let m = 0;
+    for (let l = 0; l < S; l++) if (cnt[l]) to[l] = m++;
+    for (let k = 0; k < n; k++) if (label[k] >= 0) label[k] = to[label[k]];
+    const keep = provinces.filter((_, l) => cnt[l]);
+    for (const p of keep) p.neighbours = p.neighbours.map((q) => to[q]).filter((q) => q >= 0);
+    for (const b of borders) {
+      if (b.a >= 0) b.a = to[b.a];
+      if (b.b >= 0) b.b = to[b.b];
+    }
+    const keptRings = rings.filter((_, l) => cnt[l]);
+    provinces.length = 0;
+    provinces.push(...keep);
+    rings.length = 0;
+    rings.push(...keptRings);
+  }
 
   const saved: SavedProvinces = {
     v: 1,
@@ -393,6 +472,7 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
     seeds: seedPix.flatMap((k) => [Math.round(xOf(k) * 100) / 100, Math.round(yOf(k) * 100) / 100]),
     ids: seedId.slice(),
     nextId,
+    ...(edits.length ? { edits } : {}),
   };
   return { grid, wrapKm: g.wrapKm, label, provinces, borders, rings, saved };
 }
@@ -647,4 +727,55 @@ function wholeProvinces(label: Int32Array, zone: Int32Array, w: number, h: numbe
       if (t !== undefined) label[k] = t;
     }
   }
+}
+
+/**
+ * Hand edits: the ground within each stroke goes to its province, land to land and sea to sea
+ * (a stroke never turns land into a sea province, or the reverse). Afterwards every province is
+ * one piece again: ground cut off from its province by the paint joins the province round it.
+ */
+function applyEdits(label: Int32Array, edits: ProvinceEdit[], seedId: number[], g: ReturnType<typeof sampleGround>, grid: Grid): void {
+  const { w, h, px, x0, y0 } = grid;
+  const wrap = g.wrapKm > 0;
+  const index = new Map(seedId.map((id, l) => [id, l]));
+  const wet = (k: number) => !g.land[k];
+  for (const e of edits) {
+    const l = index.get(e.id);
+    if (l === undefined || e.r <= 0 || e.pts.length < 2) continue;
+    // Which ground the province is (from any point it holds now).
+    let mine = -1;
+    for (let k = 0; k < label.length && mine < 0; k++) if (label[k] === l) mine = k;
+    if (mine < 0) continue;
+    const sea = wet(mine);
+    const R = Math.ceil(e.r / px);
+    const pts = e.pts.length === 2 ? [e.pts[0], e.pts[1], e.pts[0], e.pts[1]] : e.pts;
+    for (let q = 0; q + 3 < pts.length; q += 2) {
+      const ax = pts[q];
+      const ay = pts[q + 1];
+      let bx = pts[q + 2];
+      const by = pts[q + 3];
+      if (wrap && Math.abs(bx - ax) > g.wrapKm / 2) bx -= Math.sign(bx - ax) * g.wrapKm;
+      const i0 = Math.floor((Math.min(ax, bx) - x0) / px) - R;
+      const i1 = Math.ceil((Math.max(ax, bx) - x0) / px) + R;
+      const j0 = Math.max(0, Math.floor((Math.min(ay, by) - y0) / px) - R);
+      const j1 = Math.min(h - 1, Math.ceil((Math.max(ay, by) - y0) / px) + R);
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      for (let j = j0; j <= j1; j++) for (let ii = i0; ii <= i1; ii++) {
+        let i = ii;
+        if (i < 0 || i >= w) {
+          if (!wrap) continue;
+          i = ((i % w) + w) % w;
+        }
+        const x = x0 + ii * px;
+        const y = y0 + j * px;
+        const t = len2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2)) : 0;
+        if ((x - ax - t * dx) ** 2 + (y - ay - t * dy) ** 2 > e.r * e.r) continue;
+        const k = j * w + i;
+        if (wet(k) === sea) label[k] = l;
+      }
+    }
+  }
+  keepWhole(label, () => true, neighbours4(w, h, wrap), (k, m) => wet(k) === wet(m));
 }

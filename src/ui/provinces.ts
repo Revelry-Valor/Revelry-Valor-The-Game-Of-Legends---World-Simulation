@@ -4,7 +4,10 @@ import { REGION_KINDS } from '../core/geography';
 import { generateProvinces, PROVINCE_DEFAULTS, PROVINCE_SIZE_MI, smallestProvinceMi, type ProvinceMap, type SavedProvinces } from '../core/provinces';
 import type { World } from '../core/world';
 import ProvinceWorker from '../render/provinceworker?worker&inline';
-import { h, numberField } from './dom';
+import { choice, h, numberField } from './dom';
+import { climateAt, ZONE_INFO } from '../core/climate';
+import { geoNames } from '../core/geography';
+import { milesToKm } from '../core/units';
 import type { InfoItem } from './info';
 import type { MapOverlay } from './mapview';
 
@@ -27,6 +30,8 @@ export interface ProvincesDeps {
   display(): ProvinceDisplay;
   /** The provinces were made, updated or removed. */
   mapChanged?(): void;
+  /** What the peoples have in a province (holder, settlements, people, culture, faith, resources), by its index. */
+  provinceInfo?(index: number): InfoItem[];
 }
 
 export interface Provinces {
@@ -49,6 +54,12 @@ export function createProvinces(d: ProvincesDeps): Provinces {
   let busy = false;
   let error = '';
   let active = false;
+  /** Select (look at a province) or Paint (reshape provinces by painting ground from one into another). */
+  let mode: 'select' | 'paint' = 'select';
+  /** The selected province (its id), the brush (miles across), and the stroke being painted (km). */
+  let selected: number | null = null;
+  let brushMi = 20;
+  let stroke: number[] | null = null;
   const saved0 = d.world().provinces;
   const opts = { sizeMi: saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi, seaFactor: saved0?.seaFactor ?? PROVINCE_DEFAULTS.seaFactor };
   // Drawing: each province's outline as a path (km), and the borders by kind.
@@ -85,14 +96,14 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     worker = null;
   }
 
-  const run = (fresh: boolean) => {
+  const run = (fresh: boolean, savedNow?: SavedProvinces) => {
     const cl = d.climate();
     const w = d.world();
     if (!cl || busy) return;
     busy = true;
     error = '';
     render();
-    const job = { surface: w.surface, settings: w.settings, sizeMi: opts.sizeMi, seaFactor: opts.seaFactor, saved: fresh ? null : w.provinces ?? null };
+    const job = { surface: w.surface, settings: w.settings, sizeMi: opts.sizeMi, seaFactor: opts.seaFactor, saved: fresh ? null : savedNow ?? w.provinces ?? null };
     const madeFrom = { strokes: w.surface.strokes, settings: w.settings };
     const done = (m: ProvinceMap | null, err?: string) => {
       busy = false;
@@ -102,6 +113,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
         if (!sameSaved(d.world().provinces, m.saved)) d.setSaved(m.saved);
         d.mapChanged?.();
       } else error = err || 'The provinces could not be made.';
+      if (selected !== null && !map?.provinces.some((p) => p.id === selected)) selected = null;
       render();
       d.redraw();
     };
@@ -173,6 +185,8 @@ export function createProvinces(d: ProvincesDeps): Provinces {
 
   // ---- The tab ----
   const status = h('div', { class: 'prov-status small', 'aria-live': 'polite' });
+  const modeBox = h('div', {});
+  const card = h('div', { class: 'prov-card small' });
   const actions = h('div', { class: 'sketch-actions' });
   const settingsBox = h('div', {});
   const panel = h('section', { class: 'view-panel prov-panel' },
@@ -181,6 +195,9 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     settingsBox,
     actions,
     status,
+    h('h3', {}, 'Look and edit'),
+    modeBox,
+    card,
   );
   const renderSettings = () => {
     const w = d.world();
@@ -223,6 +240,74 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     else if (!busy && saved && !map) lines.push(h('p', { class: 'muted' }, 'Growing the provinces again from their saved seeds…'));
     lines.push(h('p', { class: 'muted' }, 'Hover over the map to see a province in the Under the cursor panel. While this tab is open provinces are coloured by terrain; elsewhere choose how they show under View.'));
     status.replaceChildren(...lines);
+    renderMode();
+    renderCard();
+  };
+  const indexOf = (id: number | null) => (map && id !== null ? map.provinces.findIndex((p) => p.id === id) : -1);
+  const renderMode = () => {
+    const edits = d.world().provinces?.edits ?? [];
+    modeBox.replaceChildren(
+      choice<'select' | 'paint'>('Tool', [{ value: 'select', label: 'Select' }, { value: 'paint', label: 'Paint' }], mode, (v) => {
+        mode = v;
+        renderMode();
+        d.redraw();
+      }),
+      ...(mode === 'paint'
+        ? [
+            numberField({ label: 'Brush', value: brushMi, min: 2, max: 300, step: 1, unit: 'miles', slider: true, hint: 'How wide the brush is.', change: (v) => { if (v > 0) brushMi = v; } }),
+            h('p', { class: 'muted small' }, selected === null
+              ? 'Click a province to paint with it, then drag over the map: the ground you paint goes to that province (land to land, sea to sea). Paint over a whole province to merge it away. Every province stays one piece.'
+              : `Painting with province No. ${selected}. Drag over the map to give it ground; click Select and pick another to paint with it instead.`),
+            h('div', { class: 'sketch-actions' },
+              h('button', { type: 'button', class: 'ghost small', disabled: busy || !edits.length, onclick: () => { const sv = d.world().provinces; if (sv) run(false, { ...sv, edits: edits.slice(0, -1) }); } }, 'Undo last stroke'),
+              h('button', { type: 'button', class: 'ghost small danger', disabled: busy || !edits.length, onclick: () => { const sv = d.world().provinces; if (sv) run(false, { ...sv, edits: [] }); } }, 'Clear all hand edits'),
+            ),
+            h('p', { class: 'muted small' }, `${edits.length} stroke${edits.length === 1 ? '' : 's'} painted by hand. They are kept with the provinces and painted again whenever the provinces are updated.`),
+          ]
+        : [h('p', { class: 'muted small' }, 'Click a province on the map to see what it holds.')]),
+    );
+  };
+  const renderCard = () => {
+    const i = indexOf(selected);
+    if (!map || i < 0) {
+      card.replaceChildren();
+      return;
+    }
+    const p = map.provinces[i];
+    const cl = d.climate();
+    const items: InfoItem[] = [];
+    const add = (label: string, value: string) => items.push({ label, value });
+    add('Province', `No. ${p.id}`);
+    add('Terrain', `${p.terrain}${p.kind === 'wasteland' ? ' (impassable: nobody can hold it)' : ''}`);
+    add('Size', `${fmtInt(p.area / SQ_KM_PER_SQ_MI)} sq mi`);
+    if (cl?.geo) {
+      const names = geoNames(d.world().surface, cl);
+      if (p.region >= 0) {
+        const f = cl.geo.regions[p.region];
+        add('Region', `${names.region.get(p.region) ?? 'Unnamed'} (${(f?.kind ?? 'region').toLowerCase()})`);
+      }
+      if (p.water >= 0) {
+        const f = cl.geo.waters[p.water];
+        add('Water', `${names.water.get(p.water) ?? 'Unnamed'} (${(f?.kind ?? 'sea').toLowerCase()})`);
+      }
+      if (p.kind !== 'sea') {
+        const c = climateAt(cl, p.x, p.y);
+        add('Climate', `${ZONE_INFO[c.zone]?.name ?? '?'}; summer ${Math.round(c.summerT * 1.8 + 32)}°F, winter ${Math.round(c.winterT * 1.8 + 32)}°F`);
+      }
+    }
+    const marks = [p.coastal ? 'on the coast' : '', p.river ? 'a river runs through it' : ''].filter(Boolean);
+    if (marks.length) add('Water nearby', marks.join('; '));
+    add('Neighbours', `${p.neighbours.length} (${p.neighbours.filter((q) => map!.provinces[q].kind === 'sea').length} by sea)`);
+    items.push(...(d.provinceInfo?.(i) ?? []));
+    card.replaceChildren(
+      h('h3', {}, `Province No. ${p.id}`),
+      h('dl', { class: 'info-list' }, ...items.flatMap((it) => [h('dt', {}, it.label), h('dd', {}, it.value)])),
+    );
+  };
+  const pickAt = (x: number, y: number): number | null => {
+    if (!map) return null;
+    const k = fineIndex(map.grid, map.wrapKm, x, y);
+    return k >= 0 && map.label[k] >= 0 ? map.provinces[map.label[k]].id : null;
   };
 
   // ---- The map layer ----
@@ -231,8 +316,40 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     get noPaint() {
       return active;
     },
+    down(x, y) {
+      if (!active || !map || busy) return false;
+      if (mode === 'select' || selected === null) {
+        selected = pickAt(x, y);
+        render();
+        d.redraw();
+        return mode === 'paint';
+      }
+      stroke = [x, y];
+      d.redraw();
+      return true;
+    },
+    drag(x, y) {
+      if (!stroke) return;
+      const lx = stroke[stroke.length - 2];
+      const ly = stroke[stroke.length - 1];
+      if (Math.hypot(x - lx, y - ly) < milesToKm(brushMi) * 0.2) return;
+      stroke.push(x, y);
+      d.redraw();
+    },
+    up() {
+      if (!stroke || selected === null) {
+        stroke = null;
+        return;
+      }
+      const sv = d.world().provinces;
+      const pts = stroke.map((v) => Math.round(v * 100) / 100);
+      stroke = null;
+      if (!sv) return;
+      run(false, { ...sv, edits: [...(sv.edits ?? []), { id: selected, r: milesToKm(brushMi) / 2, pts }] });
+    },
     draw(g, at, scale, copies) {
       if (!map) return;
+
       const show: ProvinceDisplay = active ? 'colour' : d.display();
       if (show === 'off') return;
       const t = g.getTransform();
@@ -275,6 +392,37 @@ export function createProvinces(d: ProvincesDeps): Provinces {
           g.stroke(coastLines);
         }
         g.restore();
+      }
+      const selI = active ? indexOf(selected) : -1;
+      if (selI >= 0 || stroke) {
+        // The selected province outlined, and the stroke being painted.
+        for (const c of copies) {
+          const [ox, oy] = at(0, 0, c);
+          g.save();
+          g.translate(ox, oy);
+          g.scale(scale, scale);
+          if (selI >= 0) {
+            g.lineJoin = 'round';
+            g.strokeStyle = 'rgba(255,255,255,0.95)';
+            g.lineWidth = 4 / scale;
+            g.stroke(paths[selI]);
+            g.strokeStyle = 'rgba(20,16,12,0.95)';
+            g.lineWidth = 1.6 / scale;
+            g.stroke(paths[selI]);
+          }
+          if (stroke) {
+            g.beginPath();
+            g.moveTo(stroke[0], stroke[1]);
+            for (let i = 2; i < stroke.length; i += 2) g.lineTo(stroke[i], stroke[i + 1]);
+            if (stroke.length === 2) g.lineTo(stroke[0] + 0.01, stroke[1]);
+            g.lineCap = 'round';
+            g.lineJoin = 'round';
+            g.strokeStyle = selI >= 0 ? colours[selI].replace(/[\d.]+\)$/, '0.55)') : 'rgba(255,255,255,0.5)';
+            g.lineWidth = milesToKm(brushMi);
+            g.stroke();
+          }
+          g.restore();
+        }
       }
     },
     describe(x, y) {
@@ -328,6 +476,7 @@ function hash01(v: number): number {
 }
 
 function sameSaved(a: SavedProvinces | null | undefined, b: SavedProvinces): boolean {
+  if (JSON.stringify(a?.edits ?? []) !== JSON.stringify(b.edits ?? [])) return false;
   if (!a || a.nextId !== b.nextId || a.sizeMi !== b.sizeMi || a.seaFactor !== b.seaFactor || a.ids.length !== b.ids.length) return false;
   for (let i = 0; i < a.ids.length; i++) if (a.ids[i] !== b.ids[i]) return false;
   for (let i = 0; i < a.seeds.length; i++) if (a.seeds[i] !== b.seeds[i]) return false;

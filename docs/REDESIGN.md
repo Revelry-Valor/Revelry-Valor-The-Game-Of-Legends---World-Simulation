@@ -1162,6 +1162,31 @@ Like Crusader Kings 3: the world is split into provinces, and much of the simula
 - *Borders* are drawn along province outlines, in the Crusader Kings style decided above. Disputed provinces are hatched in the colour of the realm taking them.
 - *Saving:* holders, rivals and rival use are saved by province (ids as runs of steps); saves stay small.
 
+**Built (step 3)**
+- *Travel province to province* (src/sim/routes.ts):
+  - Ways are found over the links between neighbouring provinces, from one province's middle to the next.
+  - A step costs its length times how rough the ground is: open lowland 1, hills 1.4, highlands 1.8, mountains 3, plateau 1.5. Forest, jungle and taiga cost 1.3 times more; desert and ice 1.2 times. Impassable peaks are closed.
+  - A step that fords a river costs twice as much.
+  - Routes use A* and are kept, by pair of provinces, while the provinces stay the same.
+- *Who uses it:*
+  - Roads and trails a settlement builds, caravans' paths and the time they take, and royal roads all run along these ways. Roads are laid through the middles of the provinces on the way.
+  - Armies and caravans march toward the next province's middle on the way.
+  - Without provinces (tests), ways stay straight as before.
+- *Sea trade:* a coastal town that knows Sailing may send its goods by ship to another coastal town. Ships go through the sea provinces at 2.5 times a caravan's pace, when that is quicker than the land. Ships show white on the map.
+- *Looking at a province:* the Provinces tab's Select tool shows a card for the province clicked:
+  - its number, terrain, size, natural region or water, climate, coast and river, and neighbours (how many by sea);
+  - its richest resources and its best road;
+  - who holds it, and whether it is disputed;
+  - its seat and villages, the tribes in it, its people, and its culture and faith.
+
+  The selected province is outlined on the map.
+- *Paint tool:*
+  - Pick a province, then drag over the map: the ground under the brush goes to that province, land to land and sea to sea. Painting over a whole province merges it away.
+  - Every province stays one piece; ground cut off by the paint joins the province round it.
+  - Strokes are kept with the provinces and painted again whenever they are updated. There is an Undo last stroke and a Clear all hand edits.
+  - Painting reuses the provinces as last grown, so only the last steps run again.
+- *Stability:* generating fresh and then updating an unchanged map gives the same provinces. A long, thin zone gets enough seeds the first time, so an update adds none.
+
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.

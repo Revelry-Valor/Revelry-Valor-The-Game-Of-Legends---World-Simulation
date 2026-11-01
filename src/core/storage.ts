@@ -96,7 +96,8 @@ function readProvinces(p: unknown): SavedProvinces | null {
   if (typeof v.sizeMi !== 'number' || typeof v.seaFactor !== 'number' || typeof v.nextId !== 'number') return null;
   if (!Array.isArray(v.seeds) || !Array.isArray(v.ids) || v.seeds.length !== v.ids.length * 2) return null;
   if (!v.seeds.every((x) => typeof x === 'number' && Number.isFinite(x)) || !v.ids.every((x) => Number.isInteger(x))) return null;
-  return { v: 1, sizeMi: v.sizeMi, seaFactor: v.seaFactor, seeds: v.seeds, ids: v.ids, nextId: v.nextId };
+  const edits = Array.isArray(v.edits) ? v.edits.filter((e) => e && Number.isInteger(e.id) && typeof e.r === 'number' && e.r > 0 && Array.isArray(e.pts) && e.pts.length >= 2 && e.pts.every((x) => typeof x === 'number' && Number.isFinite(x))) : [];
+  return { v: 1, sizeMi: v.sizeMi, seaFactor: v.seaFactor, seeds: v.seeds, ids: v.ids, nextId: v.nextId, ...(edits.length ? { edits } : {}) };
 }
 
 /** The reference picture from a save, if it is whole. */

@@ -129,9 +129,15 @@ export function showWorld(app: App, start: World): () => void {
       provinces?.overlay.draw(g, at, scale, copies);
       peoples?.overlay.draw(g, at, scale, copies);
     },
-    down: (x, y, pxKm) => peoples?.overlay.down?.(x, y, pxKm) ?? false,
-    drag: (x, y) => peoples?.overlay.drag?.(x, y),
-    up: (x, y) => peoples?.overlay.up?.(x, y),
+    down: (x, y, pxKm) => !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false),
+    drag(x, y) {
+      provinces?.overlay.drag?.(x, y);
+      peoples?.overlay.drag?.(x, y);
+    },
+    up(x, y) {
+      provinces?.overlay.up?.(x, y);
+      peoples?.overlay.up?.(x, y);
+    },
     describe(x, y) {
       const a = peoples?.overlay.describe?.(x, y) ?? [];
       const b = provinces?.overlay.describe?.(x, y) ?? [];
@@ -800,6 +806,7 @@ export function showWorld(app: App, start: World): () => void {
     redraw: () => map.redraw(),
     display: () => look.provinces,
     mapChanged: () => peoples?.provincesChanged(),
+    provinceInfo: (i) => peoples?.provinceInfo(i) ?? [],
   });
   if (climate.climate) provinces.climateChanged();
   if (climate.climate) peoples.climateChanged();

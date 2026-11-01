@@ -23,8 +23,20 @@ import { bestWay, knows, pathCells, pathSpeed } from '../src/sim/ways';
 import { armsMight, clanKnows } from '../src/sim/tech';
 import { acceptance, noteBetween } from '../src/sim/cultureChange';
 import { PK, provAt, transferAll } from '../src/sim/land';
+import { nextWaypoint, provinceRoute, routePlan } from '../src/sim/routes';
 import { generateProvinces } from '../src/core/provinces';
 import { VILLAGE_MAX } from '../src/sim/sim';
+
+/** A seeded random stream for the contexts the tests build (so a run is the same every time). */
+const testRand = (() => {
+  let a = 20261101;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+})();
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -620,7 +632,7 @@ describe('realms', () => {
     sim,
     env,
     lib: L,
-    rand: () => Math.random(),
+    rand: testRand,
     dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
     cellAt: cellOf,
     log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
@@ -734,7 +746,7 @@ describe('politics', () => {
       sim,
       env,
       lib: L,
-      rand: () => Math.random(),
+      rand: testRand,
       dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
       cellAt: cellOf,
       log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
@@ -900,7 +912,7 @@ describe('faiths and gods', () => {
     sim,
     env,
     lib: L,
-    rand: () => Math.random(),
+    rand: testRand,
     dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
     cellAt: cellOf,
     log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
@@ -1020,7 +1032,7 @@ describe('wars and armies', () => {
     sim,
     env,
     lib,
-    rand: () => Math.random(),
+    rand: testRand,
     dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by),
     cellAt: cellOf,
     log: (text, x, y) => sim.events.push({ day: sim.day, text, x, y }),
@@ -1239,7 +1251,7 @@ describe('sieges, occupation and conquest', () => {
       sim,
       env,
       lib,
-      rand: () => Math.random(),
+      rand: testRand,
       dist: (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by),
       cellAt: cellOf,
       log: (text: string, x?: number, y?: number) => sim.events.push({ day: sim.day, text, x, y }),
@@ -1504,5 +1516,33 @@ describe('land by province', () => {
     const back = unpackSim(JSON.parse(JSON.stringify(packed)), penv)!;
     expect(wholeProvinces(back)).toBe(true);
     expect(back.provOwner![provAt(penv, t.x, t.y)]).toBe(t.clan);
+  });
+  it('finds ways province to province, round impassable ground, and by sea for those who sail', () => {
+    const P = penv.prov;
+    const land = [...Array(P.count).keys()].filter((p) => P.kind[p] === PK.land);
+    const west = land.reduce((a, b) => (P.x[b] < P.x[a] ? b : a));
+    const east = land.reduce((a, b) => (P.x[b] > P.x[a] ? b : a));
+    const route = provinceRoute(penv, west, east)!;
+    expect(route.length).toBeGreaterThan(3);
+    for (let i = 0; i < route.length; i++) {
+      expect(P.kind[route[i]]).toBe(PK.land);
+      if (i) expect(Array.from(P.nb.subarray(P.nbStart[route[i - 1]], P.nbStart[route[i - 1] + 1]))).toContain(route[i]);
+    }
+    // Roads follow it: the path's points are land, and run through the provinces on the way.
+    const cells = pathCells(penv, P.x[west], P.y[west], P.x[east], P.y[east], (x, y) => provAt(penv, x, y) >= 0 ? Math.round((y - penv.y0) / penv.step) * penv.w + Math.round((((x - penv.x0) / penv.step) % penv.w + penv.w) % penv.w) : -1);
+    expect(cells.length).toBeGreaterThan(5);
+    for (const k of cells) expect(penv.land[k]).toBe(1);
+    const visited = new Set(cells.map((k) => P.of[k]));
+    expect(route.filter((p) => visited.has(p)).length / route.length).toBeGreaterThan(0.6);
+    // An army heads for the next province on the way.
+    const next = nextWaypoint(penv, P.x[west], P.y[west], P.x[east], P.y[east]);
+    expect(next.x).toBeCloseTo(P.x[route[1]], 3);
+    // Two coasts far apart: by sea the way takes to the water.
+    const coastal = land.filter((p) => Array.from(P.nb.subarray(P.nbStart[p], P.nbStart[p + 1])).some((q) => P.kind[q] === PK.sea));
+    const north = coastal.reduce((a, b) => (P.y[b] < P.y[a] ? b : a));
+    const south = coastal.reduce((a, b) => (P.y[b] > P.y[a] ? b : a));
+    const plan = routePlan(penv, P.x[north], P.y[north], P.x[south], P.y[south], true);
+    expect(plan.seaKm).toBeGreaterThan(0);
+    expect(routePlan(penv, P.x[north], P.y[north], P.x[south], P.y[south]).seaKm).toBe(0);
   });
 });

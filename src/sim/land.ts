@@ -36,6 +36,15 @@ export interface ProvIndex {
   /** Neighbours: nb[nbStart[p] … nbStart[p+1]). */
   nbStart: Int32Array;
   nb: Int32Array;
+  /** How hard it is to cross (1 open lowland; hills, forest, highlands and mountains more; Infinity impassable). */
+  rough: Float32Array;
+}
+
+/** How hard a province's ground is to cross, from its relief band and terrain. */
+export function roughOf(band: number, terrain: string): number {
+  const relief = [1, 1.4, 1.8, 3, Infinity, 1.5][band] ?? 1;
+  const cover = /Forest|Jungle|Taiga/.test(terrain) ? 1.3 : /Desert|Icefield/.test(terrain) ? 1.2 : 1;
+  return relief * cover;
 }
 
 const cellOf = (env: Env, x: number, y: number) => {
@@ -87,7 +96,8 @@ export function cellProvinces(env: Env): ProvIndex {
     if (j < h - 1) nbList.push(k + w);
     nbStart[k + 1] = nbList.length;
   }
-  return { real: false, count: n, ids, of, start, cells, x, y, area, kind, centre, nbStart, nb: Int32Array.from(nbList) };
+  const rough = Float32Array.from(env.mzone, (z, k) => (env.land[k] ? [1, 1.3, 1.8, 3, Infinity][z] : 0.7));
+  return { real: false, count: n, ids, of, start, cells, x, y, area, kind, centre, nbStart, nb: Int32Array.from(nbList), rough };
 }
 
 /** The provinces from the generator, on the climate's points: each point to the province covering most of it. */
@@ -160,6 +170,7 @@ export function provinceIndex(env: Env, pm: ProvinceMap): ProvIndex {
     centre: Int32Array.from(pm.provinces, (p) => cellOf(env, p.x, p.y)),
     nbStart,
     nb,
+    rough: Float32Array.from(pm.provinces, (p) => (p.kind === 'sea' ? 0.7 : p.kind === 'lake' ? 1.5 : roughOf(p.band, p.terrain))),
   };
 }
 

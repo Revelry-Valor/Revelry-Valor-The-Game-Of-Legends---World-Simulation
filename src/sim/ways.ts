@@ -3,6 +3,7 @@ import type { Env } from './env';
 import { resInfoOf } from './economy';
 import type { Settlement, SimState } from './state';
 import { knows } from './tech';
+import { cellsAlong, routePlan } from './routes';
 export { knows };
 
 /**
@@ -92,8 +93,13 @@ function pay(env: Env, st: Settlement, cost: Record<string, number>): boolean {
 }
 const scale = (c: Record<string, number>, f: number) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v * f]));
 
-/** The points of the grid on the way between two places, from a to b (land only). */
+/**
+ * The points of the grid on the way between two places, from a to b (land only). With provinces
+ * the way runs province to province through their middles (routes.ts), round mountains and rough
+ * ground and over rivers where it must; without, straight.
+ */
 export function pathCells(env: Env, ax: number, ay: number, bx: number, by: number, cellAt: (x: number, y: number) => number): number[] {
+  if (env.prov.real) return cellsAlong(env, routePlan(env, ax, ay, bx, by).pts);
   let dx = bx - ax;
   if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
   const dy = by - ay;

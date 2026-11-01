@@ -63,6 +63,8 @@ export interface Peoples {
   setActive(on: boolean): void;
   /** The provinces were made, updated or removed. */
   provincesChanged(): void;
+  /** What the peoples have in a province (by its index): holder, settlements, people, culture, faith, resources, roads. */
+  provinceInfo(index: number): InfoItem[];
   climateChanged(): void;
   /** The simulation packed for saving (null if there is none). */
   pack(): PackedSim | null;
@@ -728,7 +730,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.setLineDash([]);
           for (const cv of s.caravans) {
             const [sx, sy] = at(cv.x, cv.y, c);
-            g.fillStyle = cv.train ? '#222' : '#c8913c';
+            g.fillStyle = cv.train ? '#222' : cv.ship ? '#f4f1e8' : '#c8913c';
             g.strokeStyle = '#2a1a08';
             g.lineWidth = 1.5;
             g.fillRect(sx - 3.5, sy - 3.5, 7, 7);
@@ -984,7 +986,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const from = s.settlements.find((q) => q.id === cv.from)?.name ?? '?';
         const to = s.settlements.find((q) => q.id === cv.to)?.name ?? '?';
         const goods = Object.entries(cv.cargo).map(([id, u]) => `${Math.round(u)} ${resInfoOf(env!, id)?.name.toLowerCase() ?? id}`).join(', ');
-        push('Caravan', `${cv.train ? 'Train' : 'Caravan'} of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
+        push('Caravan', `${cv.train ? 'Train' : cv.ship ? 'Ship' : 'Caravan'} of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
         break;
       }
       const k = cellOf(x, y);
@@ -1949,6 +1951,54 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       d.redraw();
     },
     climateChanged,
+    provinceInfo(index) {
+      const out: InfoItem[] = [];
+      if (!env || !env.prov.real || index < 0 || index >= env.prov.count) return out;
+      const P = env.prov;
+      // What the land holds: the richest resources found across its points.
+      const res: [string, number][] = [];
+      for (const r of env.resInfo) {
+        const A = env.res[r.id];
+        if (!A) continue;
+        let sum = 0;
+        for (let q = P.start[index]; q < P.start[index + 1]; q++) sum += A[P.cells[q]];
+        const n = P.start[index + 1] - P.start[index];
+        if (n && sum / n > 0.1) res.push([r.name, sum / n]);
+      }
+      if (res.length) out.push({ label: 'Resources', value: res.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, v]) => `${n} (${Math.round(Math.min(1, v) * 100)}%)`).join(', ') });
+      let road = 0;
+      for (let q = P.start[index]; q < P.start[index + 1]; q++) road = Math.max(road, sim?.way[P.cells[q]] ?? 0);
+      if (road) out.push({ label: 'Best way', value: WAYS[road].name });
+      if (!sim) return out;
+      const s = sim;
+      const owner = s.provOwner?.[index] ?? -1;
+      const oc = owner >= 0 ? clanOf(owner) : undefined;
+      out.push({ label: 'Held by', value: oc ? realmName(lib(), oc) : P.kind[index] === PK.land ? 'Nobody yet' : 'Nobody can hold it' });
+      if ((s.provRival?.[index] ?? -1) >= 0 && (s.provRivalUse?.[index] ?? 0) > 0) {
+        const rc = clanOf(s.provRival![index]);
+        out.push({ label: 'Disputed', value: `${rc ? realmName(lib(), rc) : 'Another'} has used it for ${Math.round(s.provRivalUse![index])} of the 12 months that would take it` });
+      }
+      const inHere = (x: number, y: number) => env!.prov.of[cellOf(x, y)] === index;
+      const towns = s.settlements.filter((q) => !q.ruined && inHere(q.x, q.y));
+      const tribes = s.tribes.filter((t) => inHere(t.x, t.y));
+      const seat = towns.find((q) => q.seat) ?? towns[0];
+      if (seat) out.push({ label: 'Seat', value: `${seat.name} (${settlementTier(seat).toLowerCase()})` });
+      const villages = towns.filter((q) => q !== seat);
+      if (villages.length) out.push({ label: 'Villages', value: villages.map((q) => q.name).join(', ') });
+      if (tribes.length) out.push({ label: 'Tribes here', value: tribes.map((t) => t.name).join(', ') });
+      const people = towns.reduce((n, q) => n + q.pop, 0) + tribes.reduce((n, t) => n + t.pop, 0);
+      if (people) out.push({ label: 'People', value: Math.round(people).toLocaleString() });
+      const who = seat ?? tribes[0];
+      if (who) {
+        const cu = cultureOf(s, who.culture);
+        if (cu) out.push({ label: 'Culture', value: cu.name });
+      }
+      if (seat?.faith) {
+        const f = faithOf(s, seat.faith);
+        if (f) out.push({ label: 'Faith', value: f.name });
+      }
+      return out;
+    },
     provincesChanged,
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),
     resources: resourceView,

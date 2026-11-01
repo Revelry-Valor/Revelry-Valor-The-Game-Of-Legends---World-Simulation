@@ -4,7 +4,7 @@ import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/c
 import { defaultSettings } from '../src/core/settings';
 import { KM_PER_DEGREE } from '../src/core/units';
 import { fineGeography, sampleGround } from '../src/core/finegeo';
-import { generateProvinces, type ProvinceMap } from '../src/core/provinces';
+import { generateProvinces, type ProvinceCache, type ProvinceMap } from '../src/core/provinces';
 import { createWorld } from '../src/core/world';
 import { parseWorld } from '../src/core/storage';
 
@@ -177,4 +177,29 @@ describe('provinces', () => {
     expect(back.provinces?.seeds).toEqual(pm.saved.seeds);
     expect(parseWorld(JSON.stringify({ ...w, provinces: { v: 1, sizeMi: 40 } })).provinces).toBeUndefined();
   });
+  it('reshapes and merges provinces with the paint tool, and keeps the edits', () => {
+    // Two neighbouring land provinces: paint all of the second with the first.
+    const a = pm.provinces.findIndex((p) => p.kind === 'land' && p.neighbours.some((q) => pm.provinces[q].kind === 'land'));
+    const b = pm.provinces[a].neighbours.find((q) => pm.provinces[q].kind === 'land')!;
+    const A = pm.provinces[a];
+    const B = pm.provinces[b];
+    const r = Math.sqrt(B.area) * 1.5;
+    const saved = { ...pm.saved, edits: [{ id: A.id, r, pts: [B.x, B.y] }] };
+    const cache: ProvinceCache = {};
+    const first = generateProvinces(surface, settings, cl, { sizeMi: SIZE_MI, seaFactor: 3, saved: pm.saved }, cache);
+    const edited = generateProvinces(surface, settings, cl, { sizeMi: SIZE_MI, seaFactor: 3, saved }, cache);
+    const grownA = edited.provinces.find((p) => p.id === A.id)!;
+    expect(grownA.area).toBeGreaterThan(A.area + B.area * 0.5);
+    // B is gone (or nearly all of it), and nothing went from land to sea.
+    const bAfter = edited.provinces.find((p) => p.id === B.id);
+    expect(bAfter ? bAfter.area : 0).toBeLessThan(B.area * 0.3);
+    expect(grownA.kind).toBe('land');
+    // Still every province one piece.
+    expect([...pieces(edited.label, edited.grid.w, edited.grid.h)].filter(([, c]) => c > 1)).toEqual([]);
+    // The edit is kept, and grown again without the cache it comes out the same.
+    expect(edited.saved.edits?.length).toBe(1);
+    const again = generateProvinces(surface, settings, cl, { sizeMi: SIZE_MI, seaFactor: 3, saved: edited.saved });
+    expect(Array.from(again.label)).toEqual(Array.from(edited.label));
+    expect(first.provinces.length).toBe(pm.provinces.length);
+  }, 60000);
 });

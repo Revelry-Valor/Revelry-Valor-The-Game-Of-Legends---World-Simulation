@@ -1,5 +1,6 @@
 import type { Library } from '../core/library';
 import { holderOf, provAt, setHolder, transferAll } from './land';
+import { nextWaypoint } from './routes';
 import { cultureFx, cultureOf } from './culture';
 import { noteBetween } from './cultureChange';
 import { isFood } from './economy';
@@ -764,13 +765,18 @@ export function armiesDay(c: WarContext): void {
     const cold = k >= 0 && env.temp[sIdx][k] < 0 ? 0.6 : 1;
     const ford = k >= 0 && env.fresh[k] && !sim.bridge?.[k] ? 1 / FORD_SLOW : 1;
     const step = c.speed(clan.race, clan.culture) * slow * cold * ford * (k >= 0 ? WAYS[sim.way[k]].speed : 1) * (a.supply <= 0 ? 0.8 : 1);
-    const d = c.dist(a.x, a.y, to.x, to.y);
+    // Province to province toward it (routes.ts): through each province's middle, round mountains and rough ground.
+    const way = nextWaypoint(env, a.x, a.y, to.x, to.y);
+    const d = c.dist(a.x, a.y, way.x, way.y);
     if (d > step) {
-      a.x += ((to.x - a.x) * step) / d;
-      a.y += ((to.y - a.y) * step) / d;
+      let dx = way.x - a.x;
+      if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
+      a.x += (dx * step) / d;
+      a.y += ((way.y - a.y) * step) / d;
+      if (env.wrapKm) a.x = ((a.x % env.wrapKm) + env.wrapKm) % env.wrapKm;
     } else {
-      a.x = to.x;
-      a.y = to.y;
+      a.x = way.x;
+      a.y = way.y;
     }
     // Eat: a fighter eats a unit a month; the land feeds some, its own towns more.
     const need = a.men / DAYS_PER_MONTH;

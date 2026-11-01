@@ -361,6 +361,8 @@ export interface Caravan {
   started: number;
   /** A train: the whole way is railway (faster, carries far more, burns coal). */
   train?: boolean;
+  /** By ship, through the sea provinces (coastal towns that know sailing). */
+  ship?: boolean;
 }
 
 /** A trade route between two settlements: how often it is used and how much goes along it. */

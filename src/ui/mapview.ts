@@ -992,7 +992,8 @@ export function createMapView(o: MapViewOptions): MapView {
 
   function drawCursor(g: CanvasRenderingContext2D, r: DOMRect) {
     const t = o.tool();
-    if (!hover || t.tool === 'pan' || panning) return;
+    // No brush ring where pressing the map does not paint (the Peoples and Provinces tabs).
+    if (!hover || t.tool === 'pan' || panning || hand || o.overlay?.()?.noPaint) return;
     const [sx, sy] = toScreen(hover.x, hover.y, r);
     const rad = Math.max(2, (t.settings.size / 2) * view.scale);
     g.save();
