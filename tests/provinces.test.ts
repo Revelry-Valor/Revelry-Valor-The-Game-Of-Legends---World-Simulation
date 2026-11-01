@@ -32,6 +32,7 @@ add('river', line([[2600, yAt(20)], [3200, yAt(10)], [4100, yAt(5)]]), { width: 
 add('lake', line([[3700, yAt(22)], [3760, yAt(22)]]), { size: 120 });
 add('cliffs', line([[2700, yAt(5)], [3100, yAt(0)]], 10));
 add('canyon', line([[3500, yAt(12)], [3800, yAt(4)]], 10), { size: 70 });
+add('ravine', line([[2500, yAt(8)], [2750, yAt(14)]], 10));
 
 let cl: Climate;
 let pm: ProvinceMap;
@@ -228,23 +229,46 @@ describe('provinces', () => {
     let same = 0;
     for (let k = w; k < g.cliff.length - w; k++) {
       if (!g.cliff[k]) continue;
+      // Along the painted cliff, away from its ends (a province may go round the tip of a cliff).
+      const x = pm.grid.x0 + (k % w) * pm.grid.px;
+      if (x < 2760 || x > 3040) continue;
       for (const [a, b] of [[k - 1, k + 1], [k - w, k + w]]) {
         if (!g.land[a] || !g.land[b] || g.cliff[a] || g.cliff[b] || g.gorge[a] || g.gorge[b]) continue;
+        if (pm.provinces[pm.label[a]].kind !== 'land' || pm.provinces[pm.label[b]].kind !== 'land') continue;
         across++;
-        if (pm.label[a] === pm.label[b]) same++;
+        if (pm.label[a] === pm.label[b]) {
+          same++;
+        }
       }
     }
-    expect(across).toBeGreaterThan(10);
+    expect(across).toBeGreaterThan(5);
     expect(same / across).toBeLessThan(0.1);
     // Inside the canyon: provinces of its own, not shared with the land round it.
-    const canyon = pm.provinces.filter((p) => p.terrain === 'Canyon');
-    expect(canyon.length).toBeGreaterThan(0);
+    expect(pm.provinces.some((p) => p.terrain === 'Canyon')).toBe(true);
+    // Even a narrow ravine holds provinces of its own.
+    expect(pm.provinces.some((p) => p.terrain === 'Ravine')).toBe(true);
     let gorge = 0;
     let mixed = 0;
     for (let k = 0; k < g.gorge.length; k++) if (g.gorge[k]) {
       gorge++;
-      if (pm.provinces[pm.label[k]].terrain !== 'Canyon') mixed++;
+      if (!['Canyon', 'Ravine'].includes(pm.provinces[pm.label[k]].terrain)) mixed++;
     }
     expect(mixed / gorge).toBeLessThan(0.1);
+    // Ravine and canyon edges are hard: no province holds ground both in and out.
+    const leak: string[] = [];
+    for (let k = 0; k < g.gorge.length; k++) if (g.land[k] && !g.gorge[k] && !g.lake[k] && ['Canyon', 'Ravine'].includes(pm.provinces[pm.label[k]].terrain)) leak.push(`${k}:c${g.cliff[k]}r${g.river[k]}b${g.band[k]}`);
+    expect(leak).toEqual([]);
+  });
+  it('has its own size for mountain provinces', () => {
+    const big = generateProvinces(surface, settings, cl, { sizeMi: SIZE_MI, seaFactor: 3, mountainMi: SIZE_MI * 2 });
+    const median = (m: ProvinceMap) => {
+      const a = m.provinces.filter((p) => p.kind === 'land' && ['Mountains', 'Highlands', 'Foothills'].includes(p.terrain)).map((p) => p.area).sort((x, y) => x - y);
+      return a[Math.floor(a.length / 2)];
+    };
+    expect(median(big)).toBeGreaterThan(median(pm) * 1.8);
+    expect(big.saved.mountainMi).toBe(SIZE_MI * 2);
+    // Lowland provinces stay their own size.
+    const low = (m: ProvinceMap) => m.provinces.filter((p) => p.terrain === 'Forest').length;
+    expect(Math.abs(low(big) - low(pm))).toBeLessThan(low(pm) * 0.2);
   });
 });

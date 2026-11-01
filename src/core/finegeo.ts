@@ -58,7 +58,7 @@ export interface FineGround {
   /** 1 lake; 1 river, 2 big river (one that parts regions and provinces). */
   lake: Uint8Array;
   river: Uint8Array;
-  /** 1 on a cliff or other bare rock face outside a canyon (a cut provinces form round); 1 inside a canyon or ravine. */
+  /** 1 on a cliff or other bare rock face outside a canyon (a cut provinces form round); inside a canyon 1, a ravine 2. */
   cliff: Uint8Array;
   gorge: Uint8Array;
 }
@@ -87,14 +87,14 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid): Fi
       // The foot of a mountain (its lowest zone) belongs to the mountain; hills painted on their own are hills.
       out.band[k] = z >= 4 ? BAND.peaks : z === 3 ? BAND.mountains : z === 2 ? BAND.highlands : f.plateau[q] > 0.5 ? BAND.plateau : z === 1 ? BAND.foothills : f.hill[q] > 0.35 ? BAND.hills : BAND.lowland;
       // Canyons and ravines (their whole width), and cliffs and other rock faces outside them.
-      if (Math.max(f.canyon[q], f.ravine[q]) > 0.5) out.gorge[k] = 1;
+      if (f.canyon[q] > 0.5) out.gorge[k] = 1;
+      else if (f.ravine[q] > 0.5) out.gorge[k] = 2;
       else if (f.face[q] > 0.25) out.cliff[k] = 1;
       if (f.water[q] > 0.5 && f.waterKind[q] === 2) out.lake[k] = 1;
       else if (f.water[q] > 0.3 && f.waterKind[q] === 1) out.river[k] = f.riverWidth[q] >= BIG_RIVER_KM ? 2 : 1;
     }
   }
-  // Cliffs, ravines and canyons narrower than the grid: their painted lines, unbroken, are cuts too
-  // (a ravine too narrow to hold provinces of its own is a cut provinces form round).
+  // Cliffs, ravines and canyons narrower than the grid: their painted lines, traced unbroken.
   const { px, x0, y0 } = grid;
   const at = (x: number, y: number) => {
     let i = Math.round((x - x0) / px);
@@ -106,11 +106,26 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid): Fi
     }
     return j * w + i;
   };
+  // Cliffs: a cut. Ravines and canyons: their line always inside them (with the points either
+  // side, so even a narrow one holds provinces of its own; their edges are the cut).
+  let wide = 0;
   const mark = (k: number) => {
-    if (k >= 0 && out.land[k] && !out.gorge[k]) out.cliff[k] = 1;
+    if (k < 0 || !out.land[k]) return;
+    if (!wide) {
+      if (!out.gorge[k]) out.cliff[k] = 1;
+      return;
+    }
+    out.gorge[k] ||= wide;
+    out.cliff[k] = 0;
+    const i = k % w;
+    for (const m of [i > 0 ? k - 1 : wrapKm ? k + w - 1 : -1, i < w - 1 ? k + 1 : wrapKm ? k - w + 1 : -1, k - w, k + w]) if (m >= 0 && m < n && out.land[m]) {
+      out.gorge[m] ||= wide;
+      out.cliff[m] = 0;
+    }
   };
   for (const st of surface.strokes) {
     if (st.erase || (st.brush !== 'cliffs' && st.brush !== 'ravine' && st.brush !== 'canyon')) continue;
+    wide = st.brush === 'canyon' ? 1 : st.brush === 'ravine' ? 2 : 0;
     const p = st.ctrl && st.ctrl.length >= 4 ? sketchCourse(st.ctrl, wrapKm) : st.pts;
     let last = -1;
     for (let q = 0; q + 3 < p.length; q += 2) {

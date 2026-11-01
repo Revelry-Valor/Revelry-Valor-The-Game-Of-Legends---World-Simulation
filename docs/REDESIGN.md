@@ -1201,6 +1201,11 @@ Like Crusader Kings 3: the world is split into provinces, and much of the simula
   - No seed is placed on a cliff, and ground boxed in by one joins the province beside it.
 - *Canyons and ravines:* their outside forms round them, and their inside has provinces of its own, a little smaller than usual. The whole width of a canyon or ravine counts as its inside, and such provinces are named "Canyon". A ravine too narrow to hold provinces is a cut, like a cliff.
 
+**Decided and built (mountain size, hard cuts):**
+- *Mountain provinces have their own size.* The *Mountain provinces* slider (10–150 miles, the land size by default) sets how big mountain provinces are, and how deep the impassable heart of a wide range lies. The fine grid is fine enough for the smaller of the two sizes.
+- *Cliffs and ravines are hard barriers.* No province grows across a cliff, and the edge of every canyon and ravine is a zone edge. Ground on a cut line, big rivers included, goes to the land beside it before it ever goes into a canyon. Canyons and ravines never take in slivers of the land round them, nor go into it.
+- *Ravines have provinces of their own*, however narrow ("Ravine"). The painted line is widened to a three-point strip so it can hold them. Canyons' are named "Canyon".
+
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.

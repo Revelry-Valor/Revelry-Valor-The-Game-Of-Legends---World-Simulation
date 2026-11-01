@@ -61,7 +61,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
   let brushMi = 20;
   let stroke: number[] | null = null;
   const saved0 = d.world().provinces;
-  const opts = { sizeMi: saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi, seaFactor: saved0?.seaFactor ?? PROVINCE_DEFAULTS.seaFactor };
+  const opts = { sizeMi: saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi, seaFactor: saved0?.seaFactor ?? PROVINCE_DEFAULTS.seaFactor, mountainMi: saved0?.mountainMi ?? saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi };
   // Drawing: each province's outline as a path (km), and the borders by kind.
   let paths: Path2D[] = [];
   let boxes: Float32Array = new Float32Array(0);
@@ -103,7 +103,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     busy = true;
     error = '';
     render();
-    const job = { surface: w.surface, settings: w.settings, sizeMi: opts.sizeMi, seaFactor: opts.seaFactor, saved: fresh ? null : savedNow ?? w.provinces ?? null };
+    const job = { surface: w.surface, settings: w.settings, sizeMi: opts.sizeMi, seaFactor: opts.seaFactor, mountainMi: opts.mountainMi, saved: fresh ? null : savedNow ?? w.provinces ?? null };
     const madeFrom = { strokes: w.surface.strokes, settings: w.settings };
     const done = (m: ProvinceMap | null, err?: string) => {
       busy = false;
@@ -204,13 +204,14 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     const smallest = smallestProvinceMi(w.settings);
     settingsBox.replaceChildren(
       numberField({ label: 'Province size', value: opts.sizeMi, min: PROVINCE_SIZE_MI.min, max: PROVINCE_SIZE_MI.max, step: 5, unit: 'miles', slider: true, hint: `About how far across a land province is.${smallest > PROVINCE_SIZE_MI.min ? ` This map is big enough that provinces under about ${smallest} miles across come out blocky.` : ''}`, change: (v) => { if (v > 0) { opts.sizeMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v)); render(); } } }),
+      numberField({ label: 'Mountain provinces', value: opts.mountainMi, min: PROVINCE_SIZE_MI.min, max: PROVINCE_SIZE_MI.max, step: 5, unit: 'miles', slider: true, hint: 'About how far across a mountain province is (from the foot of a range to its crest); the impassable heart of a wide range scales with it too.', change: (v) => { if (v > 0) { opts.mountainMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v)); render(); } } }),
       numberField({ label: 'Sea provinces', value: opts.seaFactor, min: 1, max: 8, step: 0.5, unit: '× as wide', slider: true, hint: 'How much wider sea provinces are than land provinces.', change: (v) => { if (v > 0) { opts.seaFactor = Math.max(1, Math.min(8, v)); render(); } } }),
     );
   };
   const render = () => {
     const w = d.world();
     const saved = w.provinces;
-    const changedSettings = !!saved && (saved.sizeMi !== opts.sizeMi || saved.seaFactor !== opts.seaFactor);
+    const changedSettings = !!saved && (saved.sizeMi !== opts.sizeMi || saved.seaFactor !== opts.seaFactor || (saved.mountainMi ?? saved.sizeMi) !== opts.mountainMi);
     const outOfDate = !!map && !!basis && (basis.strokes !== w.surface.strokes || basis.settings !== w.settings);
     const noClimate = !d.climate();
     const gen = h('button', { type: 'button', class: 'primary', disabled: busy || noClimate, title: 'Make a new set of provinces (new ids).', onclick: () => run(true) }, saved ? 'Generate new provinces' : 'Generate provinces');
@@ -449,6 +450,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
       if (!map && w.provinces && !busy) {
         opts.sizeMi = w.provinces.sizeMi;
         opts.seaFactor = w.provinces.seaFactor;
+        opts.mountainMi = w.provinces.mountainMi ?? w.provinces.sizeMi;
         renderSettings();
         run(false);
         return;
@@ -477,6 +479,7 @@ function hash01(v: number): number {
 
 function sameSaved(a: SavedProvinces | null | undefined, b: SavedProvinces): boolean {
   if (JSON.stringify(a?.edits ?? []) !== JSON.stringify(b.edits ?? [])) return false;
+  if ((a?.mountainMi ?? a?.sizeMi) !== (b.mountainMi ?? b.sizeMi)) return false;
   if (!a || a.nextId !== b.nextId || a.sizeMi !== b.sizeMi || a.seaFactor !== b.seaFactor || a.ids.length !== b.ids.length) return false;
   for (let i = 0; i < a.ids.length; i++) if (a.ids[i] !== b.ids[i]) return false;
   for (let i = 0; i < a.seeds.length; i++) if (a.seeds[i] !== b.seeds[i]) return false;
