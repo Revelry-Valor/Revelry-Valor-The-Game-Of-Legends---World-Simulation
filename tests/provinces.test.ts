@@ -30,6 +30,8 @@ add('mountains', line([[2300, yAt(28)], [2300, yAt(12)]], 25), { size: 200, stre
 add('forest', line([[3300, yAt(25)], [3500, yAt(15)]]), { size: 500 });
 add('river', line([[2600, yAt(20)], [3200, yAt(10)], [4100, yAt(5)]]), { width: 2 });
 add('lake', line([[3700, yAt(22)], [3760, yAt(22)]]), { size: 120 });
+add('cliffs', line([[2700, yAt(5)], [3100, yAt(0)]], 10));
+add('canyon', line([[3500, yAt(12)], [3800, yAt(4)]], 10), { size: 70 });
 
 let cl: Climate;
 let pm: ProvinceMap;
@@ -78,7 +80,8 @@ describe('fine geography', () => {
     let high = 0;
     let inRange = 0;
     for (let k = 0; k < g.band.length; k++) {
-      if (g.band[k] < 3 || g.band[k] === 5) continue;
+      // High mountains and peaks (not foothills, highlands or plateaus).
+      if (g.band[k] < 3 || g.band[k] >= 5) continue;
       high++;
       const kind = cl.geo!.regions[fine.region[k]]?.kind;
       if (kind === 'Mountains' || kind === 'Highlands') inRange++;
@@ -117,7 +120,8 @@ describe('provinces', () => {
       if (g.land[k] && !g.lake[k]) {
         landPts++;
         if (p.kind === 'sea') mixed++;
-        else if (p.kind === 'land' && fg.region[k] !== p.region) crossed++;
+        // Lowland provinces keep to their region (a mountain range or canyon is one zone across regions).
+        else if (p.kind === 'land' && !['Mountains', 'Highlands', 'Foothills', 'Plateau', 'Canyon'].includes(p.terrain) && fg.region[k] !== p.region) crossed++;
       } else if (!g.land[k] && p.kind !== 'sea') mixed++;
     }
     // Only slivers too small to stand alone are folded in.
@@ -206,4 +210,41 @@ describe('provinces', () => {
     expect(Array.from(again.label)).toEqual(Array.from(edited.label));
     expect(first.provinces.length).toBe(pm.provinces.length);
   }, 60000);
+  it('starts mountain provinces at the foot of the range, cuts at cliffs, and gives canyons their own', () => {
+    const g = sampleGround(surface, settings, pm.grid);
+    const { w } = pm.grid;
+    // The foothills belong to the mountain provinces.
+    let foot = 0;
+    let inRange = 0;
+    for (let k = 0; k < g.band.length; k++) {
+      if (!g.land[k] || g.band[k] !== 6) continue;
+      foot++;
+      if (['Mountains', 'Highlands', 'Foothills'].includes(pm.provinces[pm.label[k]].terrain) || pm.provinces[pm.label[k]].kind === 'wasteland') inRange++;
+    }
+    expect(foot).toBeGreaterThan(10);
+    expect(inRange / foot).toBeGreaterThan(0.8);
+    // Across a cliff the province changes.
+    let across = 0;
+    let same = 0;
+    for (let k = w; k < g.cliff.length - w; k++) {
+      if (!g.cliff[k]) continue;
+      for (const [a, b] of [[k - 1, k + 1], [k - w, k + w]]) {
+        if (!g.land[a] || !g.land[b] || g.cliff[a] || g.cliff[b] || g.gorge[a] || g.gorge[b]) continue;
+        across++;
+        if (pm.label[a] === pm.label[b]) same++;
+      }
+    }
+    expect(across).toBeGreaterThan(10);
+    expect(same / across).toBeLessThan(0.1);
+    // Inside the canyon: provinces of its own, not shared with the land round it.
+    const canyon = pm.provinces.filter((p) => p.terrain === 'Canyon');
+    expect(canyon.length).toBeGreaterThan(0);
+    let gorge = 0;
+    let mixed = 0;
+    for (let k = 0; k < g.gorge.length; k++) if (g.gorge[k]) {
+      gorge++;
+      if (pm.provinces[pm.label[k]].terrain !== 'Canyon') mixed++;
+    }
+    expect(mixed / gorge).toBeLessThan(0.1);
+  });
 });

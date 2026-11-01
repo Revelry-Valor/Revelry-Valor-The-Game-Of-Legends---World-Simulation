@@ -1,6 +1,6 @@
 import { nearestPoint, type Climate } from './climate';
 import { fbm } from './noise';
-import type { Surface } from './paint';
+import { sketchCourse, type Surface } from './paint';
 import type { WorldSettings } from './settings';
 import { evaluate, type Grid } from './terrain';
 
@@ -40,8 +40,9 @@ export function coverPoint(cl: Climate, x: number, y: number, px: number, seed: 
 }
 
 /** Relief bands of the fine ground. */
-export const BAND = { lowland: 0, hills: 1, highlands: 2, mountains: 3, peaks: 4, plateau: 5 } as const;
-export const BAND_NAMES = ['Lowland', 'Hills', 'Highlands', 'Mountains', 'Peaks', 'Plateau'];
+export const BAND = { lowland: 0, hills: 1, highlands: 2, mountains: 3, peaks: 4, plateau: 5, foothills: 6 } as const;
+export const BAND_NAMES = ['Lowland', 'Hills', 'Highlands', 'Mountains', 'Peaks', 'Plateau', 'Foothills'];
+export const BANDS = BAND_NAMES.length;
 
 /** The painted ground on a fine grid: only what geography and provinces need. */
 export interface FineGround {
@@ -57,6 +58,9 @@ export interface FineGround {
   /** 1 lake; 1 river, 2 big river (one that parts regions and provinces). */
   lake: Uint8Array;
   river: Uint8Array;
+  /** 1 on a cliff or other bare rock face outside a canyon (a cut provinces form round); 1 inside a canyon or ravine. */
+  cliff: Uint8Array;
+  gorge: Uint8Array;
 }
 
 /** Rivers at least this wide (km) part provinces, as they part regions (REDESIGN.md 8.13). */
@@ -67,7 +71,7 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid): Fi
   const { w, h } = grid;
   const n = w * h;
   const wrapKm = s.edges === 'wrap' ? s.widthKm : 0;
-  const out: FineGround = { grid, wrapKm, land: new Uint8Array(n), band: new Uint8Array(n), height: new Float32Array(n), lake: new Uint8Array(n), river: new Uint8Array(n) };
+  const out: FineGround = { grid, wrapKm, land: new Uint8Array(n), band: new Uint8Array(n), height: new Float32Array(n), lake: new Uint8Array(n), river: new Uint8Array(n), cliff: new Uint8Array(n), gorge: new Uint8Array(n) };
   const rows = Math.max(1, Math.floor(250_000 / Math.max(1, w)));
   for (let j0 = 0; j0 < h; j0 += rows) {
     const hh = Math.min(rows, h - j0);
@@ -80,9 +84,52 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid): Fi
       out.height[k] = f.climateH[q];
       if (!land) continue;
       const z = f.zone[q];
-      out.band[k] = z >= 4 ? BAND.peaks : z === 3 ? BAND.mountains : z === 2 ? BAND.highlands : f.plateau[q] > 0.5 ? BAND.plateau : z === 1 || f.hill[q] > 0.35 ? BAND.hills : BAND.lowland;
+      // The foot of a mountain (its lowest zone) belongs to the mountain; hills painted on their own are hills.
+      out.band[k] = z >= 4 ? BAND.peaks : z === 3 ? BAND.mountains : z === 2 ? BAND.highlands : f.plateau[q] > 0.5 ? BAND.plateau : z === 1 ? BAND.foothills : f.hill[q] > 0.35 ? BAND.hills : BAND.lowland;
+      // Canyons and ravines (their whole width), and cliffs and other rock faces outside them.
+      if (Math.max(f.canyon[q], f.ravine[q]) > 0.5) out.gorge[k] = 1;
+      else if (f.face[q] > 0.25) out.cliff[k] = 1;
       if (f.water[q] > 0.5 && f.waterKind[q] === 2) out.lake[k] = 1;
       else if (f.water[q] > 0.3 && f.waterKind[q] === 1) out.river[k] = f.riverWidth[q] >= BIG_RIVER_KM ? 2 : 1;
+    }
+  }
+  // Cliffs, ravines and canyons narrower than the grid: their painted lines, unbroken, are cuts too
+  // (a ravine too narrow to hold provinces of its own is a cut provinces form round).
+  const { px, x0, y0 } = grid;
+  const at = (x: number, y: number) => {
+    let i = Math.round((x - x0) / px);
+    const j = Math.round((y - y0) / px);
+    if (j < 0 || j >= h) return -1;
+    if (i < 0 || i >= w) {
+      if (!wrapKm) return -1;
+      i = ((i % w) + w) % w;
+    }
+    return j * w + i;
+  };
+  const mark = (k: number) => {
+    if (k >= 0 && out.land[k] && !out.gorge[k]) out.cliff[k] = 1;
+  };
+  for (const st of surface.strokes) {
+    if (st.erase || (st.brush !== 'cliffs' && st.brush !== 'ravine' && st.brush !== 'canyon')) continue;
+    const p = st.ctrl && st.ctrl.length >= 4 ? sketchCourse(st.ctrl, wrapKm) : st.pts;
+    let last = -1;
+    for (let q = 0; q + 3 < p.length; q += 2) {
+      const len = Math.hypot(p[q + 2] - p[q], p[q + 3] - p[q + 1]);
+      const steps = Math.max(1, Math.ceil(len / (px * 0.3)));
+      for (let t = 0; t <= steps; t++) {
+        const k = at(p[q] + ((p[q + 2] - p[q]) * t) / steps, p[q + 1] + ((p[q + 3] - p[q + 1]) * t) / steps);
+        if (k < 0 || k === last) continue;
+        mark(k);
+        // Diagonal steps filled in, so the line is unbroken point to point (nothing slips past a corner).
+        if (last >= 0) {
+          const li = last % w;
+          const lj = (last / w) | 0;
+          const ki = k % w;
+          const kj = (k / w) | 0;
+          if (li !== ki && lj !== kj) mark(lj * w + ki);
+        }
+        last = k;
+      }
     }
   }
   return out;

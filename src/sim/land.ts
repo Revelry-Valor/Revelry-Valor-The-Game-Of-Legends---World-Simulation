@@ -43,7 +43,7 @@ export interface ProvIndex {
 /** How hard a province's ground is to cross, from its relief band and terrain. */
 export function roughOf(band: number, terrain: string): number {
   // Peaks are the roughest ground a way can take (impassable wasteland is its own kind of province).
-  const relief = [1, 1.4, 1.8, 3, 3.5, 1.5][band] ?? 1;
+  const relief = [1, 1.4, 1.8, 3, 3.5, 1.5, 1.4][band] ?? 1;
   const cover = /Forest|Jungle|Taiga/.test(terrain) ? 1.3 : /Desert|Icefield/.test(terrain) ? 1.2 : 1;
   return relief * cover;
 }

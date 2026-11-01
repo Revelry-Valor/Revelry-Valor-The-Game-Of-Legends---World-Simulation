@@ -1,5 +1,5 @@
 import type { Climate } from './climate';
-import { BAND, fineGeography, fineGrid, fineIndex, keepWhole, neighbours4, sampleGround } from './finegeo';
+import { BAND, BANDS, fineGeography, fineGrid, fineIndex, keepWhole, neighbours4, sampleGround } from './finegeo';
 import { fbm } from './noise';
 import type { Surface } from './paint';
 import type { WorldSettings } from './settings';
@@ -129,8 +129,10 @@ export function smallestProvinceMi(s: WorldSettings): number {
  * Kings); plateaus on their own. Only the heart of a wide range of peaks, well away from any
  * lower ground, is impassable wasteland.
  */
-const GROUP_OF_BAND = [0, 0, 1, 1, 1, 4];
+const GROUP_OF_BAND = [0, 0, 1, 1, 1, 4, 1];
 const PEAKS_GROUP = 3;
+/** Inside a canyon or ravine wide enough to hold them: provinces of its own, a little smaller (the floor is narrow). */
+const GORGE_GROUP = 5;
 /** Peaks at least this many province widths from lower ground are impassable (the heart of a wide range). */
 const WASTE_DEPTH = 1;
 const LAND = 0;
@@ -191,13 +193,17 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
       }
     }
     const deep = milesToKm(sizeMi) * WASTE_DEPTH;
-    for (let k = 0; k < n; k++) if (g.land[k] && g.band[k] === BAND.peaks && depth[k] > deep) grp[k] = PEAKS_GROUP;
+    for (let k = 0; k < n; k++) {
+      if (g.land[k] && g.band[k] === BAND.peaks && depth[k] > deep) grp[k] = PEAKS_GROUP;
+      if (g.land[k] && g.gorge[k]) grp[k] = GORGE_GROUP;
+    }
   }
   for (let k = 0; k < n; k++) {
     const m = medium(k);
     if (m === SEA) key[k] = -100 - (fg.water[k] + 1);
     else if (m === LAKE) key[k] = -10;
-    else if (g.river[k] === 2) key[k] = -1;
+    // Big rivers and cliffs are cuts: provinces form round them.
+    else if (g.river[k] === 2 || g.cliff[k]) key[k] = -1;
     // Lowland by natural region; a mountain range or plateau is one zone however many regions it spans.
     else key[k] = (grp[k] === 0 ? fg.region[k] + 1 : 0) * 8 + grp[k];
   }
@@ -242,7 +248,7 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   }
   const pxArea = px * px;
   const landTarget = (sizeKm * sizeKm) / pxArea;
-  const targetOf = (z: number) => (zMedium[z] === SEA ? sq(sizeKm * seaFactor) / pxArea : zMedium[z] === LAKE ? sq(sizeKm * 2) / pxArea : zGroup[z] === PEAKS_GROUP ? landTarget * 2.25 : landTarget);
+  const targetOf = (z: number) => (zMedium[z] === SEA ? sq(sizeKm * seaFactor) / pxArea : zMedium[z] === LAKE ? sq(sizeKm * 2) / pxArea : zGroup[z] === PEAKS_GROUP ? landTarget * 2.25 : zGroup[z] === GORGE_GROUP ? landTarget * 0.8 : landTarget);
   // Slivers join the zone they border most: land with land (lakes too small to stand alone
   // become land), water with water; a speck of land out at sea joins the sea.
   mergeSmallZones(zone, zones, nb, (z) => targetOf(z), zMedium);
@@ -265,7 +271,7 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
     zone[k] = zoneIds.get(zone[k])!;
     zoneSize[zone[k]]++;
   }
-  const target = (z: number) => (zm[z] === SEA ? sq(sizeKm * seaFactor) / pxArea : zm[z] === LAKE ? sq(sizeKm * 2) / pxArea : zg[z] === PEAKS_GROUP ? landTarget * 2.25 : landTarget);
+  const target = (z: number) => (zm[z] === SEA ? sq(sizeKm * seaFactor) / pxArea : zm[z] === LAKE ? sq(sizeKm * 2) / pxArea : zg[z] === PEAKS_GROUP ? landTarget * 2.25 : zg[z] === GORGE_GROUP ? landTarget * 0.8 : landTarget);
   const zoneStart = new Int32Array(Z + 1);
   for (let z = 0; z < Z; z++) zoneStart[z + 1] = zoneStart[z] + zoneSize[z];
   const zonePix = new Int32Array(n);
@@ -286,7 +292,9 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   if (!fresh && opts.saved) {
     const sv = opts.saved;
     for (let q = 0; q < sv.ids.length; q++) {
-      const k = fineIndex(grid, g.wrapKm, sv.seeds[2 * q], sv.seeds[2 * q + 1]);
+      let k = fineIndex(grid, g.wrapKm, sv.seeds[2 * q], sv.seeds[2 * q + 1]);
+      // A seed a cliff was painted over since: onto the ground beside it.
+      if (k >= 0 && g.cliff[k]) k = nb(k, buf).find((m) => !g.cliff[m] && zone[m] === zone[k]) ?? -1;
       if (k < 0 || taken.has(k)) continue;
       taken.add(k);
       zoneSeeds[zone[k]].push(seedPix.length);
@@ -311,6 +319,8 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
     const cells = new Map<number, { count: number; best: number; bd: number }>();
     for (let q = zoneStart[z]; q < zoneStart[z + 1]; q++) {
       const k = zonePix[q];
+      // Never on a cliff (a province grown from one would run along it).
+      if (g.cliff[k]) continue;
       const i = k % w;
       const j = (k / w) | 0;
       const ci = Math.floor((i + offX) / sp);
@@ -349,7 +359,7 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   // ---- Growth ----
   const noise = new Uint8Array(n);
   for (let k = 0; k < n; k++) noise[k] = Math.round(127.5 + 127.5 * Math.max(-1, Math.min(1, 1.8 * fbm(xOf(k), yOf(k), sizeKm * 0.4, px, s.seed + 611, 4))));
-  let label = grow(seedPix, zone, noise, g.height, w, h, wrap, px);
+  let label = grow(seedPix, zone, noise, g.height, g.cliff, w, h, wrap, px);
   if (fresh) {
     // Even them out: each seed moves to its province's middle, and they grow again.
     for (let round = 0; round < 1; round++) {
@@ -370,13 +380,27 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
         const l = label[k];
         if (l < 0 || !cnt[l]) continue;
         const d = sq(dxWrap(xOf(k) - xOf(seedPix[l])) - sx[l] / cnt[l]) + sq(yOf(k) - sy[l] / cnt[l]);
-        if (d < bd[l]) [bd[l], best[l]] = [d, k];
+        if (d < bd[l] && !g.cliff[k]) [bd[l], best[l]] = [d, k];
       }
       for (let l = 0; l < S; l++) seedPix[l] = best[l];
-      label = grow(seedPix, zone, noise, g.height, w, h, wrap, px);
+      label = grow(seedPix, zone, noise, g.height, g.cliff, w, h, wrap, px);
     }
   }
   // Each province in one piece (growing across corners can leave a corner cut off).
+  // Ground growth could not reach (a pocket closed off by a cliff) joins the province beside it.
+  {
+    const queue: number[] = [];
+    for (let k = 0; k < n; k++) if (label[k] >= 0) queue.push(k);
+    for (const sameZone of [true, false]) {
+      for (let q = 0; q < queue.length; q++) {
+        const k = queue[q];
+        for (const m of nb(k, buf)) if (label[m] < 0 && zone[m] >= 0 && (!sameZone || zone[m] === zone[k])) {
+          label[m] = label[k];
+          queue.push(m);
+        }
+      }
+    }
+  }
   wholeProvinces(label, zone, w, h, wrap);
   return { grid, g, fg, zone, zm, zg, seedPix, seedId, nextId, label };
 }
@@ -402,7 +426,7 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
   const cnt = new Int32Array(S);
   const sx = new Float64Array(S);
   const sy = new Float64Array(S);
-  const bands = new Int32Array(S * 6);
+  const bands = new Int32Array(S * BANDS);
   const river = new Uint8Array(S);
   const coastal = new Uint8Array(S);
   const pairs = new Set<number>();
@@ -412,7 +436,7 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
     cnt[l]++;
     sx[l] += dxWrap(xOf(k) - xOf(seedPix[l]));
     sy[l] += yOf(k);
-    if (g.land[k]) bands[l * 6 + g.band[k]]++;
+    if (g.land[k]) bands[l * BANDS + g.band[k]]++;
     if (g.river[k]) river[l] = 1;
     for (const m of nb(k, buf)) {
       const o = label[m];
@@ -437,7 +461,7 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
     const z = zone[k0];
     const md = zm[z];
     let band = 0;
-    for (let b = 1; b < 6; b++) if (bands[l * 6 + b] > bands[l * 6 + band]) band = b;
+    for (let b = 1; b < BANDS; b++) if (bands[l * BANDS + b] > bands[l * BANDS + band]) band = b;
     const region = md === SEA ? -1 : fg.region[k0];
     const water = md === SEA ? fg.water[k0] : -1;
     const kind: ProvinceKind = md === SEA ? 'sea' : md === LAKE ? 'lake' : zg[z] === PEAKS_GROUP ? 'wasteland' : 'land';
@@ -446,9 +470,11 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
       kind === 'sea' ? geo?.waters[water]?.kind ?? 'Sea'
       : kind === 'lake' ? 'Lake'
       : kind === 'wasteland' ? 'Impassable peaks'
+      : zg[z] === GORGE_GROUP ? 'Canyon'
       : band === BAND.mountains || band === BAND.peaks ? 'Mountains'
       : band === BAND.highlands ? 'Highlands'
       : band === BAND.plateau ? 'Plateau'
+      : band === BAND.foothills ? 'Foothills'
       : band === BAND.hills && regionKind !== 'Mountains' && regionKind !== 'Highlands' ? `${regionKind} hills`
       : regionKind;
     let x = xOf(seedPix[l]) + (cnt[l] ? sx[l] / cnt[l] : 0);
@@ -572,9 +598,9 @@ function mergeSmallZones(zone: Int32Array, zones: number, nb: (k: number, out: n
  * more or less by the noise, never leaving the seed's zone (Dial's shortest paths: costs are
  * whole numbers, so a ring of buckets serves as the queue).
  */
-function grow(seeds: number[], zone: Int32Array, noise: Uint8Array, height: Float32Array, w: number, h: number, wrap: boolean, px: number): Int32Array {
+function grow(seeds: number[], zone: Int32Array, noise: Uint8Array, height: Float32Array, cliff: Uint8Array, w: number, h: number, wrap: boolean, px: number): Int32Array {
   const n = w * h;
-  const B = 256;
+  const B = 1024;
   const MASK = B - 1;
   const dist = new Int32Array(n).fill(0x7fffffff);
   const label = new Int32Array(n).fill(-1);
@@ -654,8 +680,10 @@ function grow(seeds: number[], zone: Int32Array, noise: Uint8Array, height: Floa
       }
       const m = jj * w + ii;
       if (label[m] >= 0 || zone[m] !== z) continue;
+      // A cliff is a cut: growth may reach onto it but never off it onto other ground, nor slip past it across a corner.
+      if (cliff[p] && !cliff[m]) continue;
       // Across a corner only where the way round it is in the zone too.
-      if (q >= 4 && q < 8 && zone[j * w + ii] !== z && zone[jj * w + i] !== z) continue;
+      if (q >= 4 && q < 8 && ((zone[j * w + ii] !== z && zone[jj * w + i] !== z) || cliff[j * w + ii] || cliff[jj * w + i])) continue;
       // A knight's move only past points in the zone (the two it passes between).
       if (q >= 8) {
         const di = DI[q];
@@ -664,11 +692,12 @@ function grow(seeds: number[], zone: Int32Array, noise: Uint8Array, height: Floa
         const longI = di === 2 || di === -2;
         const p1 = longI ? j * w + (wrap ? col(i + di / 2) : i + di / 2) : (j + dj / 2) * w + i;
         const p2 = longI ? jj * w + (wrap ? col(i + di / 2) : i + di / 2) : (j + dj / 2) * w + ii;
-        if (zone[p1] !== z || zone[p2] !== z) continue;
+        if (zone[p1] !== z || zone[p2] !== z || cliff[p1] || cliff[p2]) continue;
       }
       let slope = slopeK * Math.abs(height[m] - hp);
       if (slope > 2.5) slope = 2.5;
-      const c = (BASE[q] * dear[noise[m]] * (1 + slope) + 0.5) | 0;
+      // Over a cliff is dear, so borders settle along cliffs even where a cliff line has gaps.
+      const c = (BASE[q] * dear[noise[m]] * (1 + slope) * (cliff[m] ? 5 : 1) + 0.5) | 0;
       const d = cur + (c > 0 ? c : 1);
       if (d < dist[m]) enqueue(d, m, l);
     }

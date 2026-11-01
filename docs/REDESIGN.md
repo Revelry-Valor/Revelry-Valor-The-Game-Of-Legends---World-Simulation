@@ -1193,6 +1193,14 @@ Like Crusader Kings 3: the world is split into provinces, and much of the simula
 - Only peaks at least a province's width from lower ground are impassable: the heart of a wide range.
 - Ways can cross mountain provinces, at peak ground's roughness of 3.5.
 
+**Decided and built (relief cuts):**
+- *Mountains start at their foot.* The lowest mountain zone (foothills, where the built-up mass of a range begins) belongs to the range's provinces. Hills painted on their own stay with the lowland, as hills.
+- *Cliffs are cuts:* provinces form round them, never across.
+  - Every cliff stroke's line is traced unbroken on the fine grid, as are other bare rock faces outside canyons.
+  - Growth may reach onto a cliff but never off it onto other ground, nor slip past it across a corner.
+  - No seed is placed on a cliff, and ground boxed in by one joins the province beside it.
+- *Canyons and ravines:* their outside forms round them, and their inside has provinces of its own, a little smaller than usual. The whole width of a canyon or ravine counts as its inside, and such provinces are named "Canyon". A ravine too narrow to hold provinces is a cut, like a cliff.
+
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.
