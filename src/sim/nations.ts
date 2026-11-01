@@ -1,4 +1,5 @@
 import type { Government, Library } from '../core/library';
+import { transferAll } from './land';
 import { cultureOf } from './culture';
 import { acceptance } from './cultureChange';
 import type { Env } from './env';
@@ -376,7 +377,7 @@ function unions(c: NationContext): void {
       const reach = controlAt(big.realm.centralization, near / FOOT_KM);
       if (reach < 0.3 || c.rand() >= 0.08 * reach * acc) continue;
       for (const p of places) p.clan = big.id;
-      for (let k = 0; k < sim.owner.length; k++) if (sim.owner[k] === small.id) sim.owner[k] = big.id;
+      transferAll(sim, c.env, small.id, big.id);
       for (const so of sim.sorties) if (so.clan === small.id) so.clan = big.id;
       for (const cv of sim.caravans) if (cv.clan === small.id) cv.clan = big.id;
       big.techs = [...new Set([...(big.techs ?? []), ...(small.techs ?? [])])];

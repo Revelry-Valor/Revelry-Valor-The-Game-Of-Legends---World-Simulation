@@ -3,6 +3,8 @@ import { COVER_BRUSHES } from '../core/paint';
 import type { Beast, Library, Resource } from '../core/library';
 import { freshWaters } from '../core/geography';
 import type { Surface } from '../core/paint';
+import type { ProvinceMap } from '../core/provinces';
+import { attachProvinces, type ProvIndex } from './land';
 
 /**
  * What the land offers the first peoples, on the climate's points: plant food by season, fresh
@@ -93,6 +95,8 @@ export interface Env {
   /** Where each resource is (0–1: how good the land is for it, or how rich the deposit). */
   res: Record<string, Float32Array>;
   resInfo: ResInfo[];
+  /** The provinces (land.ts): from the generator, or each point its own until it has them. */
+  prov: ProvIndex;
 }
 
 const smooth = (a: number, b: number, x: number) => {
@@ -104,7 +108,7 @@ const SIZE_MEAT: Record<string, number> = { Tiny: 0.5, Small: 0.4, Medium: 0.6, 
 /** The mountain zone of a climate height (km). */
 export const mountainZone = (hk: number) => (hk < 0.3 ? 0 : hk < 1 ? 1 : hk < 2.2 ? 2 : hk < 3.7 ? 3 : 4);
 
-export function buildEnv(cl: Climate, lib: Library, surface: Surface): Env {
+export function buildEnv(cl: Climate, lib: Library, surface: Surface, provinces: ProvinceMap | null = null): Env {
   const { w, h, step } = cl;
   const n = w * h;
   const plant: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
@@ -211,7 +215,9 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface): Env {
     }
   }
   const { res, resInfo } = resources(cl, lib.resources, { mzone, coast, fresh, volcanic });
-  return { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, res, resInfo };
+  const env: Env = { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, res, resInfo, prov: null as unknown as ProvIndex };
+  attachProvinces(env, provinces);
+  return env;
 }
 
 const RARITY_WEIGHT: Record<string, number> = { Common: 1, Uncommon: 0.6, Rare: 0.3, 'Very rare': 0.12 };

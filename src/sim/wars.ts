@@ -1,4 +1,5 @@
 import type { Library } from '../core/library';
+import { holderOf, provAt, setHolder, transferAll } from './land';
 import { cultureFx, cultureOf } from './culture';
 import { noteBetween } from './cultureChange';
 import { isFood } from './economy';
@@ -824,12 +825,14 @@ function cede(c: WarContext, st: Settlement, to: number): void {
   delete st.occupied;
   st.unrest = 0;
   const left = towns(sim, from);
-  for (let k = 0; k < env.n; k++) {
-    if (sim.owner[k] !== from) continue;
-    const x = env.x0 + (k % env.w) * env.step;
-    const y = env.y0 + ((k / env.w) | 0) * env.step;
-    const d = c.dist(x, y, st.x, st.y);
-    if (d < 80 && left.every((o) => c.dist(x, y, o.x, o.y) > d)) sim.owner[k] = to;
+  // Its own province, and the old realm's provinces nearer it than any town the old realm keeps (within about 50 miles).
+  const P = env.prov;
+  const home = provAt(env, st.x, st.y);
+  if (home >= 0 && holderOf(sim, home) === from) setHolder(sim, env, home, to);
+  for (let p = 0; p < P.count; p++) {
+    if (holderOf(sim, p) !== from) continue;
+    const d = c.dist(P.x[p], P.y[p], st.x, st.y);
+    if (d < 80 && left.every((o) => c.dist(P.x[p], P.y[p], o.x, o.y) > d)) setHolder(sim, env, p, to);
   }
 }
 
@@ -838,7 +841,7 @@ function absorb(c: WarContext, from: Clan, into: Clan): void {
   const { sim } = c;
   for (const st of towns(sim, from.id)) cede(c, st, into.id);
   for (const t of sim.tribes) if (t.clan === from.id) t.clan = into.id;
-  for (let k = 0; k < sim.owner.length; k++) if (sim.owner[k] === from.id) sim.owner[k] = into.id;
+  transferAll(sim, c.env, from.id, into.id);
   for (const so of sim.sorties) if (so.clan === from.id) so.clan = into.id;
   for (const cv of sim.caravans) if (cv.clan === from.id) cv.clan = into.id;
   for (const a of [...(sim.armies ?? [])]) if (a.clan === from.id) disband(c, a);

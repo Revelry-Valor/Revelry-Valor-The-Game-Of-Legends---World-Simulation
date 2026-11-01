@@ -7,7 +7,7 @@ import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
-import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, stepDays, techOutlook } from '../sim/sim';
+import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
@@ -22,8 +22,10 @@ import { techTiers } from '../core/library';
 import { dateText, DAYS_PER_MONTH, monthOf, northernSummer, yearOf, type Settlement, type SetupRow, type SimState, type StartKind, type Tribe } from '../sim/state';
 import { choice, h, numberField, toast } from './dom';
 import type { MapOverlay } from './mapview';
-import { borderMap, holder, isOcc, OUTSIDE } from './borders';
-import { evaluate } from '../core/terrain';
+import { holder, isOcc, occ, OUTSIDE, SEA, UNCLAIMED } from './borders';
+import { assembleRings } from '../core/trace';
+import type { ProvinceMap } from '../core/provinces';
+import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
 import type { InfoItem, ResourceView } from './info';
 
 /**
@@ -48,6 +50,9 @@ export interface PeoplesDeps {
   selectionChanged?(): void;
   /** Open the Peoples tab (to show what the hand tool picked). */
   openPeoples?(): void;
+  /** The provinces (the peoples hold land by province), and opening the Provinces tab to make them. */
+  provinces(): ProvinceMap | null;
+  openProvinces?(): void;
 }
 
 export interface Peoples {
@@ -56,6 +61,8 @@ export interface Peoples {
   overlay: MapOverlay;
   /** Whether the Peoples tab is open (the map's presses go to the peoples then). */
   setActive(on: boolean): void;
+  /** The provinces were made, updated or removed. */
+  provincesChanged(): void;
   climateChanged(): void;
   /** The simulation packed for saving (null if there is none). */
   pack(): PackedSim | null;
@@ -112,7 +119,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   const climateChanged = () => {
     const c = cl();
     if (!c) return;
-    env = buildEnv(c, lib(), d.surface());
+    env = buildEnv(c, lib(), d.surface(), d.provinces());
     if (!sim && pending) {
       sim = unpackSim(pending, env);
       if (!sim) {
@@ -123,6 +130,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     }
     if (sim && (sim.w !== env.w || sim.h !== env.h)) gridProblem = true;
     if (sim && !gridProblem) {
+      bindProvinces(sim, env);
       // Beasts added to the library since: they start at home in their land.
       for (const b of env.beastInfo) if (!sim.beasts[b.id]) sim.beasts[b.id] = Float32Array.from(env.beastK[b.id], (v) => v * 0.9);
     }
@@ -131,7 +139,16 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     render();
     d.redraw();
   };
-  const ready = () => !!(env && sim && !gridProblem);
+  const ready = () => !!(env && sim && !gridProblem && env.prov.real);
+  /** New or updated provinces: the land is held by them from now on (each province's holder kept by its id). */
+  const provincesChanged = () => {
+    if (!env) return;
+    attachProvinces(env, d.provinces());
+    if (sim && !gridProblem) bindProvinces(sim, env);
+    landDirty = true;
+    render();
+    d.redraw();
+  };
   const cellOf = (x: number, y: number) => {
     if (!env) return -1;
     let i = Math.round((x - env.x0) / env.step);
@@ -268,8 +285,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   /** Border lines (km): polylines along the natural edges of the realms' lands; and when the land was last drawn. */
   let borderChains: { pts: number[]; left: number; right: number }[] = [];
   let borderRings = new Map<number, number[][]>();
-  /** The painted land on the borders' fine grid (kept until the painting or the grid changes). */
-  let fineLandCache: { surface: unknown; W: number; H: number; land: Uint8Array } | null = null;
+  /** Provinces being taken by another's use, for hatching. */
+  let disputed: { rings: number[][]; rgb: number[] }[] = [];
   let landBuilt = 0;
   let landColours = new Map<number, number[]>();
   let beastImg: HTMLCanvasElement | null = null;
@@ -291,67 +308,39 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const fa = landsBy === 'faith' ? realmFaith(s, c) : undefined;
       return [c.id, hex(cu ? cultureColour(s, cu) : fa ? faithColour(s, fa) : c.colour)];
     }));
-    // Land round towns held by an enemy (its owner's land within about 30 miles): who holds it.
-    const occupiedBy = new Map<number, number>();
-    const reach = Math.ceil(50 / e.step);
+    // Provinces round towns held by an enemy (its owner's within about 30 miles): taken in the war.
+    const P = e.prov;
+    const pm = d.provinces();
+    const taken = new Map<number, number>();
     for (const st of s.settlements) {
       if (!st.occupied || st.ruined) continue;
-      const ci = Math.round((st.x - e.x0) / e.step);
-      const cj = Math.round((st.y - e.y0) / e.step);
-      for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) {
-        if (di * di + dj * dj > reach * reach) continue;
-        const jj = cj + dj;
-        let ii = ci + di;
-        if (jj < 0 || jj >= e.h) continue;
-        if (ii < 0 || ii >= e.w) {
-          if (!e.wrapKm) continue;
-          ii = ((ii % e.w) + e.w) % e.w;
-        }
-        const k = jj * e.w + ii;
-        if (s.owner[k] === st.clan) occupiedBy.set(k, st.occupied.by);
-      }
+      for (const p of provincesNear(e, st.x, st.y, 50)) if (s.provOwner?.[p] === st.clan) taken.set(p, st.occupied.by);
     }
-    // Borders (borders.ts): the claims on a finer grid, the coast from the painting itself.
-    const F = e.w * e.h > 120000 ? 2 : e.w * e.h > 40000 ? 3 : 4;
-    const W = e.w * F;
-    const H = e.h * F;
-    const surface = d.surface();
-    if (!fineLandCache || fineLandCache.surface !== surface || fineLandCache.W !== W || fineLandCache.H !== H) {
-      const wsets = d.world().settings;
-      const px = e.step / F;
-      const f = evaluate(surface, { x0: e.x0 - e.step / 2 + px / 2, y0: e.y0 - e.step / 2 + px / 2, px, w: W, h: H }, { seed: wsets.seed, wrapKm: e.wrapKm, noRelief: true });
-      const land = new Uint8Array(W * H);
-      for (let q = 0; q < land.length; q++) land[q] = f.ground[q] >= 1.5 ? 1 : 0;
-      fineLandCache = { surface, W, H, land };
+    // Each province's label for the borders (borders.ts): its holder (or its holder's land taken), unheld land, or water.
+    const label = new Int32Array(P.count);
+    for (let p = 0; p < P.count; p++) {
+      const o = s.provOwner?.[p] ?? -1;
+      label[p] = P.kind[p] === PK.sea || P.kind[p] === PK.lake ? SEA : o < 0 ? UNCLAIMED : taken.has(p) ? occ(o) : o;
     }
-    const bm = borderMap({ w: e.w, h: e.h, wrap: !!e.wrapKm, land: e.land, owner: s.owner, occupied: new Set(occupiedBy.keys()), F, fineLand: fineLandCache.land });
-    // Disputed land (being taken by another's use): hatched in the taker's colour.
-    const cv = h('canvas', { width: bm.W, height: bm.H }) as HTMLCanvasElement;
-    const g = cv.getContext('2d')!;
-    const img = g.createImageData(bm.W, bm.H);
-    const data = img.data;
-    const stripe = Math.max(2, F);
-    for (let q = 0; q < bm.label.length; q++) {
-      const o = holder(bm.label[q]);
-      if (o < 0) continue;
-      const k = bm.cell[q];
-      if (s.owner[k] !== o || s.rival[k] < 0 || s.rivalUse[k] <= 0) continue;
-      const X = q % bm.W;
-      const Y = (q / bm.W) | 0;
-      if ((X + Y) % (stripe * 2) >= stripe) continue;
-      const rc = hex(clanOf(s.rival[k])?.colour ?? '#888888');
-      data.set([rc[0], rc[1], rc[2], 150], q * 4);
+    const held = (l: number) => l >= 0 || l <= -1000;
+    // Borders run along the province outlines: every stretch between two different labels.
+    const chains: { pts: number[]; left: number; right: number }[] = [];
+    if (pm) for (const b of pm.borders) {
+      const l = b.a < 0 ? OUTSIDE : label[b.a];
+      const r = b.b < 0 ? OUTSIDE : label[b.b];
+      if (l === r || (!held(l) && !held(r))) continue;
+      chains.push({ pts: b.pts, left: l, right: r });
     }
-    g.putImageData(img, 0, 0);
-    // Lines and rings in km.
-    const fx = e.step / F;
-    const ox = e.x0 - e.step / 2;
-    const oy = e.y0 - e.step / 2;
-    const toKm = (l: number[]) => l.map((v, i) => (i % 2 ? oy + v * fx : ox + v * fx));
-    borderChains = bm.chains.map((c) => ({ pts: toKm(c.pts), left: c.left, right: c.right }));
-    borderRings = new Map([...bm.rings].map(([who, rings]) => [who, rings.map(toKm)]));
+    borderChains = chains;
+    borderRings = assembleRings(chains, pm?.wrapKm ?? 0, !!pm?.wrapKm, held);
+    // Disputed provinces (being taken by another's use): hatched in the taker's colour.
+    disputed = [];
+    if (pm && s.provRival && s.provRivalUse) for (let p = 0; p < P.count; p++) {
+      if (s.provRival[p] < 0 || s.provRivalUse[p] <= 0 || (s.provOwner?.[p] ?? -1) < 0) continue;
+      disputed.push({ rings: pm.rings[p], rgb: hex(clanOf(s.provRival[p])?.colour ?? '#888888') });
+    }
     landColours = colours;
-    return cv;
+    return h('canvas', { width: 1, height: 1 }) as HTMLCanvasElement;
   };
 
   const drawBeast = (id: string) => {
@@ -452,6 +441,36 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             }
             g.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${chosen ? 1 : 0.85})`;
             g.lineWidth = (chosen ? strip * 2.2 : strip) * 2;
+            g.stroke();
+            g.restore();
+          }
+          // Disputed provinces: hatched in the colour of those taking them.
+          for (const dp of disputed) {
+            g.save();
+            g.beginPath();
+            let x0 = Infinity;
+            let y0 = Infinity;
+            let x1 = -Infinity;
+            let y1 = -Infinity;
+            for (const r of dp.rings) {
+              trace(r, c);
+              g.closePath();
+              for (let i = 0; i < r.length; i += 2) {
+                const [sx, sy] = at(r[i], r[i + 1], c);
+                x0 = Math.min(x0, sx);
+                x1 = Math.max(x1, sx);
+                y0 = Math.min(y0, sy);
+                y1 = Math.max(y1, sy);
+              }
+            }
+            g.clip('evenodd');
+            g.beginPath();
+            for (let t = x0 - (y1 - y0); t < x1; t += 7) {
+              g.moveTo(t, y1);
+              g.lineTo(t + (y1 - y0), y0);
+            }
+            g.strokeStyle = `rgba(${dp.rgb[0]},${dp.rgb[1]},${dp.rgb[2]},0.6)`;
+            g.lineWidth = 1.5;
             g.stroke();
             g.restore();
           }
@@ -1481,7 +1500,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     ].filter(Boolean) as HTMLElement[];
   };
   const settlementLine = (st: Settlement) => {
-    const what = st.kind === 'dawn' ? 'dawn city' : 'village';
+    const what = settlementTier(st).toLowerCase();
     if (st.ruined) return `Ruins of ${st.name} (${what})${st.holyTo.length ? `, holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
     const cn = clanOf(st.clan);
     const occ = st.occupied ? clanOf(st.occupied.by) : undefined;
@@ -1514,6 +1533,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const c = cl();
     if (!c || !env || !sim) {
       panel.replaceChildren(h('h2', {}, 'Peoples'), h('p', { class: 'muted small' }, 'Working out the climate first: the peoples live by it.'));
+      return;
+    }
+    if (!env.prov.real) {
+      panel.replaceChildren(
+        h('h2', {}, 'Peoples'),
+        h('p', { class: 'notice small' }, 'The peoples hold land by province: make the provinces first (Provinces tab). Saved peoples from before provinces carry on once there are provinces, each province going to whoever held most of it.'),
+        ...(d.openProvinces ? [h('button', { type: 'button', class: 'primary', onclick: () => d.openProvinces?.() }, 'Open the Provinces tab')] : []),
+      );
       return;
     }
     if (gridProblem) {
@@ -1783,7 +1810,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       parts.push(
         h('h3', {}, st.name),
         h('div', { class: 'tribe-card small' },
-          h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)}` : 'Village'),
+          h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)}` : `${settlementTier(st)}${st.seat === false ? ': another settlement is its province’s seat, so it stays a village' : ''}`),
           st.holyTo.length ? h('div', { class: 'holy-tag' }, `Holy to all the ${st.holyTo.map(raceName).join(', ')}, wherever they are${st.ruined ? ', even in ruin' : ''}.`) : null,
           st.ruined
             ? h('div', {}, 'In ruins. Those who come to it may build it again (its own people most of all).')
@@ -1819,7 +1846,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         !s.started
           ? h('div', { class: 'group' },
               numberField({ label: 'People', value: Math.round(st.pop), min: 30, max: 20000, step: 10, change: (v) => { st.pop = Math.max(30, Math.min(20000, Math.round(v))); if (ri) st.warband = Math.round(st.pop * ri.warShare * 0.6); const row = draft.get(st.race); if (row) row.cityPop = st.pop; d.changed(); } }),
-              h('button', { type: 'button', class: 'ghost small danger', onclick: () => { removeSettlement(s, st.id); selected = null; landDirty = true; d.changed(); render(); d.redraw(); } }, 'Remove this dawn city'),
+              h('button', { type: 'button', class: 'ghost small danger', onclick: () => { removeSettlement(s, st.id, env ?? undefined); selected = null; landDirty = true; d.changed(); render(); d.redraw(); } }, 'Remove this dawn city'),
             )
           : null,
       );
@@ -1922,6 +1949,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       d.redraw();
     },
     climateChanged,
+    provincesChanged,
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),
     resources: resourceView,
     dispose() {

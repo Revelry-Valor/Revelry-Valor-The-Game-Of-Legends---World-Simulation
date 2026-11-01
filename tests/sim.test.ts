@@ -22,6 +22,9 @@ import { updatePrices } from '../src/sim/trade';
 import { bestWay, knows, pathCells, pathSpeed } from '../src/sim/ways';
 import { armsMight, clanKnows } from '../src/sim/tech';
 import { acceptance, noteBetween } from '../src/sim/cultureChange';
+import { PK, provAt, transferAll } from '../src/sim/land';
+import { generateProvinces } from '../src/core/provinces';
+import { VILLAGE_MAX } from '../src/sim/sim';
 
 /** The test continent from the climate tests: 55°N to 35°S, with a western range. */
 const north = 70;
@@ -1371,7 +1374,7 @@ describe('claiming land', () => {
   it('claims a band of land round a tribe as it walks, not a thin line', () => {
     const sim = newSim(env, 801);
     const t = addTribe(sim, env, lib, humanId(), 6000, yAt(-12), -1, 200)!;
-    for (const q of sim.owner.keys()) sim.owner[q] = -1;
+    transferAll(sim, env, t.clan, -1);
     const start = { x: t.x, y: t.y };
     t.summer = t.winter = { x: t.x + 400, y: t.y };
     t.target = { x: t.x + 400, y: t.y };
@@ -1388,7 +1391,7 @@ describe('natural borders', () => {
   it('claims up to a river, not over it, when ranging round', () => {
     const sim = newSim(env, 803);
     const t = addTribe(sim, env, lib, humanId(), 6000, yAt(-12), -1, 200)!;
-    for (const q of sim.owner.keys()) sim.owner[q] = -1;
+    transferAll(sim, env, t.clan, -1);
     // A river running north–south a little east of the tribe.
     const river: number[] = [];
     for (let k = 0; k < env.n; k++) {
@@ -1433,5 +1436,73 @@ describe('natural borders', () => {
       const r = rings[0];
       expect(Math.hypot(r[0] - r[r.length - 2], r[1] - r[r.length - 1])).toBeLessThan(1e-6);
     }
+  });
+});
+
+describe('land by province', () => {
+  let penv: Env;
+  beforeAll(() => {
+    const pm = generateProvinces(surface, settings, cl, { sizeMi: 120, seaFactor: 3 });
+    penv = buildEnv(cl, lib, surface, pm);
+  }, 60000);
+  const wholeProvinces = (sim: SimState) => {
+    const P = penv.prov;
+    for (let p = 0; p < P.count; p++) for (let q = P.start[p]; q < P.start[p + 1]; q++) if (sim.owner[P.cells[q]] !== sim.provOwner![p]) return false;
+    return true;
+  };
+  it('has the generator’s provinces on the climate’s points', () => {
+    expect(penv.prov.real).toBe(true);
+    expect(penv.prov.count).toBeGreaterThan(100);
+    let mapped = 0;
+    let land = 0;
+    for (let k = 0; k < penv.n; k++) if (penv.land[k]) {
+      land++;
+      if (penv.prov.of[k] >= 0 && penv.prov.kind[penv.prov.of[k]] !== PK.sea) mapped++;
+    }
+    expect(mapped / land).toBeGreaterThan(0.99);
+  });
+  it('lets a walking tribe claim whole provinces: the one it is in and those round it', () => {
+    const sim = newSim(penv, 811);
+    const t = addTribe(sim, penv, lib, humanId(), 6000, yAt(-12), -1, 200)!;
+    t.summer = t.winter = { x: t.x + 400, y: t.y };
+    t.target = { x: t.x + 400, y: t.y };
+    stepDays(sim, penv, lib, 20);
+    expect(wholeProvinces(sim)).toBe(true);
+    const here = provAt(penv, t.x, t.y);
+    expect(sim.provOwner![here]).toBe(t.clan);
+    const P = penv.prov;
+    let round = 0;
+    for (let q = P.nbStart[here]; q < P.nbStart[here + 1]; q++) if (sim.provOwner![P.nb[q]] === t.clan) round++;
+    expect(round).toBeGreaterThanOrEqual(2);
+    // Never water or impassable peaks.
+    for (let p = 0; p < P.count; p++) if (P.kind[p] !== PK.land) expect(sim.provOwner![p]).toBe(-1);
+  });
+  it('runs for years holding land by province, with one seat to a province', () => {
+    const sim = newSim(penv, 812);
+    placeStart(sim, penv, lib, [{ race: humanId(), tribes: 6 }, { race: elfId(), tribes: 0, start: 'dawn', cityPop: 1500 }], cl.zone);
+    stepDays(sim, penv, lib, DAYS_PER_YEAR * 12);
+    expect(wholeProvinces(sim)).toBe(true);
+    expect(sim.provOwner!.some((o) => o >= 0)).toBe(true);
+    const seats = new Map<number, number>();
+    for (const st of sim.settlements) if (!st.ruined && st.seat) {
+      const p = provAt(penv, st.x, st.y);
+      seats.set(p, (seats.get(p) ?? 0) + 1);
+    }
+    expect([...seats.values()].every((n) => n === 1)).toBe(true);
+    for (const st of sim.settlements) if (!st.ruined && st.seat === false) expect(st.pop).toBeLessThanOrEqual(VILLAGE_MAX * 1.6);
+    // Saved and back: the same holders by province.
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, penv))), penv)!;
+    expect(Array.from(back.provOwner!)).toEqual(Array.from(sim.provOwner!));
+    expect(wholeProvinces(back)).toBe(true);
+  }, 120000);
+  it('brings a save from before provinces onto them: each province to whoever held most of it', () => {
+    const sim = newSim(env, 813);
+    const t = addTribe(sim, env, lib, humanId(), 6000, yAt(-12), -1, 200)!;
+    stepDays(sim, env, lib, 30);
+    const packed = packSim(sim, env);
+    expect(packed.provIds).toBeUndefined();
+    const back = unpackSim(JSON.parse(JSON.stringify(packed)), penv)!;
+    expect(wholeProvinces(back)).toBe(true);
+    expect(back.provOwner![provAt(penv, t.x, t.y)]).toBe(t.clan);
   });
 });

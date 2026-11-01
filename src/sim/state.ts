@@ -282,6 +282,8 @@ export interface Settlement {
   ruined: boolean;
   founded: number;
   ruinedOn: number;
+  /** The seat of its province: the one settlement there that can grow into a town or city (the rest stay villages). */
+  seat?: boolean;
   /** Its economy (Phase 7): what it has in store and how its workers are split (both in units). */
   economy?: Economy;
   /** Technologies it knows beyond those every people starts with (library ids). */
@@ -546,6 +548,14 @@ export interface SimState {
   owner: Int32Array;
   rival: Int32Array;
   rivalUse: Float32Array;
+  /**
+   * Land by province (land.ts): the provinces' ids (in the order of the arrays below), who holds
+   * each, and who is using it against its holder and for how long. The points above mirror these.
+   */
+  provIds?: Int32Array;
+  provOwner?: Int32Array;
+  provRival?: Int32Array;
+  provRivalUse?: Float32Array;
   /** Beast densities, 0–1 of what the land can carry, per beast (library id). */
   beasts: Record<string, Float32Array>;
   events: SimEvent[];

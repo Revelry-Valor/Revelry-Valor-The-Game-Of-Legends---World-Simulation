@@ -1,4 +1,5 @@
 import type { Env } from './env';
+import { bindProvinces } from './land';
 import type { SimState } from './state';
 
 /**
@@ -43,6 +44,11 @@ export interface PackedSim {
   owner: number[];
   rival: number[];
   rivalUse: number[];
+  /** Land by province: runs of the ids' steps (each id less the one before), then runs of holder, rival and rival use. */
+  provIds?: number[];
+  provOwner?: number[];
+  provRival?: number[];
+  provRivalUse?: number[];
   beasts: Record<string, number[]>;
 }
 
@@ -120,6 +126,10 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     owner: runs(sim.owner),
     rival: runs(sim.rival),
     rivalUse: runs(Float32Array.from(sim.rivalUse, Math.round)),
+    // By province only for the generator's provinces (otherwise they are the points above).
+    ...(env?.prov.real && sim.provIds && sim.provOwner && sim.provRival && sim.provRivalUse
+      ? { provIds: runs(Int32Array.from(sim.provIds, (v, i) => v - (i ? sim.provIds![i - 1] : 0))), provOwner: runs(sim.provOwner), provRival: runs(sim.provRival), provRivalUse: runs(Float32Array.from(sim.provRivalUse, Math.round)) }
+      : {}),
     beasts,
   };
 }
@@ -147,7 +157,22 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     const ok = unruns(p.beasts?.[b.id], n, q);
     beasts[b.id] = ok ? Float32Array.from(q, (v, k) => (v / 255) * K[k]) : Float32Array.from(K, (v) => v * 0.9);
   }
-  return {
+  // Land by province, when it was saved by province.
+  let prov: Pick<SimState, 'provIds' | 'provOwner' | 'provRival' | 'provRivalUse'> = {};
+  if (Array.isArray(p.provIds) && p.provIds.length % 2 === 0) {
+    let P = 0;
+    for (let i = 1; i < p.provIds.length; i += 2) P += p.provIds[i];
+    const steps = new Int32Array(P);
+    const po = new Int32Array(P);
+    const pr = new Int32Array(P);
+    const pu = new Float32Array(P);
+    if (P > 0 && unruns(p.provIds, P, steps) && unruns(p.provOwner, P, po) && unruns(p.provRival, P, pr) && unruns(p.provRivalUse, P, pu)) {
+      const ids = new Int32Array(P);
+      for (let i = 0; i < P; i++) ids[i] = steps[i] + (i ? ids[i - 1] : 0);
+      prov = { provIds: ids, provOwner: po, provRival: pr, provRivalUse: pu };
+    }
+  }
+  const sim: SimState = {
     day: p.day | 0,
     seed: p.seed | 0 || 1,
     started: !!p.started,
@@ -183,5 +208,9 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     beasts,
     events: Array.isArray(p.events) ? p.events : [],
     setup: Array.isArray(p.setup) ? p.setup : [],
+    ...prov,
   };
+  // Fitted to the provinces the map has now (a save from before provinces: each to whoever held most of it).
+  bindProvinces(sim, env);
+  return sim;
 }

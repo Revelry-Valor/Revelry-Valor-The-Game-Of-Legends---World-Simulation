@@ -780,6 +780,8 @@ export function showWorld(app: App, start: World): () => void {
     climateBusy: () => climateBusy,
     selectionChanged: () => resources.show(peoples?.resources() ?? null),
     openPeoples: () => showTab('peoples'),
+    provinces: () => provinces?.map() ?? null,
+    openProvinces: () => showTab('provinces'),
     openLibrary: () => {
       save();
       app.library(world);
@@ -797,6 +799,7 @@ export function showWorld(app: App, start: World): () => void {
     climateBusy: () => climateBusy,
     redraw: () => map.redraw(),
     display: () => look.provinces,
+    mapChanged: () => peoples?.provincesChanged(),
   });
   if (climate.climate) provinces.climateChanged();
   if (climate.climate) peoples.climateChanged();

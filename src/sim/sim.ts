@@ -1,4 +1,5 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
+import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
 import { PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
@@ -187,7 +188,9 @@ function passable(env: Env, ri: RaceInfo, k: number): boolean {
 export function newSim(env: Env, seed: number): SimState {
   const beasts: Record<string, Float32Array> = {};
   for (const b of env.beastInfo) beasts[b.id] = Float32Array.from(env.beastK[b.id], (v) => v * 0.9);
-  return { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], caravans: [], routes: [], traffic: new Float32Array(env.n), way: new Uint8Array(env.n), wayKeeper: new Int32Array(env.n).fill(-1), bridge: new Uint8Array(env.n), realmRelations: {}, spies: [], clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
+  const sim: SimState = { day: 0, seed: seed | 0 || 1, started: false, tribes: [], settlements: [], grudges: [], caravans: [], routes: [], traffic: new Float32Array(env.n), way: new Uint8Array(env.n), wayKeeper: new Int32Array(env.n).fill(-1), bridge: new Uint8Array(env.n), realmRelations: {}, spies: [], clans: [], sorties: [], nextId: 1, w: env.w, h: env.h, owner: new Int32Array(env.n).fill(-1), rival: new Int32Array(env.n).fill(-1), rivalUse: new Float32Array(env.n), beasts, events: [], setup: [] };
+  bindProvinces(sim, env);
+  return sim;
 }
 
 /** The culture a race's people start with: the first that names the race (or its species) as its heritage. */
@@ -261,6 +264,9 @@ export function placeStart(sim: SimState, env: Env, lib: Library, setup: SetupRo
   sim.owner.fill(-1);
   sim.rival.fill(-1);
   sim.rivalUse.fill(0);
+  sim.provOwner?.fill(-1);
+  sim.provRival?.fill(-1);
+  sim.provRivalUse?.fill(0);
   sim.setup = setup.map((s) => ({ ...s }));
   const taken: Point[] = [];
   for (const row of setup) {
@@ -366,16 +372,19 @@ export function moveSettlement(sim: SimState, env: Env, lib: Library, id: number
   if (!st) return;
   const ri = raceInfo(lib, st.race, st.culture);
   // Its old land is let go (while setting up), and the land round the new place taken.
-  if (!sim.started) for (let k = 0; k < env.n; k++) if (sim.owner[k] === st.clan) sim.owner[k] = -1;
+  if (!sim.started) transferAll(sim, env, st.clan, -1);
   ({ x, y } = landPoint(env, x, y));
   st.x = x;
   st.y = y;
   if (ri) claimAround(sim, env, x, y, settleRange(ri, st), st.clan);
 }
-export function removeSettlement(sim: SimState, id: number): void {
+export function removeSettlement(sim: SimState, id: number, env?: Env): void {
   const st = sim.settlements.find((s) => s.id === id);
   sim.settlements = sim.settlements.filter((s) => s.id !== id);
-  if (st && !sim.started) for (let k = 0; k < sim.owner.length; k++) if (sim.owner[k] === st.clan && !sim.tribes.some((t) => t.clan === st.clan)) sim.owner[k] = -1;
+  if (st && !sim.started && !sim.tribes.some((t) => t.clan === st.clan)) {
+    if (env) transferAll(sim, env, st.clan, -1);
+    else for (let k = 0; k < sim.owner.length; k++) if (sim.owner[k] === st.clan) sim.owner[k] = -1;
+  }
   sim.sorties = sim.sorties.filter((s) => !(s.targetKind === 'settlement' && s.target === id));
   dropUnusedClans(sim);
 }
@@ -383,8 +392,9 @@ export function removeSettlement(sim: SimState, id: number): void {
 function settleRange(ri: RaceInfo, st: Settlement): number {
   return ri.range * (st.kind === 'dawn' ? 2.2 : 1.5);
 }
+/** A new settlement takes the unheld provinces round it (its own, and those within reach not over a river or mountains). */
 function claimAround(sim: SimState, env: Env, x: number, y: number, r: number, clan: number): void {
-  for (const c of cellsNear(env, x, y, r)) if (env.land[c] && sim.owner[c] < 0 && !beyondBarrier(env, x, y, c)) sim.owner[c] = clan;
+  claimNear(sim, env, x, y, Math.max(r, provinceSpan(env, x, y) * 1.15), clan, (fx, fy, k) => beyondBarrier(env, fx, fy, k));
 }
 
 /** Move a tribe (while setting up): it moves its grounds with it. */
@@ -583,7 +593,8 @@ function daily(sim: SimState, env: Env, info: Info, lib: Library): void {
     // thin line: the land its people range over); and the way gets worn.
     const c = cellOf(env, t.x, t.y);
     if (c >= 0 && t.target) sim.traffic[c] += t.pop / 200;
-    if (c >= 0) for (const q of cellsNear(env, t.x, t.y, Math.max(ri.range * 0.8, env.step * 1.1))) if (env.land[q] && sim.owner[q] < 0 && !beyondBarrier(env, t.x, t.y, q)) sim.owner[q] = t.clan;
+    // The province it is in and those round it (not over a river or mountains).
+    if (c >= 0) claimNear(sim, env, t.x, t.y, Math.max(ri.range * 0.8, provinceSpan(env, t.x, t.y) * 1.15), t.clan, (fx, fy, k) => beyondBarrier(env, fx, fy, k));
   }
   // Warbands on the move.
   for (const s of [...sim.sorties]) {
@@ -644,11 +655,7 @@ function battle(sim: SimState, env: Env, s: Sortie, enemy: Tribe, info: Info, li
   const dc = sim.clans.find((c) => c.id === enemy.clan);
   if (win) {
     // The beaten tribe flees, and the land it was using goes to the winners.
-    for (const c of cellsNear(env, enemy.x, enemy.y, (rd?.range ?? 20) * 1.2)) if (env.land[c] && sim.owner[c] === enemy.clan) {
-      sim.owner[c] = s.clan;
-      sim.rival[c] = -1;
-      sim.rivalUse[c] = 0;
-    }
+    for (const p of provincesNear(env, enemy.x, enemy.y, (rd?.range ?? 20) * 1.2)) if (holderOf(sim, p) === enemy.clan) setHolder(sim, env, p, s.clan);
     const a = Math.atan2(enemy.y - s.y, enemy.x - s.x);
     const flee = { x: enemy.x + Math.cos(a) * 120, y: enemy.y + Math.sin(a) * 120 };
     enemy.winter = flee;
@@ -686,7 +693,11 @@ function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info, li
   const what = st.kind === 'dawn' ? `the dawn city ${st.name}` : st.name;
   if (win) {
     if (home) home.fed = Math.max(home.fed, 1.1);
-    if (rd) for (const c of cellsNear(env, st.x, st.y, settleRange(rd, st) * 0.6)) if (env.land[c] && sim.owner[c] === st.clan) sim.owner[c] = s.clan;
+    // The land round it (not the province it stands in).
+    if (rd) {
+      const home = provAt(env, st.x, st.y);
+      for (const p of provincesNear(env, st.x, st.y, Math.max(settleRange(rd, st) * 0.6, provinceSpan(env, st.x, st.y) * 1.15))) if (p !== home && holderOf(sim, p) === st.clan) setHolder(sim, env, p, s.clan);
+    }
     log(sim, `The warband of ${home?.name ?? 'a tribe'} (clan ${ac?.name ?? '?'}) raided ${what}: ${loseA} and ${loseD} fell.`, st.x, st.y);
     // An archive can burn.
     if (hasArchive(lib, st, sim.day) && rand(sim) < 0.25) {
@@ -754,67 +765,18 @@ function beyondBarrier(env: Env, x: number, y: number, k: number): boolean {
   return false;
 }
 
-/**
- * Tidy the claims once a year, so lands are whole and their borders clean: unclaimed land almost
- * surrounded by one realm's (5 of its 8 neighbours) joins it, and a lone speck of a realm's land
- * inside another's (no neighbour of its own, 6 of 8 the other's) goes to the land round it.
- */
+/** Tidy the land once a year (land.ts): holes filled, lone specks given to the land round them. */
 function tidyLand(sim: SimState, env: Env): void {
-  const { w, h } = env;
-  const next = Int32Array.from(sim.owner);
-  const count = new Map<number, number>();
-  for (let j = 1; j < h - 1; j++) for (let i = 0; i < w; i++) {
-    const k = j * w + i;
-    if (!env.land[k]) continue;
-    if (!env.wrapKm && (i === 0 || i === w - 1)) continue;
-    count.clear();
-    let own = 0;
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      if (!di && !dj) continue;
-      const m = (j + dj) * w + ((i + di + w) % w);
-      const o = env.land[m] ? sim.owner[m] : -1;
-      if (o === sim.owner[k]) own++;
-      if (o >= 0) count.set(o, (count.get(o) ?? 0) + 1);
-    }
-    let best = -1;
-    let n = 0;
-    for (const [o, c] of count) if (c > n) [best, n] = [o, c];
-    if (sim.owner[k] < 0 && n >= 5) next[k] = best;
-    else if (sim.owner[k] >= 0 && own === 0 && best !== sim.owner[k] && n >= 6) {
-      next[k] = best;
-      sim.rival[k] = -1;
-      sim.rivalUse[k] = 0;
-    }
-  }
-  sim.owner.set(next);
+  const seats = new Set<number>();
+  for (const st of sim.settlements) if (!st.ruined) seats.add(provAt(env, st.x, st.y));
+  tidyProvinces(sim, env, seats);
 }
 
 function useLand(sim: SimState, env: Env, cells: number[], clan: number, near: number, from?: { x: number; y: number }): void {
-  for (const c of cells) {
-    if (!env.land[c]) continue;
-    const o = sim.owner[c];
-    if (o < 0) {
-      if (!from || !beyondBarrier(env, from.x, from.y, c)) sim.owner[c] = clan;
-    }
-    else if (o === clan) sim.rivalUse[c] = Math.max(0, sim.rivalUse[c] - 1);
-    else {
-      if (sim.rival[c] === clan) sim.rivalUse[c] += 1;
-      else {
-        sim.rival[c] = clan;
-        sim.rivalUse[c] = 1;
-      }
-      if (sim.rivalUse[c] < 12) continue;
-      // A year of use: it changes hands unless its owners are still about.
-      const cx = xOf(env, c);
-      const cy = yOf(env, c);
-      const ownerHere = sim.tribes.some((q) => q.clan === o && dist(env, q.x, q.y, cx, cy) < near) || sim.settlements.some((q) => !q.ruined && q.clan === o && dist(env, q.x, q.y, cx, cy) < near * 1.5);
-      if (!ownerHere) {
-        sim.owner[c] = clan;
-        sim.rival[c] = -1;
-        sim.rivalUse[c] = 0;
-      }
-    }
-  }
+  useProvinces(sim, env, cells, clan, from, (fx, fy, c) => beyondBarrier(env, fx, fy, c), (o, cx, cy) =>
+    // A year of use: it changes hands unless its holders are still about.
+    sim.tribes.some((q) => q.clan === o && dist(env, q.x, q.y, cx, cy) < near) || sim.settlements.some((q) => !q.ruined && q.clan === o && dist(env, q.x, q.y, cx, cy) < near * 1.5),
+  );
 }
 
 function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
@@ -1084,7 +1046,7 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const other = sim.tribes.find((q) => q.clan !== c.id && q.race === t.race && q.culture === t.culture && dist(env, q.x, q.y, t.x, t.y) < 250);
     if (other && rand(sim) < 0.3) {
       t.clan = other.clan;
-      for (let k = 0; k < env.n; k++) if (sim.owner[k] === c.id) sim.owner[k] = other.clan;
+      transferAll(sim, env, c.id, other.clan);
       sim.clans = sim.clans.filter((q) => q.id !== c.id);
       log(sim, `Clan ${c.name} joined clan ${sim.clans.find((q) => q.id === other.clan)?.name ?? '?'}.`, t.x, t.y);
     }
@@ -1127,11 +1089,19 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
 function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // Every settlement on the painted land (older ones set down between the grid's points moved onto it).
   for (const st of sim.settlements) Object.assign(st, landPoint(env, st.x, st.y));
+  const seatOf = chooseSeats(sim, env);
   for (const st of [...sim.settlements]) {
     if (st.ruined) continue;
     const ri = info(st);
     if (!ri) continue;
-    const full = st.pop > (st.kind === 'dawn' ? 900 : 450) && st.fed >= 0.9;
+    // A village beside its province's seat stays a village: past that its people move to the seat.
+    const seat = seatOf.get(provAt(env, st.x, st.y));
+    if (!st.seat && seat && seat.clan === st.clan && st.pop > VILLAGE_MAX) {
+      const go = st.pop - VILLAGE_MAX;
+      st.pop -= go;
+      seat.pop += go;
+    }
+    const full = st.pop > (st.kind === 'dawn' ? 900 : st.seat ? 450 : 300) && st.fed >= 0.9;
     const pressed = st.pop > 300 && st.fed < 0.85;
     if (!full && !pressed) continue;
     const n = Math.round(Math.max(80, Math.min(250, st.pop * (0.15 + 0.1 * rand(sim)))));
@@ -1147,7 +1117,9 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       const k = cellOf(env, x, y);
       if (k < 0 || !env.land[k] || !passable(env, ri, k)) continue;
       if (sim.settlements.some((o) => dist(env, o.x, o.y, x, y) < R * 1.3)) continue;
-      const s = liveScore(env, ri, k) - (sim.owner[k] >= 0 && sim.owner[k] !== st.clan ? 0.5 : 0);
+      // Better in a province of its own (a new town needs a province without one); others' land worse.
+      const pk = provAt(env, x, y);
+      const s = liveScore(env, ri, k) - (sim.owner[k] >= 0 && sim.owner[k] !== st.clan ? 0.5 : 0) + (seatOf.has(pk) ? -0.3 : 0.3);
       if (!spot || s > spot.s) spot = { x, y, s };
     }
     const clan = sim.clans.find((c) => c.id === st.clan);
@@ -1194,10 +1166,43 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
   }
 }
 
+/** Past this a village that is not its province's seat sends its people to the seat. */
+export const VILLAGE_MAX = 600;
+
+/**
+ * Each province's seat: a dawn city, else the seat it had while it stands, unless another there has
+ * grown half as big again; else the biggest. Every other settlement in the province is a village.
+ */
+function chooseSeats(sim: SimState, env: Env): Map<number, Settlement> {
+  const by = new Map<number, Settlement[]>();
+  for (const st of sim.settlements) {
+    if (st.ruined) {
+      st.seat = false;
+      continue;
+    }
+    const p = provAt(env, st.x, st.y);
+    by.set(p, [...(by.get(p) ?? []), st]);
+  }
+  const out = new Map<number, Settlement>();
+  for (const [p, list] of by) {
+    const biggest = list.reduce((a, b) => (b.pop > a.pop ? b : a));
+    const old = list.find((q) => q.seat);
+    const seat = list.find((q) => q.kind === 'dawn') ?? (old && biggest.pop <= old.pop * 1.5 ? old : biggest);
+    for (const q of list) q.seat = q === seat;
+    out.set(p, seat);
+  }
+  return out;
+}
+
+/** What a settlement is: a dawn city; a city or town (its province's seat, by size); or a village. */
+export function settlementTier(st: Settlement): 'Dawn city' | 'City' | 'Town' | 'Village' {
+  if (st.kind === 'dawn') return 'Dawn city';
+  if (st.seat === false) return 'Village';
+  return st.pop >= 5000 ? 'City' : st.pop >= 1000 ? 'Town' : 'Village';
+}
+
 /** Area (km²) each clan claims. */
 export function clanLand(sim: SimState, env: Env): Map<number, number> {
-  const out = new Map<number, number>();
-  for (let k = 0; k < env.n; k++) if (sim.owner[k] >= 0) out.set(sim.owner[k], (out.get(sim.owner[k]) ?? 0) + env.cellArea);
-  return out;
+  return heldArea(sim, env);
 }
 

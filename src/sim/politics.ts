@@ -1,4 +1,5 @@
 import type { Government } from '../core/library';
+import { splitByNearest, transferAll } from './land';
 import { cultureOf } from './culture';
 import { acceptance } from './cultureChange';
 import { govOf, realmName, rulerTitle, tribalRule, type NationContext } from './nations';
@@ -189,7 +190,7 @@ function succeed(c: PoliticsContext, clan: Clan, realm: Realm, g: Government | u
 function union(c: PoliticsContext, from: Clan, into: Clan): void {
   const { sim } = c;
   for (const p of [...sim.settlements.filter((s) => s.clan === from.id), ...sim.tribes.filter((t) => t.clan === from.id)]) p.clan = into.id;
-  for (let k = 0; k < sim.owner.length; k++) if (sim.owner[k] === from.id) sim.owner[k] = into.id;
+  transferAll(sim, c.env, from.id, into.id);
   for (const so of sim.sorties) if (so.clan === from.id) so.clan = into.id;
   for (const cv of sim.caravans) if (cv.clan === from.id) cv.clan = into.id;
   into.techs = [...new Set([...(into.techs ?? []), ...(from.techs ?? [])])];
@@ -264,21 +265,8 @@ function breakAway(c: PoliticsContext, clan: Clan, group: Settlement[]): void {
   }
   // The land round the towns that rose goes with them.
   const mine = sim.settlements.filter((s) => !s.ruined && (s.clan === clan.id || s.clan === nc.id));
-  for (let k = 0; k < env.n; k++) {
-    if (sim.owner[k] !== clan.id) continue;
-    const x = env.x0 + (k % env.w) * env.step;
-    const y = env.y0 + ((k / env.w) | 0) * env.step;
-    let best: Settlement | null = null;
-    let bd = Infinity;
-    for (const s of mine) {
-      const d = c.dist(x, y, s.x, s.y);
-      if (d < bd) {
-        bd = d;
-        best = s;
-      }
-    }
-    if (best?.clan === nc.id) sim.owner[k] = nc.id;
-  }
+  // Each province to the realm of the town nearest it.
+  splitByNearest(sim, env, clan.id, mine);
   // Tribes roaming nearest the risen towns go with them too.
   for (const t of sim.tribes.filter((q) => q.clan === clan.id)) {
     const near = [...mine].sort((a, b) => c.dist(t.x, t.y, a.x, a.y) - c.dist(t.x, t.y, b.x, b.y))[0];

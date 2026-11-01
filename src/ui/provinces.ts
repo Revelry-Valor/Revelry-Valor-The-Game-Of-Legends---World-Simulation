@@ -25,6 +25,8 @@ export interface ProvincesDeps {
   redraw(): void;
   /** How provinces show on the map outside the Provinces tab. */
   display(): ProvinceDisplay;
+  /** The provinces were made, updated or removed. */
+  mapChanged?(): void;
 }
 
 export interface Provinces {
@@ -98,6 +100,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
         setMap(m);
         basis = madeFrom;
         if (!sameSaved(d.world().provinces, m.saved)) d.setSaved(m.saved);
+        d.mapChanged?.();
       } else error = err || 'The provinces could not be made.';
       render();
       d.redraw();
@@ -196,7 +199,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     const gen = h('button', { type: 'button', class: 'primary', disabled: busy || noClimate, title: 'Make a new set of provinces (new ids).', onclick: () => run(true) }, saved ? 'Generate new provinces' : 'Generate provinces');
     const upd = saved && !changedSettings ? h('button', { type: 'button', class: 'ghost', disabled: busy || noClimate || !outOfDate, title: 'Fit the provinces to the map as it is now, keeping each province (and its id) where it was.', onclick: () => run(false) }, 'Update to the map') : null;
     const remove = saved ? h('button', { type: 'button', class: 'ghost danger', disabled: busy, onclick: () => {
-      actions.replaceChildren(h('span', { class: 'small' }, 'Remove the provinces?'), h('button', { type: 'button', class: 'danger-solid', onclick: () => { map = null; basis = null; d.setSaved(null); render(); d.redraw(); } }, 'Remove'), h('button', { type: 'button', class: 'ghost', onclick: render }, 'Keep'));
+      actions.replaceChildren(h('span', { class: 'small' }, 'Remove the provinces?'), h('button', { type: 'button', class: 'danger-solid', onclick: () => { map = null; basis = null; d.setSaved(null); d.mapChanged?.(); render(); d.redraw(); } }, 'Remove'), h('button', { type: 'button', class: 'ghost', onclick: render }, 'Keep'));
     } }, 'Remove') : null;
     actions.replaceChildren(gen, ...(upd ? [upd] : []), ...(remove ? [remove] : []));
     const lines: (HTMLElement | string)[] = [];

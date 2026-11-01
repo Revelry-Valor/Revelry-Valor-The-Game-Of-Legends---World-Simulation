@@ -1095,7 +1095,7 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 ### 8.6 Territory
 - **Borders (decided, drawn like Crusader Kings 3):** no fill. A solid black line along every border, the coast included (following the painted coastline); just inside it a strip of the realm's colour, one on each side where two realms meet; a selected realm's strip widens and its land is lightly washed so it stands out. Land taken in a war is outlined with a dashed black line with a red strip inside it. Disputed land (being taken by another realm's use) is hatched in the taker's colour. Wandering clans and settled realms both have hard borders.
 - **Borders follow natural features:** peoples ranging round them claim up to a river or a high mountain range, not over it; land beyond is claimed by going there, by use over time, or by war (the AI crossing on purpose). Walking tribes claim a band of land round them; each year small unclaimed holes inside a realm join it and lone specks go to the land round them. Claims do not fade.
-- Claimed by moving through land (see 8.4). Territory and settlements will get much more work.
+- Claimed by moving through land (see 8.4), now by whole provinces (8.6a).
 - **Rivers** can be claimed and lie inside territories and nations like any land. Fighting commonly ends at rivers because fortresses, or an army holding the far bank, stop the advance there.
 - Land regions to be designed later.
 
@@ -1135,6 +1135,32 @@ Like Crusader Kings 3: the world is split into provinces, and much of the simula
   - While the Provinces tab is open, provinces are coloured by terrain, and pressing the map pans instead of painting.
   - The Under the cursor panel has a Province field.
 - *Speed:* the generator works in the background. On a test continent about 9,000 by 9,000 miles at 40-mile provinces (about 16,000 provinces), it takes about 8 seconds; at the smallest sizes it takes about 20 seconds. Working out the climate takes about 1.5 seconds longer, for the fine geography.
+
+**Built (step 2)**
+- *Land by province* (src/sim/land.ts):
+  - The simulation keeps who holds each province, and who is using it against its holder and for how long, by province id.
+  - Every climate point of a province mirrors its holder. So the economy, wars and politics, which read the land point by point, all see whole provinces.
+  - Each climate point belongs to the province covering most of it.
+  - Sea, lakes and impassable peaks are never held.
+- *Claiming:*
+  - A walking tribe claims the unheld province it is in and the provinces round it: those reaching within its range, at least the neighbours. A new settlement does the same.
+  - Neither claims over a river or high mountains.
+  - Land a settlement or tribe works becomes its own if unheld.
+  - Using another's province for a year takes it, unless its holders are still about. This is counted once per province.
+  - Each year, an unheld province ringed by one realm's land (three quarters of its neighbours, at least two) joins that realm. A lone province of one realm inside another realm goes to the land round it, unless a settlement of its holder stands in it.
+- *Changing hands:*
+  - Wars, raids, tribal fights, unions, break-aways and mergers move whole provinces.
+  - A ceded town takes its own province, and the old realm's provinces nearer it than any town the old realm keeps (within about 50 miles).
+  - In a break-away, each province goes to the realm of the town nearest it.
+  - A raid takes the provinces round a town, but not the town's own.
+- *Seats:*
+  - Each province has one seat: a dawn city, otherwise the settlement that was the seat (unless another there has grown half as big again), otherwise the biggest.
+  - Only a seat can become a town (1,000 people) or a city (5,000).
+  - Other settlements in the province stay villages. Past 600 people, the extra people move to the seat, and these villages send people out sooner.
+  - New villages are placed by preference in provinces with no settlement yet.
+- *Starting:* the Peoples tab asks for provinces first. A save from before provinces is brought onto them, with each province going to whoever held most of its points. After provinces are updated or remade, each province keeps its holder by id.
+- *Borders* are drawn along province outlines, in the Crusader Kings style decided above. Disputed provinces are hatched in the colour of the realm taking them.
+- *Saving:* holders, rivals and rival use are saved by province (ids as runs of steps); saves stay small.
 
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
