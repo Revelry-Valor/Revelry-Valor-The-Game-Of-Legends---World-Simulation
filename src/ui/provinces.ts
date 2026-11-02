@@ -1,7 +1,7 @@
 import type { Climate } from '../core/climate';
 import { fineIndex } from '../core/finegeo';
 import { REGION_KINDS } from '../core/geography';
-import { generateProvinces, PROVINCE_DEFAULTS, PROVINCE_SIZE_MI, smallestProvinceMi, type ProvinceMap, type SavedProvinces } from '../core/provinces';
+import { generateProvinces, sizesOf, type ProvinceSizes, PROVINCE_DEFAULTS, PROVINCE_SIZE_MI, smallestProvinceMi, type ProvinceMap, type SavedProvinces } from '../core/provinces';
 import type { World } from '../core/world';
 import ProvinceWorker from '../render/provinceworker?worker&inline';
 import { choice, h, numberField } from './dom';
@@ -61,7 +61,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
   let brushMi = 20;
   let stroke: number[] | null = null;
   const saved0 = d.world().provinces;
-  const opts = { sizeMi: saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi, seaFactor: saved0?.seaFactor ?? PROVINCE_DEFAULTS.seaFactor, mountainMi: saved0?.mountainMi ?? saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi };
+  const opts = { sizeMi: saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi, seaFactor: saved0?.seaFactor ?? PROVINCE_DEFAULTS.seaFactor, ...sizesOf(saved0?.sizeMi ?? PROVINCE_DEFAULTS.sizeMi, saved0 ?? {}) };
   // Drawing: each province's outline as a path (km), and the borders by kind.
   let paths: Path2D[] = [];
   let boxes: Float32Array = new Float32Array(0);
@@ -103,7 +103,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     busy = true;
     error = '';
     render();
-    const job = { surface: w.surface, settings: w.settings, sizeMi: opts.sizeMi, seaFactor: opts.seaFactor, mountainMi: opts.mountainMi, saved: fresh ? null : savedNow ?? w.provinces ?? null };
+    const job = { surface: w.surface, settings: w.settings, ...opts, saved: fresh ? null : savedNow ?? w.provinces ?? null };
     const madeFrom = { strokes: w.surface.strokes, settings: w.settings };
     const done = (m: ProvinceMap | null, err?: string) => {
       busy = false;
@@ -160,7 +160,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     landLines = new Path2D();
     seaLines = new Path2D();
     coastLines = new Path2D();
-    const wet = (i: number) => i >= 0 && (m.provinces[i].kind === 'sea');
+    const wet = (i: number) => i >= 0 && (m.provinces[i].kind === 'sea' || m.provinces[i].kind === 'river');
     for (const b of m.borders) {
       if (b.a < 0 || b.b < 0) continue;
       const target = wet(b.a) !== wet(b.b) ? coastLines : wet(b.a) ? seaLines : landLines;
@@ -176,6 +176,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
       };
       if (p.kind === 'sea') return tint(p.terrain === 'Ocean' ? '#2e588c' : p.terrain === 'Sea' ? '#467ab2' : p.terrain === 'Gulf' ? '#609cc8' : '#7ebad8', 0.8);
       if (p.kind === 'lake') return tint('#86c4e0', 0.85);
+      if (p.kind === 'river') return tint('#4f93c9', 0.9);
       if (p.kind === 'wasteland') return tint('#7c7670', 0.9);
       const kind = p.region >= 0 ? geo?.regions[p.region]?.kind ?? '' : '';
       const base = p.terrain === 'Mountains' ? '#8d7b6a' : p.terrain === 'Highlands' ? '#b49a72' : p.terrain === 'Plateau' ? '#c09a6a' : REGION_KINDS[kind] ?? '#a8a08a';
@@ -205,13 +206,18 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     settingsBox.replaceChildren(
       numberField({ label: 'Province size', value: opts.sizeMi, min: PROVINCE_SIZE_MI.min, max: PROVINCE_SIZE_MI.max, step: 5, unit: 'miles', slider: true, hint: `About how far across a land province is.${smallest > PROVINCE_SIZE_MI.min ? ` This map is big enough that provinces under about ${smallest} miles across come out blocky.` : ''}`, change: (v) => { if (v > 0) { opts.sizeMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v)); render(); } } }),
       numberField({ label: 'Mountain provinces', value: opts.mountainMi, min: PROVINCE_SIZE_MI.min, max: PROVINCE_SIZE_MI.max, step: 5, unit: 'miles', slider: true, hint: 'About how far across a mountain province is (from the foot of a range to its crest); the impassable heart of a wide range scales with it too.', change: (v) => { if (v > 0) { opts.mountainMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v)); render(); } } }),
+      numberField({ label: 'River provinces', value: opts.riverMi, min: PROVINCE_SIZE_MI.min, max: PROVINCE_SIZE_MI.max, step: 5, unit: 'miles', slider: true, hint: 'About how long a stretch of river each river province is.', change: (v) => { if (v > 0) { opts.riverMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v)); render(); } } }),
+      numberField({ label: 'Rivers with provinces', value: Math.round(opts.riverMinKm * 0.621371 * 100) / 100, min: 0.1, max: 6, step: 0.1, unit: 'miles wide or more', slider: true, hint: 'Rivers at least this wide have provinces of their own (water: nobody holds them, boats use them); narrower ones run through land provinces.', change: (v) => { if (v > 0) { opts.riverMinKm = Math.max(0.1, Math.min(10, v / 0.621371)); render(); } } }),
+      numberField({ label: 'Canyon provinces', value: opts.canyonMi, min: PROVINCE_SIZE_MI.min, max: PROVINCE_SIZE_MI.max, step: 5, unit: 'miles', slider: true, hint: 'About how long a stretch of canyon each canyon province is.', change: (v) => { if (v > 0) { opts.canyonMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v)); render(); } } }),
+      numberField({ label: 'Ravine provinces', value: opts.ravineMi, min: PROVINCE_SIZE_MI.min, max: PROVINCE_SIZE_MI.max, step: 5, unit: 'miles', slider: true, hint: 'About how long a stretch of ravine each ravine province is.', change: (v) => { if (v > 0) { opts.ravineMi = Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v)); render(); } } }),
       numberField({ label: 'Sea provinces', value: opts.seaFactor, min: 1, max: 8, step: 0.5, unit: '× as wide', slider: true, hint: 'How much wider sea provinces are than land provinces.', change: (v) => { if (v > 0) { opts.seaFactor = Math.max(1, Math.min(8, v)); render(); } } }),
     );
   };
   const render = () => {
     const w = d.world();
     const saved = w.provinces;
-    const changedSettings = !!saved && (saved.sizeMi !== opts.sizeMi || saved.seaFactor !== opts.seaFactor || (saved.mountainMi ?? saved.sizeMi) !== opts.mountainMi);
+    const was = saved ? sizesOf(saved.sizeMi, saved) : null;
+    const changedSettings = !!saved && (saved.sizeMi !== opts.sizeMi || saved.seaFactor !== opts.seaFactor || (Object.keys(was!) as (keyof ProvinceSizes)[]).some((k) => Math.abs(was![k] - opts[k]) > 1e-9));
     const outOfDate = !!map && !!basis && (basis.strokes !== w.surface.strokes || basis.settings !== w.settings);
     const noClimate = !d.climate();
     const gen = h('button', { type: 'button', class: 'primary', disabled: busy || noClimate, title: 'Make a new set of provinces (new ids).', onclick: () => run(true) }, saved ? 'Generate new provinces' : 'Generate provinces');
@@ -225,14 +231,14 @@ export function createProvinces(d: ProvincesDeps): Provinces {
     else if (noClimate || (d.climateBusy() && !map)) lines.push(h('p', { class: 'muted' }, 'Waiting for the climate (provinces follow the regions it works out).'));
     if (error) lines.push(h('p', { class: 'warn' }, error));
     if (map) {
-      const count = { land: 0, sea: 0, lake: 0, wasteland: 0 };
+      const count = { land: 0, sea: 0, lake: 0, river: 0, wasteland: 0 };
       let landArea = 0;
       for (const p of map.provinces) {
         count[p.kind]++;
         if (p.kind === 'land') landArea += p.area;
       }
       lines.push(
-        h('p', {}, h('strong', {}, `${fmtInt(map.provinces.length)} provinces`), `: ${fmtInt(count.land)} land, ${fmtInt(count.sea)} sea, ${fmtInt(count.lake)} lake${count.lake === 1 ? '' : 's'}, ${fmtInt(count.wasteland)} impassable.`),
+        h('p', {}, h('strong', {}, `${fmtInt(map.provinces.length)} provinces`), `: ${fmtInt(count.land)} land, ${fmtInt(count.sea)} sea, ${fmtInt(count.river)} river, ${fmtInt(count.lake)} lake${count.lake === 1 ? '' : 's'}, ${fmtInt(count.wasteland)} impassable.`),
         h('p', { class: 'muted' }, count.land ? `A land province averages about ${fmtInt(landArea / count.land / SQ_KM_PER_SQ_MI)} sq mi.` : ''),
       );
       if (outOfDate) lines.push(h('p', { class: 'warn' }, 'The map has changed since the provinces were made. Update them to fit it (each keeps its place and id), or generate new ones.'));
@@ -450,7 +456,7 @@ export function createProvinces(d: ProvincesDeps): Provinces {
       if (!map && w.provinces && !busy) {
         opts.sizeMi = w.provinces.sizeMi;
         opts.seaFactor = w.provinces.seaFactor;
-        opts.mountainMi = w.provinces.mountainMi ?? w.provinces.sizeMi;
+        Object.assign(opts, sizesOf(w.provinces.sizeMi, w.provinces));
         renderSettings();
         run(false);
         return;
@@ -479,7 +485,7 @@ function hash01(v: number): number {
 
 function sameSaved(a: SavedProvinces | null | undefined, b: SavedProvinces): boolean {
   if (JSON.stringify(a?.edits ?? []) !== JSON.stringify(b.edits ?? [])) return false;
-  if ((a?.mountainMi ?? a?.sizeMi) !== (b.mountainMi ?? b.sizeMi)) return false;
+  if (!a || JSON.stringify(sizesOf(a.sizeMi, a)) !== JSON.stringify(sizesOf(b.sizeMi, b))) return false;
   if (!a || a.nextId !== b.nextId || a.sizeMi !== b.sizeMi || a.seaFactor !== b.seaFactor || a.ids.length !== b.ids.length) return false;
   for (let i = 0; i < a.ids.length; i++) if (a.ids[i] !== b.ids[i]) return false;
   for (let i = 0; i < a.seeds.length; i++) if (a.seeds[i] !== b.seeds[i]) return false;

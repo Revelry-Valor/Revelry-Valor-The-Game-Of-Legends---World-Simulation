@@ -1206,6 +1206,17 @@ Like Crusader Kings 3: the world is split into provinces, and much of the simula
 - *Cliffs and ravines are hard barriers.* No province grows across a cliff, and the edge of every canyon and ravine is a zone edge. Ground on a cut line, big rivers included, goes to the land beside it before it ever goes into a canyon. Canyons and ravines never take in slivers of the land round them, nor go into it.
 - *Ravines have provinces of their own*, however narrow ("Ravine"). The painted line is widened to a three-point strip so it can hold them. Canyons' are named "Canyon".
 
+**Decided and built (river provinces, strip sizes):**
+- *Rivers have provinces of their own*, as in Crusader Kings:
+  - Rivers at least as wide as *Rivers with provinces* (default 1 km, about 0.6 miles) form chains of "River" provinces.
+  - They are water: nobody holds them, and realm borders run along them.
+  - Ships sail them like the sea. On foot, crossing one is a ford, costing extra.
+  - Land provinces beside them are marked as on a river. Narrower rivers run through land provinces.
+- *Adjusters:* *River provinces*, *Canyon provinces* and *Ravine provinces* (10–150 miles each) set how long a stretch each of these provinces covers. Their defaults are the land size for rivers and 0.8 of it for canyons and ravines.
+  - Strips are sized along their length: a strip zone's province area is its length setting times the zone's own width (its area over half its edge).
+  - The fine grid is fine enough for the smallest size set.
+  - All sizes are saved with the provinces; changing any of them calls for new provinces.
+
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.

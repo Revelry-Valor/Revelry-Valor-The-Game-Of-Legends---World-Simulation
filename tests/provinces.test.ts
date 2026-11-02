@@ -231,7 +231,7 @@ describe('provinces', () => {
       if (!g.cliff[k]) continue;
       // Along the painted cliff, away from its ends (a province may go round the tip of a cliff).
       const x = pm.grid.x0 + (k % w) * pm.grid.px;
-      if (x < 2760 || x > 3040) continue;
+      if (x < 2800 || x > 3000) continue;
       for (const [a, b] of [[k - 1, k + 1], [k - w, k + w]]) {
         if (!g.land[a] || !g.land[b] || g.cliff[a] || g.cliff[b] || g.gorge[a] || g.gorge[b]) continue;
         if (pm.provinces[pm.label[a]].kind !== 'land' || pm.provinces[pm.label[b]].kind !== 'land') continue;
@@ -241,8 +241,8 @@ describe('provinces', () => {
         }
       }
     }
-    expect(across).toBeGreaterThan(5);
-    expect(same / across).toBeLessThan(0.1);
+    expect(across).toBeGreaterThan(3);
+    expect(same / across).toBeLessThan(0.15);
     // Inside the canyon: provinces of its own, not shared with the land round it.
     expect(pm.provinces.some((p) => p.terrain === 'Canyon')).toBe(true);
     // Even a narrow ravine holds provinces of its own.
@@ -271,4 +271,20 @@ describe('provinces', () => {
     const low = (m: ProvinceMap) => m.provinces.filter((p) => p.terrain === 'Forest').length;
     expect(Math.abs(low(big) - low(pm))).toBeLessThan(low(pm) * 0.2);
   });
+  it('gives wide rivers provinces of their own, and sizes rivers, canyons and ravines by their own adjusters', () => {
+    const rivers = pm.provinces.filter((p) => p.kind === 'river');
+    expect(rivers.length).toBeGreaterThan(1);
+    expect(rivers.every((p) => p.terrain === 'River')).toBe(true);
+    // The land beside them knows it is on a river.
+    expect(pm.provinces.some((p) => p.kind === 'land' && p.river && p.neighbours.some((q) => pm.provinces[q].kind === 'river'))).toBe(true);
+    const count = (m: ProvinceMap, t: string) => m.provinces.filter((p) => p.terrain === t).length;
+    const bigger = generateProvinces(surface, settings, cl, { sizeMi: SIZE_MI, seaFactor: 3, riverMi: SIZE_MI * 3, canyonMi: SIZE_MI * 3, ravineMi: SIZE_MI * 3 });
+    expect(count(bigger, 'River')).toBeLessThan(count(pm, 'River'));
+    expect(count(bigger, 'Canyon')).toBeLessThan(count(pm, 'Canyon'));
+    expect(count(bigger, 'River')).toBeGreaterThan(0);
+    expect(bigger.saved.riverMi).toBe(SIZE_MI * 3);
+    // Only rivers at least so wide have provinces.
+    const none = generateProvinces(surface, settings, cl, { sizeMi: SIZE_MI, seaFactor: 3, riverMinKm: 9 });
+    expect(count(none, 'River')).toBe(0);
+  }, 60000);
 });

@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { PK, provAt, type ProvIndex } from './land';
+import { PK, provAt, sailable, type ProvIndex } from './land';
 
 /**
  * Travel province to province (REDESIGN.md 8.6a, step 3). Roads, caravans and armies go from one
@@ -64,7 +64,7 @@ function fords(env: Env, p: number, q: number): boolean {
 }
 
 /** Can the way go through this province (by sea only when sailing)? */
-const passable = (P: ProvIndex, p: number, sea: boolean) => P.kind[p] === PK.land ? Number.isFinite(P.rough[p]) : P.kind[p] === PK.sea ? sea : false;
+const passable = (P: ProvIndex, p: number, sea: boolean) => (P.kind[p] === PK.land ? Number.isFinite(P.rough[p]) : P.kind[p] === PK.river ? true : P.kind[p] === PK.sea ? sea : false);
 
 /** The cheapest chain of provinces from one to another (null if there is none). */
 export function provinceRoute(env: Env, from: number, to: number, sea = false): number[] | null {
@@ -126,9 +126,12 @@ export function provinceRoute(env: Env, from: number, to: number, sea = false): 
       const m = P.nb[q];
       if (done.has(m) || (m !== to && !passable(P, m, sea))) continue;
       const d = Math.hypot(dxOn(env, P.x[m] - P.x[p]), P.y[m] - P.y[p]);
-      const rough = (Math.min(P.rough[p], 50) + Math.min(P.rough[m], 50)) / 2;
+      // On foot a river province is forded (open ground, and the ford's cost); by ship it is sailed.
+      const onFoot = (q: number) => (!sea && P.kind[q] === PK.river ? 1 : Math.min(P.rough[q], 50));
+      const rough = (onFoot(p) + onFoot(m)) / 2;
       const land = P.kind[p] === PK.land && P.kind[m] === PK.land;
-      const cost = gp + d * rough + (land && fords(env, p, m) ? d * FORD_COST : 0);
+      const ford = !sea && P.kind[m] === PK.river && P.kind[p] !== PK.river;
+      const cost = gp + d * rough + ((land && fords(env, p, m)) || ford ? d * FORD_COST : 0);
       if (cost < (g.get(m) ?? Infinity)) {
         g.set(m, cost);
         came.set(m, p);
@@ -168,7 +171,7 @@ export function routePlan(env: Env, ax: number, ay: number, bx: number, by: numb
     pts.push(nx, y);
     [px, py] = [nx, y];
   };
-  for (let i = 1; i < provs.length - 1; i++) to(P.x[provs[i]], P.y[provs[i]], P.kind[provs[i]] === PK.sea);
+  for (let i = 1; i < provs.length - 1; i++) to(P.x[provs[i]], P.y[provs[i]], sea && sailable(P.kind[provs[i]]));
   to(bx, by, false);
   return { provs, pts, landKm, seaKm };
 }

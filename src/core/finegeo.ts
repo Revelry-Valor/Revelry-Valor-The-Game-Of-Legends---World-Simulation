@@ -67,7 +67,7 @@ export interface FineGround {
 export const BIG_RIVER_KM = 1.0;
 
 /** Sample the painted surface on a fine grid, a strip at a time (so a big grid needs little memory). */
-export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid): FineGround {
+export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid, bigRiverKm = BIG_RIVER_KM): FineGround {
   const { w, h } = grid;
   const n = w * h;
   const wrapKm = s.edges === 'wrap' ? s.widthKm : 0;
@@ -91,7 +91,7 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid): Fi
       else if (f.ravine[q] > 0.5) out.gorge[k] = 2;
       else if (f.face[q] > 0.25) out.cliff[k] = 1;
       if (f.water[q] > 0.5 && f.waterKind[q] === 2) out.lake[k] = 1;
-      else if (f.water[q] > 0.3 && f.waterKind[q] === 1) out.river[k] = f.riverWidth[q] >= BIG_RIVER_KM ? 2 : 1;
+      else if (f.water[q] > 0.3 && f.waterKind[q] === 1) out.river[k] = f.riverWidth[q] >= bigRiverKm ? 2 : 1;
     }
   }
   // Cliffs, ravines and canyons narrower than the grid: their painted lines, traced unbroken.

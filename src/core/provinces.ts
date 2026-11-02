@@ -1,5 +1,5 @@
 import type { Climate } from './climate';
-import { BAND, BANDS, fineGeography, fineGrid, fineIndex, keepWhole, neighbours4, sampleGround } from './finegeo';
+import { BAND, BANDS, BIG_RIVER_KM, fineGeography, fineGrid, fineIndex, keepWhole, neighbours4, sampleGround } from './finegeo';
 import { fbm } from './noise';
 import type { Surface } from './paint';
 import type { WorldSettings } from './settings';
@@ -35,6 +35,11 @@ export interface SavedProvinces {
   seaFactor: number;
   /** How far across a mountain province is (miles; the land size when not set). */
   mountainMi?: number;
+  /** How long a river province is, and a canyon's and a ravine's (miles); and how wide a river must be to have provinces (km). */
+  riverMi?: number;
+  canyonMi?: number;
+  ravineMi?: number;
+  riverMinKm?: number;
   /** x, y of each seed (km). */
   seeds: number[];
   ids: number[];
@@ -68,7 +73,28 @@ interface Stage {
   label: Int32Array;
 }
 
-export type ProvinceKind = 'land' | 'sea' | 'lake' | 'wasteland';
+export type ProvinceKind = 'land' | 'sea' | 'lake' | 'river' | 'wasteland';
+
+/** The sizes beyond the land's: mountains, rivers, canyons and ravines (miles), and the narrowest river with provinces (km). */
+export interface ProvinceSizes {
+  mountainMi: number;
+  riverMi: number;
+  canyonMi: number;
+  ravineMi: number;
+  riverMinKm: number;
+}
+/** The sizes asked for (or saved), filled in from the land size where not given. */
+export function sizesOf(sizeMi: number, o: Partial<ProvinceSizes>): ProvinceSizes {
+  const mi = (v: number) => Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v));
+  return {
+    mountainMi: mi(o.mountainMi ?? sizeMi),
+    riverMi: mi(o.riverMi ?? sizeMi),
+    canyonMi: mi(o.canyonMi ?? sizeMi * 0.8),
+    ravineMi: mi(o.ravineMi ?? sizeMi * 0.8),
+    riverMinKm: Math.max(0.1, Math.min(10, o.riverMinKm ?? BIG_RIVER_KM)),
+  };
+}
+const sameSizes = (a: ProvinceSizes, b: ProvinceSizes) => (Object.keys(a) as (keyof ProvinceSizes)[]).every((k) => Math.abs(a[k] - b[k]) < 1e-9);
 
 export interface Province {
   id: number;
@@ -135,23 +161,26 @@ const GROUP_OF_BAND = [0, 0, 1, 1, 1, 4, 1];
 const PEAKS_GROUP = 3;
 /** Inside a canyon or ravine wide enough to hold them: provinces of its own, a little smaller (the floor is narrow). */
 const GORGE_GROUP = 5;
+const RAVINE_GROUP = 6;
 /** Peaks at least this many province widths from lower ground are impassable (the heart of a wide range). */
 const WASTE_DEPTH = 1;
 const LAND = 0;
 const LAKE = 1;
 const SEA = 2;
+/** A river wide enough to have provinces of its own. */
+const RIVER = 4;
 
 /** Split the world into provinces. With `saved`, they grow from its seeds (keeping their ids); otherwise from new ones. */
-export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climate, opts: { sizeMi: number; seaFactor: number; mountainMi?: number; saved?: SavedProvinces | null }, cache?: ProvinceCache): ProvinceMap {
+export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climate, opts: { sizeMi: number; seaFactor: number; saved?: SavedProvinces | null } & Partial<ProvinceSizes>, cache?: ProvinceCache): ProvinceMap {
   const clampMi = (v: number) => Math.max(PROVINCE_SIZE_MI.min, Math.min(PROVINCE_SIZE_MI.max, v));
   const sizeMi = clampMi(opts.sizeMi);
   const seaFactor = Math.max(1, Math.min(8, opts.seaFactor));
-  const mountainMi = clampMi(opts.mountainMi ?? sizeMi);
-  const fresh = !opts.saved || opts.saved.sizeMi !== sizeMi || opts.saved.seaFactor !== seaFactor || (opts.saved.mountainMi ?? opts.saved.sizeMi) !== mountainMi;
-  const keyBase = `${s.seed}|${s.widthKm}|${s.heightKm}|${s.edges}|${surface.nextId}|${surface.strokes.length}|${sizeMi}|${seaFactor}|${mountainMi}|`;
-  const stage = !fresh && cache?.stage && cache.key === keyBase + seedSig(opts.saved!) ? cache.stage : growStage(surface, s, cl, sizeMi, seaFactor, mountainMi, fresh, opts.saved ?? null);
+  const sz = sizesOf(sizeMi, opts);
+  const fresh = !opts.saved || opts.saved.sizeMi !== sizeMi || opts.saved.seaFactor !== seaFactor || !sameSizes(sizesOf(opts.saved.sizeMi, opts.saved), sz);
+  const keyBase = `${s.seed}|${s.widthKm}|${s.heightKm}|${s.edges}|${surface.nextId}|${surface.strokes.length}|${sizeMi}|${seaFactor}|${JSON.stringify(sz)}|`;
+  const stage = !fresh && cache?.stage && cache.key === keyBase + seedSig(opts.saved!) ? cache.stage : growStage(surface, s, cl, sizeMi, seaFactor, sz, fresh, opts.saved ?? null);
   const map = finish(stage, cl, sizeMi, seaFactor, opts.saved?.edits ?? []);
-  if (mountainMi !== sizeMi) map.saved.mountainMi = mountainMi;
+  Object.assign(map.saved, sz);
   if (cache) {
     cache.key = keyBase + seedSig(map.saved);
     cache.stage = stage;
@@ -162,13 +191,13 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
 const seedSig = (sv: SavedProvinces) => `${sv.nextId}:${sv.ids.length}:${Math.round(sv.seeds.reduce((a, b) => a + b, 0) * 100)}`;
 
 /** Zones, seeds and growth: the provinces as grown, before hand edits. */
-function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: number, seaFactor: number, mountainMi: number, fresh: boolean, saved: SavedProvinces | null): Stage {
+function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: number, seaFactor: number, sz: ProvinceSizes, fresh: boolean, saved: SavedProvinces | null): Stage {
   const opts = { saved };
   const sizeKm = milesToKm(sizeMi);
-  const mountainKm = milesToKm(mountainMi);
-  // Fine enough for the smaller of the two sizes.
-  const grid = fineGrid(s, provinceGridKm(s, Math.min(sizeMi, mountainMi)));
-  const g = sampleGround(surface, s, grid);
+  const mountainKm = milesToKm(sz.mountainMi);
+  // Fine enough for the smallest of the sizes.
+  const grid = fineGrid(s, provinceGridKm(s, Math.min(sizeMi, sz.mountainMi, sz.riverMi, sz.canyonMi, sz.ravineMi)));
+  const g = sampleGround(surface, s, grid, sz.riverMinKm);
   const fg = fineGeography(cl, g, s.seed);
   const { w, h, px, x0, y0 } = grid;
   const n = w * h;
@@ -177,9 +206,9 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   const buf: number[] = [];
 
   // ---- Zones: what no province crosses ----
-  // Keys: land by region and band group, lakes, and each water; big rivers are walls (−1).
+  // Keys: land by region and band group, lakes, rivers, and each water; cliffs are walls (−1).
   const key = new Int32Array(n);
-  const medium = (k: number) => (!g.land[k] ? SEA : g.lake[k] ? LAKE : LAND);
+  const medium = (k: number) => (!g.land[k] ? SEA : g.lake[k] ? LAKE : g.river[k] === 2 ? RIVER : LAND);
   // Each point's group; the heart of a wide range of peaks (far from lower ground) is wasteland.
   const grp = new Uint8Array(n);
   {
@@ -202,15 +231,17 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
     const deep = mountainKm * WASTE_DEPTH;
     for (let k = 0; k < n; k++) {
       if (g.land[k] && g.band[k] === BAND.peaks && depth[k] > deep) grp[k] = PEAKS_GROUP;
-      if (g.land[k] && g.gorge[k]) grp[k] = GORGE_GROUP;
+      if (g.land[k] && g.gorge[k]) grp[k] = g.gorge[k] === 2 ? RAVINE_GROUP : GORGE_GROUP;
     }
   }
   for (let k = 0; k < n; k++) {
     const m = medium(k);
     if (m === SEA) key[k] = -100 - (fg.water[k] + 1);
     else if (m === LAKE) key[k] = -10;
-    // Big rivers and cliffs are cuts: provinces form round them.
-    else if (g.river[k] === 2 || g.cliff[k]) key[k] = -1;
+    // Rivers wide enough have provinces of their own (and part the land either side).
+    else if (m === RIVER) key[k] = -20;
+    // Cliffs are cuts: provinces form round them.
+    else if (g.cliff[k]) key[k] = -1;
     // Lowland by natural region; a mountain range or plateau is one zone however many regions it spans.
     else key[k] = (grp[k] === 0 ? fg.region[k] + 1 : 0) * 8 + grp[k];
   }
@@ -236,7 +267,7 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   {
     for (const inGorge of [false, true]) {
       const queue: number[] = [];
-      for (let k = 0; k < n; k++) if (zone[k] >= 0 && g.land[k] && !!g.gorge[k] === inGorge) queue.push(k);
+      for (let k = 0; k < n; k++) if (zone[k] >= 0 && g.land[k] && (!!g.gorge[k] || medium(k) !== LAND) === inGorge) queue.push(k);
       for (let q = 0; q < queue.length; q++) {
         const k = queue[q];
         for (const m of nb(k, buf)) if (zone[m] < 0) {
@@ -259,12 +290,23 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   const landTarget = (sizeKm * sizeKm) / pxArea;
   // Mountain provinces (and the impassable heart of a range) by the mountain size.
   const mountainTarget = (mountainKm * mountainKm) / pxArea;
-  const targetOf = (z: number) => (zMedium[z] === SEA ? sq(sizeKm * seaFactor) / pxArea : zMedium[z] === LAKE ? sq(sizeKm * 2) / pxArea : zGroup[z] === PEAKS_GROUP ? mountainTarget * 2.25 : zGroup[z] === GORGE_GROUP ? landTarget * 0.8 : zGroup[z] === 1 ? mountainTarget : landTarget);
+  const sizeFor = (m: number, grp: number) =>
+    m === SEA ? sq(sizeKm * seaFactor) / pxArea
+    : m === LAKE ? sq(sizeKm * 2) / pxArea
+    : m === RIVER ? sq(milesToKm(sz.riverMi)) / pxArea
+    : grp === PEAKS_GROUP ? mountainTarget * 2.25
+    : grp === GORGE_GROUP ? sq(milesToKm(sz.canyonMi)) / pxArea
+    : grp === RAVINE_GROUP ? sq(milesToKm(sz.ravineMi)) / pxArea
+    : grp === 1 ? mountainTarget
+    : landTarget;
+  const targetOf = (z: number) => sizeFor(zMedium[z], zGroup[z]);
+  // A strip (a river, canyon or ravine) is long and narrow: its province size is along its length.
+  const strip = (m: number, grp: number) => m === RIVER || grp === GORGE_GROUP || grp === RAVINE_GROUP;
   // Slivers join the zone they border most: land with land (lakes too small to stand alone
   // become land), water with water; a speck of land out at sea joins the sea.
   // (Canyons and ravines are a ground of their own here: they never take in land, nor go into it.)
-  const mergeClass = Uint8Array.from(zMedium, (m, z) => (zGroup[z] === GORGE_GROUP ? 3 : m));
-  mergeSmallZones(zone, zones, nb, (z) => (zGroup[z] === GORGE_GROUP ? 15 : targetOf(z)), mergeClass);
+  const mergeClass = Uint8Array.from(zMedium, (m, z) => (zGroup[z] === GORGE_GROUP || zGroup[z] === RAVINE_GROUP ? 3 : m));
+  mergeSmallZones(zone, zones, nb, (z) => (strip(zMedium[z], zGroup[z]) ? 15 : targetOf(z)), mergeClass);
 
   // Zones again, numbered 0…, with their points listed.
   const zoneIds = new Map<number, number>();
@@ -284,7 +326,19 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
     zone[k] = zoneIds.get(zone[k])!;
     zoneSize[zone[k]]++;
   }
-  const target = (z: number) => (zm[z] === SEA ? sq(sizeKm * seaFactor) / pxArea : zm[z] === LAKE ? sq(sizeKm * 2) / pxArea : zg[z] === PEAKS_GROUP ? mountainTarget * 2.25 : zg[z] === GORGE_GROUP ? landTarget * 0.8 : zg[z] === 1 ? mountainTarget : landTarget);
+  // A strip's province covers its length times its width: the size squared is about its length
+  // times how wide it is here (a little room either side).
+  const zoneWidth = new Float64Array(Z).fill(1);
+  {
+    // How wide each strip zone is: its area over its length (half its edge points).
+    const edge = new Int32Array(Z);
+    for (let k = 0; k < n; k++) for (const m of nb(k, buf)) if (zone[m] !== zone[k]) {
+      edge[zone[k]]++;
+      break;
+    }
+    for (let z = 0; z < Z; z++) if (strip(zm[z], zg[z])) zoneWidth[z] = Math.max(1, (2 * zoneSize[z]) / Math.max(1, edge[z]));
+  }
+  const target = (z: number) => (strip(zm[z], zg[z]) ? Math.sqrt(sizeFor(zm[z], zg[z])) * zoneWidth[z] : sizeFor(zm[z], zg[z]));
   const zoneStart = new Int32Array(Z + 1);
   for (let z = 0; z < Z; z++) zoneStart[z + 1] = zoneStart[z] + zoneSize[z];
   const zonePix = new Int32Array(n);
@@ -455,6 +509,8 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
       const o = label[m];
       if (o < 0 || o === l) continue;
       if (g.land[k] && !g.land[m]) coastal[l] = 1;
+      // On a river with provinces of its own.
+      if (g.river[m] === 2) river[l] = 1;
       if (o > l) pairs.add(l * S + o);
     }
   }
@@ -475,15 +531,17 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
     const md = zm[z];
     let band = 0;
     for (let b = 1; b < BANDS; b++) if (bands[l * BANDS + b] > bands[l * BANDS + band]) band = b;
-    const region = md === SEA ? -1 : fg.region[k0];
+    const region = md === SEA || md === RIVER ? -1 : fg.region[k0];
     const water = md === SEA ? fg.water[k0] : -1;
-    const kind: ProvinceKind = md === SEA ? 'sea' : md === LAKE ? 'lake' : zg[z] === PEAKS_GROUP ? 'wasteland' : 'land';
+    const kind: ProvinceKind = md === SEA ? 'sea' : md === LAKE ? 'lake' : md === RIVER ? 'river' : zg[z] === PEAKS_GROUP ? 'wasteland' : 'land';
     const regionKind = region >= 0 ? geo?.regions[region]?.kind ?? 'Land' : 'Land';
     const terrain =
       kind === 'sea' ? geo?.waters[water]?.kind ?? 'Sea'
       : kind === 'lake' ? 'Lake'
+      : kind === 'river' ? 'River'
       : kind === 'wasteland' ? 'Impassable peaks'
-      : zg[z] === GORGE_GROUP ? (g.gorge[k0] === 2 ? 'Ravine' : 'Canyon')
+      : zg[z] === GORGE_GROUP ? 'Canyon'
+      : zg[z] === RAVINE_GROUP ? 'Ravine'
       : band === BAND.mountains || band === BAND.peaks ? 'Mountains'
       : band === BAND.highlands ? 'Highlands'
       : band === BAND.plateau ? 'Plateau'
@@ -810,7 +868,8 @@ function applyEdits(label: Int32Array, edits: ProvinceEdit[], seedId: number[], 
   const { w, h, px, x0, y0 } = grid;
   const wrap = g.wrapKm > 0;
   const index = new Map(seedId.map((id, l) => [id, l]));
-  const wet = (k: number) => !g.land[k];
+  // Water (the sea and rivers with provinces) is painted only into water, land only into land.
+  const wet = (k: number) => !g.land[k] || g.river[k] === 2;
   for (const e of edits) {
     const l = index.get(e.id);
     if (l === undefined || e.r <= 0 || e.pts.length < 2) continue;

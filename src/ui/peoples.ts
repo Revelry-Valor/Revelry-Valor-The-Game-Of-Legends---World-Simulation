@@ -322,7 +322,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const label = new Int32Array(P.count);
     for (let p = 0; p < P.count; p++) {
       const o = s.provOwner?.[p] ?? -1;
-      label[p] = P.kind[p] === PK.sea || P.kind[p] === PK.lake ? SEA : o < 0 ? UNCLAIMED : taken.has(p) ? occ(o) : o;
+      label[p] = P.kind[p] === PK.sea || P.kind[p] === PK.lake || P.kind[p] === PK.river ? SEA : o < 0 ? UNCLAIMED : taken.has(p) ? occ(o) : o;
     }
     const held = (l: number) => l >= 0 || l <= -1000;
     // Borders run along the province outlines: every stretch between two different labels.

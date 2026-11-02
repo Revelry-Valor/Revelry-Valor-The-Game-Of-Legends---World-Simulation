@@ -97,7 +97,7 @@ function readProvinces(p: unknown): SavedProvinces | null {
   if (!Array.isArray(v.seeds) || !Array.isArray(v.ids) || v.seeds.length !== v.ids.length * 2) return null;
   if (!v.seeds.every((x) => typeof x === 'number' && Number.isFinite(x)) || !v.ids.every((x) => Number.isInteger(x))) return null;
   const edits = Array.isArray(v.edits) ? v.edits.filter((e) => e && Number.isInteger(e.id) && typeof e.r === 'number' && e.r > 0 && Array.isArray(e.pts) && e.pts.length >= 2 && e.pts.every((x) => typeof x === 'number' && Number.isFinite(x))) : [];
-  return { v: 1, sizeMi: v.sizeMi, seaFactor: v.seaFactor, ...(typeof v.mountainMi === 'number' ? { mountainMi: v.mountainMi } : {}), seeds: v.seeds, ids: v.ids, nextId: v.nextId, ...(edits.length ? { edits } : {}) };
+  return { v: 1, sizeMi: v.sizeMi, seaFactor: v.seaFactor, ...Object.fromEntries((['mountainMi', 'riverMi', 'canyonMi', 'ravineMi', 'riverMinKm'] as const).filter((k) => typeof v[k] === 'number' && Number.isFinite(v[k])).map((k) => [k, v[k]])), seeds: v.seeds, ids: v.ids, nextId: v.nextId, ...(edits.length ? { edits } : {}) };
 }
 
 /** The reference picture from a save, if it is whole. */

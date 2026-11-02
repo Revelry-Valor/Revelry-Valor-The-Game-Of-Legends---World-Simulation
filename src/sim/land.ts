@@ -14,7 +14,9 @@ import type { SimState } from './state';
  */
 
 /** Province kinds as the simulation sees them. */
-export const PK = { land: 0, sea: 1, lake: 2, waste: 3 } as const;
+export const PK = { land: 0, sea: 1, lake: 2, waste: 3, river: 4 } as const;
+/** Open water a ship can sail (the sea, and rivers with provinces of their own). */
+export const sailable = (k: number) => k === PK.sea || k === PK.river;
 
 export interface ProvIndex {
   /** From the province generator (false: each climate point is a province). */
@@ -109,7 +111,7 @@ export function provinceIndex(env: Env, pm: ProvinceMap): ProvIndex {
   const fh = grid.h;
   const kindOf = (p: number) => {
     const k = pm.provinces[p].kind;
-    return k === 'land' ? PK.land : k === 'sea' ? PK.sea : k === 'lake' ? PK.lake : PK.waste;
+    return k === 'land' ? PK.land : k === 'sea' ? PK.sea : k === 'lake' ? PK.lake : k === 'river' ? PK.river : PK.waste;
   };
   const kinds = new Uint8Array(P);
   for (let p = 0; p < P; p++) kinds[p] = kindOf(p);
@@ -136,7 +138,8 @@ export function provinceIndex(env: Env, pm: ProvinceMap): ProvIndex {
             i = ((i % fw) + fw) % fw;
           }
           const l = pm.label[j * fw + i];
-          if (l < 0 || (kinds[l] !== PK.sea) !== wantLand) continue;
+          // Land points to land provinces (a river province is too narrow to own the grid's points).
+          if (l < 0 || (wantLand ? sailable(kinds[l]) : kinds[l] !== PK.sea)) continue;
           const c = (count.get(l) ?? 0) + 1;
           count.set(l, c);
           if (c > bc) [best, bc] = [l, c];
@@ -171,7 +174,7 @@ export function provinceIndex(env: Env, pm: ProvinceMap): ProvIndex {
     centre: Int32Array.from(pm.provinces, (p) => cellOf(env, p.x, p.y)),
     nbStart,
     nb,
-    rough: Float32Array.from(pm.provinces, (p) => (p.kind === 'sea' ? 0.7 : p.kind === 'lake' ? 1.5 : roughOf(p.band, p.terrain))),
+    rough: Float32Array.from(pm.provinces, (p) => (p.kind === 'sea' ? 0.7 : p.kind === 'river' ? 0.6 : p.kind === 'lake' ? 1.5 : roughOf(p.band, p.terrain))),
   };
 }
 
