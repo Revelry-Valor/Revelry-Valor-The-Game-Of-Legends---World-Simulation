@@ -71,6 +71,14 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: wind' : b.name), ...windFields());
       return;
     }
+    if (state.tool === 'root') {
+      settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: root' : b.name), ...rootFields());
+      return;
+    }
+    if (state.tool === 'treeAnchor') {
+      settings.replaceChildren(h('h3', {}, b.name), h('p', { class: 'muted small hint' }, b.hint));
+      return;
+    }
     if (state.tool === 'divide' || state.tool === 'join') {
       settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...geoLineFields(state.tool));
       return;
@@ -235,6 +243,33 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
     out.push(
       ...seasonAdjust(sel, (patch) => ops.set(patch), () => ops.copyToOtherSeason()),
       h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', title: 'Back to the automatic path', onclick: () => { ops.remove(); renderSettings(); } }, 'Reset to automatic')),
+    );
+    return out;
+  };
+  /** World tree roots: drawn through points, then moved, resized or deleted. */
+  const rootFields = (): HTMLElement[] => {
+    const b = brushInfo('root');
+    if (state.erase) return [h('p', { class: 'muted small hint' }, 'Tap a root to delete it.')];
+    const mode = state.sketchMode ?? 'draw';
+    const sizeChoice = (value: 'main' | 'sprout', set: (v: 'main' | 'sprout') => void) =>
+      choice<'main' | 'sprout'>('Kind', [{ value: 'main', label: 'Main root' }, { value: 'sprout', label: 'Sprout' }], value, set);
+    const out: HTMLElement[] = [
+      h('p', { class: 'muted small hint' }, b.hint),
+      choice<'draw' | 'adjust'>('Mode', [{ value: 'draw', label: 'Draw' }, { value: 'adjust', label: 'Adjust' }], mode, (v) => { state.sketchMode = v; renderSettings(); changed(); }),
+    ];
+    if (mode === 'draw') {
+      out.push(sizeChoice(state.settings.rootSize ?? 'main', (v) => { state.settings.rootSize = v; changed(); }), h('p', { class: 'muted small' }, 'Main roots carry the most mana and spread it widest; sprouts are smaller roots reaching out to places of note.'));
+      return out;
+    }
+    const ops = sketch();
+    const sel = ops?.selected() ?? null;
+    if (!ops || !sel) {
+      out.push(h('p', { class: 'muted small' }, 'Tap a root to pick it. Drag its dots to move them; tap the root to add a bend.'));
+      return out;
+    }
+    out.push(
+      sizeChoice(sel.rootSize ?? 'main', (v) => { ops.set({ rootSize: v }, true); renderSettings(); }),
+      h('div', { class: 'sketch-actions' }, h('button', { type: 'button', class: 'ghost small danger', onclick: () => { ops.remove(); renderSettings(); } }, 'Delete')),
     );
     return out;
   };

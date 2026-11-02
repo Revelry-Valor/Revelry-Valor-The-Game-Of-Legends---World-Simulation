@@ -19,6 +19,7 @@ import { loadSharedLibrary } from '../core/libstore';
 import { createInfoPanel, createResourcePanel } from './info';
 import { regionAt, waterAt } from '../core/finegeo';
 import { createProvinces, type ProvinceDisplay, type Provinces } from './provinces';
+import { createMana, type Mana, type ManaDisplay } from './mana';
 import type { MapOverlay } from './mapview';
 
 /**
@@ -28,7 +29,7 @@ import type { MapOverlay } from './mapview';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -44,6 +45,7 @@ export function showWorld(app: App, start: World): () => void {
   };
   let peoples: Peoples | null = null;
   let provinces: Provinces | null = null;
+  let mana: Mana | null = null;
   let climateBusy = true;
   const autosave = window.setInterval(() => dirty && save(), 30000);
 
@@ -127,6 +129,7 @@ export function showWorld(app: App, start: World): () => void {
   const layers: MapOverlay = {
     draw(g, at, scale, copies) {
       provinces?.overlay.draw(g, at, scale, copies);
+      mana?.overlay.draw(g, at, scale, copies);
       peoples?.overlay.draw(g, at, scale, copies);
     },
     down: (x, y, pxKm) => !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false),
@@ -141,7 +144,8 @@ export function showWorld(app: App, start: World): () => void {
     describe(x, y) {
       const a = peoples?.overlay.describe?.(x, y) ?? [];
       const b = provinces?.overlay.describe?.(x, y) ?? [];
-      return a.length || b.length ? [...a, ...b] : null;
+      const m = mana?.overlay.describe?.(x, y) ?? [];
+      return a.length || b.length || m.length ? [...a, ...b, ...m] : null;
     },
     pick: (x, y, pxKm) => peoples?.overlay.pick?.(x, y, pxKm) ?? false,
     get noPaint() {
@@ -160,15 +164,18 @@ export function showWorld(app: App, start: World): () => void {
     begin(stroke) {
       const id = world.surface.nextId;
       const live: Stroke = { ...stroke, id };
+      // The world tree has one anchor: placing it again moves it.
+      const others = live.brush === 'treeAnchor' && !live.erase ? world.surface.strokes.filter((st) => st.brush !== 'treeAnchor') : world.surface.strokes;
       // Currents, winds and highs drawn for "the season shown" belong to the season on the map.
       if (live.season === 'shown') live.season = look.season === 1 ? 'summer' : 'winter';
       undoStack.push(world.surface.strokes);
       if (undoStack.length > 300) undoStack.shift();
       redoStack.length = 0;
-      world = { ...world, surface: { strokes: [...world.surface.strokes, live], nextId: id + 1 } };
+      world = { ...world, surface: { strokes: [...others, live], nextId: id + 1 } };
       changed();
       climate.changed();
       updateUndo();
+      requestAnimationFrame(() => mana?.invalidate());
       return live;
     },
     update(stroke) {
@@ -454,6 +461,7 @@ export function showWorld(app: App, start: World): () => void {
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
     choice<'all' | 'main' | 'off'>('Labels', [{ value: 'all', label: 'All' }, { value: 'main', label: 'Land & sea only' }, { value: 'off', label: 'Hidden' }], look.labels, (v) => { look.labels = v; map.redraw(); }),
+    choice<ManaDisplay>('Mana', [{ value: 'off', label: 'Hidden' }, { value: 'lines', label: 'Lines' }, { value: 'heat', label: 'Heat map' }], look.mana, (v) => { look.mana = v; map.redraw(); }),
     choice<ProvinceDisplay>('Provinces', [{ value: 'off', label: 'Hidden' }, { value: 'lines', label: 'Outlines' }, { value: 'colour', label: 'Coloured' }], look.provinces, (v) => { look.provinces = v; map.redraw(); }),
   );
   const zonesPanel = h(
@@ -809,6 +817,23 @@ export function showWorld(app: App, start: World): () => void {
     provinceInfo: (i) => peoples?.provinceInfo(i) ?? [],
   });
   if (climate.climate) provinces.climateChanged();
+  // The Mana tab: the world tree and the mana heat map (Phase 11).
+  mana = createMana({
+    world: () => world,
+    climate: () => climate.climate,
+    redraw: () => map.redraw(),
+    display: () => look.mana,
+    live: () => peoples?.manaState() ?? null,
+    replaceRoots(roots) {
+      snapshot();
+      const first = world.surface.nextId;
+      const fixed = roots.map((r, i) => ({ ...r, id: first + i }));
+      world = { ...world, surface: { ...world.surface, nextId: first + fixed.length } };
+      setStrokes([...world.surface.strokes.filter((st) => st.brush !== 'root'), ...fixed]);
+      mana?.invalidate();
+      map.redraw();
+    },
+  });
   if (climate.climate) peoples.climateChanged();
   const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
     { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
@@ -818,6 +843,7 @@ export function showWorld(app: App, start: World): () => void {
     { id: 'geo', name: 'Geography', groups: ['Geography'], extra: [geoPanel] },
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
     { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel] },
+    { id: 'mana', name: 'Mana', groups: ['World tree'], extra: [mana.panel] },
     { id: 'peoples', name: 'Peoples', groups: [], extra: [peoples.panel] },
   ];
   const tabBody = h('div', { class: 'tab-body' });
@@ -830,6 +856,7 @@ export function showWorld(app: App, start: World): () => void {
     if (t.id === 'geo') renderGeoPanel();
     peoples?.setActive(t.id === 'peoples');
     provinces?.setActive(t.id === 'provinces');
+    mana?.setActive(t.id === 'mana');
     tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
     if (t.groups.length) tools.showGroups(t.groups);
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
@@ -857,7 +884,7 @@ export function showWorld(app: App, start: World): () => void {
   };
   const drops = [
     drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}`, false, mapPanel),
-    drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}${look.provinces === 'lines' ? ' · province outlines' : look.provinces === 'colour' ? ' · provinces coloured' : ''}`, false, lookPanel, zonesPanel),
+    drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}${look.provinces === 'lines' ? ' · province outlines' : look.provinces === 'colour' ? ' · provinces coloured' : ''}${look.mana === 'lines' ? ' · mana lines' : look.mana === 'heat' ? ' · mana heat map' : ''}`, false, lookPanel, zonesPanel),
     drop('Layers', () => LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface', false, layersPanel),
     drop('Reference image', () => (world.reference ? 'One laid over the map' : 'None'), false, refPanel),
   ];

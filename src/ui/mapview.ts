@@ -123,8 +123,10 @@ export interface MapView {
 
 const SKETCH_COLOUR = { warm: '#e0301e', cold: '#1f66e0', neutral: '#0d1014' };
 /** Brushes drawn as a course through points and adjusted afterwards: ocean currents and winds. */
-type SketchBrush = 'current' | 'wind' | 'itcz' | 'divide' | 'join';
-const isSketch = (t: string): t is SketchBrush => t === 'current' || t === 'wind' || t === 'itcz' || t === 'divide' || t === 'join';
+type SketchBrush = 'current' | 'wind' | 'itcz' | 'divide' | 'join' | 'root';
+const isSketch = (t: string): t is SketchBrush => t === 'current' || t === 'wind' || t === 'itcz' || t === 'divide' || t === 'join' || t === 'root';
+/** World tree roots on the map: main roots and sprouts. */
+const ROOT_COLOUR = '#5c8a2e';
 const GEO_LINE = { divide: '#d1347f', join: '#1f9e62' } as const;
 
 export function createMapView(o: MapViewOptions): MapView {
@@ -222,6 +224,7 @@ export function createMapView(o: MapViewOptions): MapView {
     if (look.view === 'pressure' || look.view === 'air' || o.tool().tool === 'wind') drawSketches(g, r, x0, span, copies, 'wind');
     if (look.view === 'pressure' || o.tool().tool === 'high') drawHighs(g, r, x0, span, copies);
     for (const gl of ['divide', 'join'] as const) if (o.tool().tool === gl || (look.view === 'geo' && (o.tool().tool === 'divide' || o.tool().tool === 'join'))) drawSketches(g, r, x0, span, copies, gl);
+    if (o.tool().tool === 'root') drawSketches(g, r, x0, span, copies, 'root');
     const ov = o.overlay?.();
     if (ov) {
       const yTop = toScreen(0, 0, r)[1];
@@ -801,8 +804,8 @@ export function createMapView(o: MapViewOptions): MapView {
     for (const st of sketches(brush)) {
       const wind = brush === 'wind';
       const itcz = brush === 'itcz' || brush === 'divide' || brush === 'join';
-      const colour = brush === 'divide' || brush === 'join' ? GEO_LINE[brush] : itcz ? '#f2b705' : wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
-      const minor = itcz ? false : wind ? st.strength < 0.45 : st.currentSize === 'secondary';
+      const colour = brush === 'root' ? ROOT_COLOUR : brush === 'divide' || brush === 'join' ? GEO_LINE[brush] : itcz ? '#f2b705' : wind ? '#1b2027' : SKETCH_COLOUR[st.current ?? 'warm'];
+      const minor = brush === 'root' ? st.rootSize === 'sprout' : itcz ? false : wind ? st.strength < 0.45 : st.currentSize === 'secondary';
       const p = st.pts;
       for (const c of copies) {
         const ox = x0 + c * span;
@@ -1148,13 +1151,13 @@ export function createMapView(o: MapViewOptions): MapView {
       return;
     }
     const t = o.tool();
-    if (brush === 'current' || brush === 'wind' || brush === 'itcz' || brush === 'divide' || brush === 'join') {
+    if (brush === 'current' || brush === 'wind' || brush === 'itcz' || brush === 'divide' || brush === 'join' || brush === 'root') {
       // An ocean current or a wind: a smooth course through the points.
       const wrapKm = o.world().settings.edges === 'wrap' ? o.world().settings.widthKm : 0;
       const live = o.begin({ ...t.settings, brush, erase: undefined, pts: roundPath(sketchCourse(ctrl, wrapKm)), route: 'points', ctrl: roundPath(ctrl) });
       sel = live.id;
       o.sketchSelected?.();
-      o.notice(brush === 'divide' ? 'Divide line drawn: what it crosses is cut in two once the geography updates.' : brush === 'join' ? 'Join line drawn: what it touches becomes one once the geography updates.' : brush === 'itcz' ? 'ITCZ drawn: where it runs, it replaces the automatic path for this season. Use Adjust to move or add points.' : brush === 'wind' ? 'Wind drawn. Use Adjust to move or add points, change its strength, reverse it or delete it.' : 'Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
+      o.notice(brush === 'root' ? 'Root drawn: mana flows along it. Use Adjust to move or add points, make it a main root or a sprout, or delete it.' : brush === 'divide' ? 'Divide line drawn: what it crosses is cut in two once the geography updates.' : brush === 'join' ? 'Join line drawn: what it touches becomes one once the geography updates.' : brush === 'itcz' ? 'ITCZ drawn: where it runs, it replaces the automatic path for this season. Use Adjust to move or add points.' : brush === 'wind' ? 'Wind drawn. Use Adjust to move or add points, change its strength, reverse it or delete it.' : 'Current drawn. Use Adjust to move or add points, change its type, reverse it or delete it.');
       schedule();
       return;
     }
@@ -1174,6 +1177,7 @@ export function createMapView(o: MapViewOptions): MapView {
     if (routing.brush === 'wind') return '#1b2027';
     if (routing.brush === 'itcz') return '#f2b705';
     if (routing.brush === 'divide' || routing.brush === 'join') return GEO_LINE[routing.brush];
+    if (routing.brush === 'root') return ROOT_COLOUR;
     return '#bfe6ff';
   };
 
@@ -1348,7 +1352,7 @@ export function createMapView(o: MapViewOptions): MapView {
         o.remove(hit);
         if (sel === hit) sel = null;
         o.sketchSelected?.();
-        o.notice(`${o.tool().tool === 'wind' ? 'Wind' : o.tool().tool === 'itcz' ? 'ITCZ line' : o.tool().tool === 'divide' ? 'Divide line' : o.tool().tool === 'join' ? 'Join line' : 'Current'} deleted (Undo brings it back).`);
+        o.notice(`${o.tool().tool === 'root' ? 'Root' : o.tool().tool === 'wind' ? 'Wind' : o.tool().tool === 'itcz' ? 'ITCZ line' : o.tool().tool === 'divide' ? 'Divide line' : o.tool().tool === 'join' ? 'Join line' : 'Current'} deleted (Undo brings it back).`);
       }
       schedule();
       return true;

@@ -297,6 +297,54 @@ How long the rift will last and how strong it is decide how often it must be loo
 
 ---
 
+### Phase 11 decisions (agreed)
+- **Three steps:**
+  1. The mana map: ley lines, world tree roots, the heat map, and placing the anchor.
+  2. Rifts: where they open, what they yield, and how realms hold them.
+  3. Rift breaks, monster tides and hordes.
+- **World tree:** optional. You place the anchor in the Mana tab, then grow roots from it or draw them yourself. **Every root can be edited:** added, moved, changed between a main root and a sprout, or deleted.
+- **Ley line nodes at the start:** volcanoes, whirlpools, the poles (where the map reaches them), high-pressure zones and dawn cities. Each node links to its two or three nearest. Temples (holy sites held) and mage towers add nodes as they are built.
+- **What mana does for now:**
+  - mana crystal deposits are richer on strong mana;
+  - mana-sensitive peoples are drawn to it;
+  - towns on strong mana that know ley line mapping raise mage towers;
+  - magocracy becomes possible;
+  - each province shows its mana.
+- **Corruption** builds where mana is drawn on heavily (mage towers, mana tech) and around open rifts, and fades slowly. When high, it opens short-lived rifts (step 2).
+- **Rift water** is a spring the simulation knows about (fresh water, better land nearby), not painted rivers or lakes.
+- **Holding a rift:** a realm builds an encampment, stations soldiers, sends parties now and then, or ignores it. Guilds come later.
+- **Monsters:** a built-in set for each kind of rift (lesser spawn, brutes, alphas), editable later in the Library. Tides spread province by province and besiege towns with the Phase 10 siege rules. Hordes are monster armies that fight with the phased battles.
+
+**Built (step 1)** (src/core/mana.ts, src/sim/mana.ts, src/ui/mana.ts):
+- *World tree tools* (Mana tab):
+  - **Tree anchor**: one anchor; placing it again moves it.
+  - **Root**: a line drawn through points, main root or sprout. Adjust moves or adds points, changes its kind, or deletes it; the eraser deletes a root by tapping it.
+  - **Grow roots from the anchor** (2–12 main roots), and **Remove all roots**. Both can be undone.
+- *Growing roots:*
+  - Main roots step outward from the anchor, at each step choosing among headings near straight on the one with most to follow (mountains, deep sea, coasts), and never turning back.
+  - A volcano on the way bursts into four short roots.
+  - Mountain ranges near a main root but not on one get a sprout reaching to them.
+  - The grown roots are ordinary Root strokes, editable like any other.
+- *Ley lines:* every node joined to its two nearest, and a third when nearly as near. The web grows as peoples add dawn cities, temples and towers.
+- *Roots reach new places:* a temple or mage tower within about 250 miles of a root gets a sprout from the nearest point on the root.
+- *The heat map:*
+  - Each line spreads mana about it: about 50 miles for ley lines, 75 for main roots, 45 for sprouts.
+  - Each line counts once at each point.
+  - Lines reaching the same point add the sum of every pair's product, so crossings and lines running alongside each other are strongest.
+  - The anchor and each node add a bump.
+  - The result is shown as thin, faint, moderate, strong or intense.
+- *Map:*
+  - The Mana choice under Map look: Hidden, Lines or Heat map.
+  - The Mana tab shows the heat map, roots (green), ley lines (violet dashes), nodes (diamonds by kind) and the anchor (a tree).
+  - Mana appears in the Under the cursor panel and on the province card.
+- *Simulation:*
+  - The land's mana (natural nodes, roots and anchor) is worked out with the environment. The living peoples' nodes are added and the mana worked out again whenever they change.
+  - Mana crystal deposits scale with mana, from a quarter to 1.75 times.
+  - Mana-sensitive races score land higher on dense mana and lower where it is thin.
+  - Each year a town of 400 or more that knows **Ley line mapping**, on mana of at least 45%, may raise a **mage tower**, more likely the denser the mana. The tower becomes a node.
+  - **Magocracy** fits a realm with at least one tower and two towns whose capital stands on mana of 50% or more, more so for Mystic peoples.
+  - Settlement cards show their tower.
+
 ## 7. Climate system
 
 Climate is built as a fixed chain of rule-based passes, run once for summer and once for winter, then the two seasons are compared to assign climate zones. The method follows Worldbuilding Pasta's climate series (Part VIa, Part VIb).

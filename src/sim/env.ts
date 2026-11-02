@@ -5,6 +5,7 @@ import { freshWaters } from '../core/geography';
 import type { Surface } from '../core/paint';
 import type { ProvinceMap } from '../core/provinces';
 import { attachProvinces, type ProvIndex } from './land';
+import { anchorOf, leyLines, manaField, naturalNodes, rootLines, type ManaLine, type ManaNode } from '../core/mana';
 
 /**
  * What the land offers the first peoples, on the climate's points: plant food by season, fresh
@@ -97,6 +98,9 @@ export interface Env {
   resInfo: ResInfo[];
   /** The provinces (land.ts): from the generator, or each point its own until it has them. */
   prov: ProvIndex;
+  /** The land's own mana (Phase 11): natural nodes, the world tree's roots and anchor, and the mana they give (0–1 at each point). */
+  manaLand: { nodes: ManaNode[]; roots: ManaLine[]; anchor: { x: number; y: number } | null };
+  manaBase: Float32Array;
 }
 
 const smooth = (a: number, b: number, x: number) => {
@@ -215,7 +219,14 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface, provinces:
     }
   }
   const { res, resInfo } = resources(cl, lib.resources, { mzone, coast, fresh, volcanic });
-  const env: Env = { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, res, resInfo, prov: null as unknown as ProvIndex };
+  // The land's own mana: natural nodes (volcanoes, whirlpools, the poles, highs), the world tree's roots and anchor.
+  const poles = { widthKm: w * step, heightKm: h * step, north: cl.lat[0] >= 84, south: cl.lat[h - 1] <= -84 };
+  const manaLand = { nodes: naturalNodes(surface, poles), roots: rootLines(surface, cl.wrapKm), anchor: anchorOf(surface) };
+  const manaBase = manaField({ x0: cl.x0, y0: cl.y0, step, w, h, wrapKm: cl.wrapKm }, [...leyLines(manaLand.nodes, cl.wrapKm), ...manaLand.roots], manaLand.nodes, manaLand.anchor);
+  // Mana crystals are richest where mana is dense.
+  const crystal = res['mana-crystal'];
+  if (crystal) for (let k = 0; k < n; k++) crystal[k] = Math.min(1, crystal[k] * (0.25 + 1.5 * manaBase[k]));
+  const env: Env = { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, res, resInfo, prov: null as unknown as ProvIndex, manaLand, manaBase };
   attachProvinces(env, provinces);
   return env;
 }

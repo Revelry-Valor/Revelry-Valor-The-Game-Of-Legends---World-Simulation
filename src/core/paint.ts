@@ -60,7 +60,10 @@ export type BrushId =
   | 'gap'
   | 'current'
   // Mountain zones (by hand)
-  | 'zone';
+  | 'zone'
+  // The world tree (mana)
+  | 'treeAnchor'
+  | 'root';
 
 export type MountainMode = 'range' | 'spur' | 'massif';
 
@@ -79,7 +82,7 @@ export type BrushKind = 'area' | 'line' | 'point';
 export interface BrushInfo {
   id: BrushId;
   name: string;
-  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography';
+  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography' | 'World tree';
   kind: BrushKind;
   hint: string;
   /** Default brush settings. Size is the brush's width in miles. */
@@ -138,6 +141,8 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'divide', name: 'Divide', group: 'Geography', kind: 'line', hint: 'Draw a line to cut one feature in two: a landmass into two continents (like Europe and Asia), a sea into two seas, or a region into two regions. Tap points along it, then tap the last point again (or press Enter).', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'join', name: 'Join', group: 'Geography', kind: 'line', hint: 'Draw a line across two or more features of the same kind to make them one: two landmasses one continent, two seas one sea, two regions one region.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'name', name: 'Name', group: 'Geography', kind: 'point', hint: 'Click a continent, island, sea, bay, mountain range, region, lake or river to name it. Names stay with the land as you repaint.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'treeAnchor', name: 'Tree anchor', group: 'World tree', kind: 'point', hint: 'Click to place where the world tree’s roots enter the world (one anchor: placing it again moves it). Then grow the roots from it, or draw them yourself with the Root brush.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'root', name: 'Root', group: 'World tree', kind: 'line', hint: 'Draw a root of the world tree: tap points along it, then tap the last point again (or press Enter). Mana flows along roots, most where they meet, cross or run together. Use Adjust to move or add points, change a root to a main root or a sprout, or delete it.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
 
@@ -210,6 +215,8 @@ export interface Stroke {
   nameOf?: 'land' | 'archipelago' | 'water' | 'region' | 'lake' | 'river';
   /** Rain Shadow Pen: high ground (the default) or a gap (pass) that lets moist air through. */
   penMode?: 'raise' | 'gap';
+  /** World tree roots: a main root, or a smaller sprout. */
+  rootSize?: 'main' | 'sprout';
   /** Drawn current (teaching sketch): what kind of water it carries. Its course is `ctrl`. */
   current?: 'warm' | 'cold' | 'neutral';
   /** Ocean currents: a major current (ocean-wide) or a secondary one (bays and shallow seas). */
@@ -274,7 +281,8 @@ export function brushDefaults(id: BrushId): Omit<Stroke, 'id' | 'pts'> {
     ...(id === 'volcano' || id === 'lava' ? { active: true } : {}),
     ...(id === 'crystal' ? { crystal: 'heat' as const } : {}),
     ...(id === 'high' || id === 'current' || id === 'wind' || id === 'itcz' ? { season: 'shown' as const } : {}),
-    ...(id === 'wind' || id === 'itcz' || id === 'divide' || id === 'join' ? { route: 'points' as const } : {}),
+    ...(id === 'wind' || id === 'itcz' || id === 'divide' || id === 'join' || id === 'root' ? { route: 'points' as const } : {}),
+    ...(id === 'root' ? { rootSize: 'main' as const } : {}),
     ...(id === 'name' ? { nameOf: 'land' as const } : {}),
     ...(id === 'shadowpen' ? { penHeight: 2.5 } : {}),
     ...(id === 'current' ? { current: 'warm' as const, currentSize: 'major' as const, route: 'points' as const } : {}),

@@ -23,6 +23,7 @@ import { bestWay, knows, pathCells, pathSpeed } from '../src/sim/ways';
 import { armsMight, clanKnows } from '../src/sim/tech';
 import { acceptance, noteBetween } from '../src/sim/cultureChange';
 import { PK, provAt, transferAll } from '../src/sim/land';
+import { manaAtPlace, manaLinesNow, manaNow, manaYear, TOWER_MANA } from '../src/sim/mana';
 import { nextWaypoint, provinceRoute, routePlan } from '../src/sim/routes';
 import { generateProvinces } from '../src/core/provinces';
 import { VILLAGE_MAX } from '../src/sim/sim';
@@ -1544,5 +1545,29 @@ describe('land by province', () => {
     const plan = routePlan(penv, P.x[north], P.y[north], P.x[south], P.y[south], true);
     expect(plan.seaKm).toBeGreaterThan(0);
     expect(routePlan(penv, P.x[north], P.y[north], P.x[south], P.y[south]).seaKm).toBe(0);
+  });
+});
+
+describe('mana in the simulation', () => {
+  it('lets a town on strong mana that charts ley lines raise a mage tower, a new node', () => {
+    const anchorAt = { x: 6000, y: yAt(-12) };
+    const tree: Surface = { strokes: [...surface.strokes, { ...brushDefaults('treeAnchor'), id: 9001, pts: [anchorAt.x, anchorAt.y] } as Stroke], nextId: 9002 };
+    const menv = buildEnv(cl, lib, tree);
+    expect(menv.manaLand.anchor).not.toBeNull();
+    const sim = newSim(menv, 901);
+    const city = addDawnCity(sim, menv, lib, humanId(), anchorAt.x + 40, anchorAt.y, 2000, ['ley-mapping'])!;
+    expect(manaAtPlace(sim, menv, city.x, city.y)).toBeGreaterThan(TOWER_MANA);
+    const before = manaNow(sim, menv);
+    for (let y = 0; y < 30 && city.tower === undefined; y++) manaYear({ sim, env: menv, lib, rand: testRand, log: () => {} });
+    expect(city.tower).toBeDefined();
+    const { nodes } = manaLinesNow(sim, menv);
+    expect(nodes.some((n) => n.kind === 'tower')).toBe(true);
+    // The new node changes the mana (worked out again).
+    expect(manaNow(sim, menv)).not.toBe(before);
+    // Without the knowledge, no tower.
+    const sim2 = newSim(menv, 902);
+    const other = addDawnCity(sim2, menv, lib, humanId(), anchorAt.x + 40, anchorAt.y, 2000, [])!;
+    for (let y = 0; y < 30; y++) manaYear({ sim: sim2, env: menv, lib, rand: testRand, log: () => {} });
+    expect(other.tower).toBeUndefined();
   });
 });

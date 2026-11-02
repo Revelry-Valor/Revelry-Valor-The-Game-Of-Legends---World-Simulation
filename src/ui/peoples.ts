@@ -26,6 +26,9 @@ import { holder, isOcc, occ, OUTSIDE, SEA, UNCLAIMED } from './borders';
 import { assembleRings } from '../core/trace';
 import type { ProvinceMap } from '../core/provinces';
 import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
+import { manaAtPlace, manaLinesNow, manaNow } from '../sim/mana';
+import { manaWord } from '../core/mana';
+import type { ManaState } from './mana';
 import type { InfoItem, ResourceView } from './info';
 
 /**
@@ -63,6 +66,8 @@ export interface Peoples {
   setActive(on: boolean): void;
   /** The provinces were made, updated or removed. */
   provincesChanged(): void;
+  /** The mana as the living peoples have it (their nodes added), or null when there are none. */
+  manaState(): ManaState | null;
   /** What the peoples have in a province (by its index): holder, settlements, people, culture, faith, resources, roads. */
   provinceInfo(index: number): InfoItem[];
   climateChanged(): void;
@@ -1814,6 +1819,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         h('div', { class: 'tribe-card small' },
           h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)}` : `${settlementTier(st)}${st.seat === false ? ': another settlement is its province’s seat, so it stays a village' : ''}`),
           st.holyTo.length ? h('div', { class: 'holy-tag' }, `Holy to all the ${st.holyTo.map(raceName).join(', ')}, wherever they are${st.ruined ? ', even in ruin' : ''}.`) : null,
+          st.tower !== undefined && !st.ruined ? h('div', {}, `A mage tower (raised in year ${yearOf(st.tower)}): a node on the ley lines; mana here is ${env ? manaWord(manaAtPlace(sim!, env, st.x, st.y)) : '?'}.`) : null,
           st.ruined
             ? h('div', {}, 'In ruins. Those who come to it may build it again (its own people most of all).')
             : h('div', {}, h('span', { class: 'swatch', style: `background:${clan?.colour ?? '#888'}` }), h('span', { class: 'link', onclick: () => { if (clan) { selectedRealm = clan.id; selected = null; render(); d.redraw(); } } }, clan ? realmName(L, clan) : '?'), ` · ${raceName(st.race)}`),
@@ -1966,6 +1972,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         if (n && sum / n > 0.1) res.push([r.name, sum / n]);
       }
       if (res.length) out.push({ label: 'Resources', value: res.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, v]) => `${n} (${Math.round(Math.min(1, v) * 100)}%)`).join(', ') });
+      // How dense its mana is (the average over its points).
+      {
+        const field = sim ? manaNow(sim, env) : env.manaBase;
+        let m = 0;
+        const cnt = P.start[index + 1] - P.start[index];
+        for (let q = P.start[index]; q < P.start[index + 1]; q++) m += field[P.cells[q]];
+        if (cnt) out.push({ label: 'Mana', value: `${manaWord(m / cnt)} (${Math.round((m / cnt) * 100)}%)` });
+      }
       let road = 0;
       for (let q = P.start[index]; q < P.start[index + 1]; q++) road = Math.max(road, sim?.way[P.cells[q]] ?? 0);
       if (road) out.push({ label: 'Best way', value: WAYS[road].name });
@@ -1998,6 +2012,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         if (f) out.push({ label: 'Faith', value: f.name });
       }
       return out;
+    },
+    manaState() {
+      if (!ready() || !sim || !env || !(sim.tribes.length || sim.settlements.length)) return null;
+      const { lines, nodes } = manaLinesNow(sim, env);
+      return { lines, nodes, anchor: env.manaLand.anchor, grid: { x0: env.x0, y0: env.y0, step: env.step, w: env.w, h: env.h, wrapKm: env.wrapKm }, field: manaNow(sim, env) };
     },
     provincesChanged,
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),

@@ -1,4 +1,5 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
+import { manaYear } from './mana';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
 import { PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
@@ -49,6 +50,8 @@ export interface RaceInfo {
   swims: boolean;
   lifestyle: string;
   attitude: string;
+  /** Feels mana: drawn to dense mana, unsettled where it is thin (the Mana-sensitive trait). */
+  manaSensitive: boolean;
 }
 
 const SIZE_NEED: Record<string, number> = { Tiny: 0.3, Small: 0.6, Medium: 1, Large: 1.6, Giant: 3 };
@@ -91,6 +94,7 @@ export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures:
       swims: (st.swimming ?? 0) >= 40,
       lifestyle: race.lifestyle || species.lifestyle || 'Semi-nomadic',
       attitude: p.attitude || 'Wary',
+      manaSensitive: traits.has('mana-sensitive'),
     };
   }
   return null;
@@ -240,7 +244,9 @@ function liveScore(env: Env, ri: RaceInfo, k: number, cl?: { zone: Int8Array }):
   const water = env.fresh[k] ? 0.4 : env.coast[k] ? 0.25 : 0;
   const prefs = ri.race.climates.length ? ri.race.climates : ri.species.profile.climates;
   const pref = prefs.length && cl ? (prefs.includes(cl.zone[k]) ? 1 : 0.3) : 1;
-  return (food + Math.min(1, game / 8) * 0.6 + water) * pref;
+  // Mana-sensitive peoples are drawn to dense mana, and unsettled where it is thin.
+  const mana = ri.manaSensitive ? 0.5 * (env.manaBase[k] - 0.2) : 0;
+  return (food + Math.min(1, game / 8) * 0.6 + water) * pref + mana;
 }
 
 /**
@@ -1004,6 +1010,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   settlementsYearly(sim, env, lib, info);
   // Discoveries, learning and forgetting (tech.ts).
   techYear(techContext(sim, env, lib));
+  // Mana: towns on strong mana that chart ley lines raise mage towers, new nodes (mana.ts).
+  manaYear({ sim, env, lib, rand: () => rand(sim), log: (text, x, y) => log(sim, text, x, y) });
   // Cultures: peoples without one (older saves) grow their folk culture; then traditions and behaviours change (culture.ts).
   for (const g of [...sim.tribes, ...sim.settlements.filter((q) => !q.ruined)]) {
     if (g.culture && cultureOf(sim, g.culture)) continue;

@@ -282,6 +282,8 @@ export interface Settlement {
   ruined: boolean;
   founded: number;
   ruinedOn: number;
+  /** A mage tower raised here (the day it was built): a ley line node (mana.ts). */
+  tower?: number;
   /** The seat of its province: the one settlement there that can grow into a town or city (the rest stay villages). */
   seat?: boolean;
   /** Its economy (Phase 7): what it has in store and how its workers are split (both in units). */

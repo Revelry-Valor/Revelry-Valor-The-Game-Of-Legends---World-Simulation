@@ -1,4 +1,5 @@
 import type { Government, Library } from '../core/library';
+import { manaAtPlace } from './mana';
 import { transferAll } from './land';
 import { cultureOf } from './culture';
 import { acceptance } from './cultureChange';
@@ -133,6 +134,9 @@ interface RealmFacts {
   behaviours: Set<string>;
   lifespan: number;
   elders: boolean;
+  /** Mage towers in its towns, and the mana at its capital (Phase 11). */
+  towers: number;
+  capitalMana: number;
   /** Its faith's organization (0–3) and fervour, and whether that faith wants its rulers divine or its clergy to lead. */
   faithOrg: number;
   fervour: number;
@@ -163,6 +167,11 @@ function facts(c: NationContext, clan: Clan): RealmFacts {
     behaviours: new Set(cu?.behaviours ?? []),
     lifespan: c.lifespan(clan.race),
     elders: !!cu?.traditions.some((t) => t.id === 'ancestor-reverence' && t.level >= 0),
+    towers: towns.filter((s) => s.tower !== undefined).length,
+    capitalMana: (() => {
+      const at = towns.find((s) => s.id === clan.realm?.capital) ?? [...towns].sort((a, b) => b.pop - a.pop)[0];
+      return at ? manaAtPlace(sim, c.env, at.x, at.y) : 0;
+    })(),
     ...(() => {
       // The realm's faith: its capital's (or its greatest town's).
       const at = towns.find((s) => s.id === clan.realm?.capital) ?? [...towns].sort((a, b) => b.pop - a.pop)[0];
@@ -208,10 +217,12 @@ function fit(f: RealmFacts, id: string): number {
       return S >= 4 && f.pop >= 3000 ? 1.4 + plus(e === 'Egalitarian', 1.4) : 0;
     case 'elective-monarchy':
       return S >= 4 && f.towns.filter((s) => s.pop >= 1000).length >= 3 ? 2 : 0;
+    case 'magocracy':
+      // Dense mana and mage towers (Phase 11): ruled by its mages.
+      return f.towers >= 1 && f.capitalMana >= 0.5 && S >= 2 ? 2 + 0.3 * Math.min(4, f.towers) + 1.2 * (f.capitalMana - 0.5) + plus(e === 'Mystic', 0.8) + plus(e === 'Inventive', 0.2) : 0;
     case 'theocracy':
       // A fervent faith with a head of faith, in a settled realm: its clergy may rule.
       return f.faithOrg >= 3 && f.fervour >= 0.65 && S >= 2 ? 2 + 2 * (f.fervour - 0.65) + plus(f.divine, 0.6) + plus(e === 'Spiritual', 0.8) : 0;
-    // Magocracies come with mana (Phase 11); until then only a culture's preference brings them.
     default:
       return 0;
   }
