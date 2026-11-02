@@ -218,3 +218,25 @@ describe('by fresh water: banks, deltas, lake shores', () => {
     expect(f.lakeClosed[0]).toBe(1);
   });
 });
+
+describe('erasing canyons', () => {
+  it('takes a canyon away completely, walls and all, where the eraser goes over it', () => {
+    const canyon: [BrushId, number[], Partial<Stroke>] = ['canyon', [0, 0, 300, 0], { size: 40 }];
+    const before = paint(['land', [0, 0, 300, 0], { size: 400 }], canyon);
+    const after = paint(['land', [0, 0, 300, 0], { size: 400 }], canyon, ['canyon', [0, 0, 300, 0], { size: 60, erase: true }]);
+    const g = { x0: 50, y0: -30, px: 2, w: 100, h: 31 };
+    const a = evaluate(before, g, { ...o, noRelief: true });
+    const b = evaluate(after, g, { ...o, noRelief: true });
+    let had = 0;
+    let left = 0;
+    for (let k = 0; k < g.w * g.h; k++) {
+      // Only within the eraser (well inside its edge).
+      const y = g.y0 + Math.floor(k / g.w) * g.px;
+      if (Math.abs(y) > 20) continue;
+      if (a.canyon[k] > 0.1 || a.face[k] > 0.1) had++;
+      if (b.canyon[k] > 0.01 || b.face[k] > 0.01) left++;
+    }
+    expect(had).toBeGreaterThan(100);
+    expect(left).toBe(0);
+  });
+});

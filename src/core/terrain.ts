@@ -634,6 +634,20 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
         const ero = s.erosion ?? 0.4;
         lineStroke(s, g, o, (i, x, y, d, t) => {
           let e = d / r;
+          if (er) {
+            // The eraser: a plain round brush, clearing fully inside and fading only at its very
+            // edge; the rock walls go with the cut (they are kept apart from it, so they must be
+            // cleared too, or the walls of an erased canyon stay standing).
+            if (e >= 1) return;
+            const k = smooth(0.75, 1, e);
+            buf[i] *= k;
+            cut[i] *= k;
+            cutSmooth[i] *= k;
+            f.face[i] *= k;
+            f.shadow[i] *= k;
+            f.scree[i] *= k;
+            return;
+          }
           if (canyon) {
             // Side canyons notch the rim; terraced walls step down to a flat floor.
             // Side canyons cut back into the rim, branching.
@@ -649,12 +663,6 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
             e += s.roughness * 0.6 * fbm(x, y, r * 2, px, seed);
           }
           if (e >= 1) return;
-          if (er) {
-            buf[i] *= e;
-            cut[i] *= e;
-            cutSmooth[i] *= e;
-            return;
-          }
           const c = 1 - smooth(0.85, 1, e);
           buf[i] = Math.max(buf[i], c * str);
           let depth: number;
