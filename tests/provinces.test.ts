@@ -144,14 +144,14 @@ describe('provinces', () => {
     let same = 0;
     for (let k = 0; k < pm.label.length - 3 * w; k++) {
       // A straight run north–south: land, big river, land.
-      if (!g.land[k] || g.river[k] || g.lake[k]) continue;
+      if (!g.land[k] || g.river[k] === 2 || g.lake[k]) continue;
       let q = k + w;
       let wide = 0;
       while (q < pm.label.length && g.river[q] === 2 && wide < 6) {
         q += w;
         wide++;
       }
-      if (!wide || q >= pm.label.length || !g.land[q] || g.river[q] || g.lake[q]) continue;
+      if (!wide || q >= pm.label.length || !g.land[q] || g.river[q] === 2 || g.lake[q]) continue;
       crossings++;
       if (pm.label[k] === pm.label[q]) same++;
     }

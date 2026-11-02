@@ -1,6 +1,7 @@
 import { nearestPoint, type Climate } from './climate';
 import { fbm } from './noise';
 import { sketchCourse, type Surface } from './paint';
+import { flowAt, riverNetwork, widthForFlow } from './water';
 import type { WorldSettings } from './settings';
 import { evaluate, type Grid } from './terrain';
 
@@ -91,7 +92,8 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid, big
       else if (f.ravine[q] > 0.5) out.gorge[k] = 2;
       else if (f.face[q] > 0.25) out.cliff[k] = 1;
       if (f.water[q] > 0.5 && f.waterKind[q] === 2) out.lake[k] = 1;
-      else if (f.water[q] > 0.3 && f.waterKind[q] === 1) out.river[k] = f.riverWidth[q] >= bigRiverKm ? 2 : 1;
+      // A river here (as drawn: a little wider than life, so it shows); the big ones are traced below.
+      else if (f.water[q] > 0.3 && f.waterKind[q] === 1) out.river[k] = 1;
     }
   }
   // Cliffs, ravines and canyons narrower than the grid: their painted lines, traced unbroken.
@@ -142,6 +144,45 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid, big
           const ki = k % w;
           const kj = (k / w) | 0;
           if (li !== ki && lj !== kj) mark(lj * w + ki);
+        }
+        last = k;
+      }
+    }
+  }
+  // Big rivers (at least `bigRiverKm` wide) traced from their own course at their true width,
+  // never less than one point and unbroken point to point: the river itself, not the drawing of it.
+  const wet = (k: number) => {
+    if (k >= 0 && out.land[k] && !out.lake[k]) out.river[k] = 2;
+  };
+  for (const r of riverNetwork(surface).values()) {
+    const p = r.stroke.pts;
+    let last = -1;
+    for (let q = 0; q + 3 < p.length; q += 2) {
+      const len = Math.hypot(p[q + 2] - p[q], p[q + 3] - p[q + 1]);
+      const steps = Math.max(1, Math.ceil(len / (px * 0.3)));
+      for (let t = 0; t <= steps; t++) {
+        const width = widthForFlow(flowAt(r, r.cum[q / 2] + (len * t) / steps));
+        if (width < bigRiverKm) {
+          last = -1;
+          continue;
+        }
+        const x = p[q] + ((p[q + 2] - p[q]) * t) / steps;
+        const y = p[q + 1] + ((p[q + 3] - p[q + 1]) * t) / steps;
+        const k = at(x, y);
+        if (k < 0 || k === last) continue;
+        wet(k);
+        if (last >= 0) {
+          const li = last % w;
+          const lj = (last / w) | 0;
+          const ki = k % w;
+          const kj = (k / w) | 0;
+          if (li !== ki && lj !== kj) wet(lj * w + ki);
+        }
+        // A river wider than a point covers the points within its banks.
+        const half = width / 2;
+        if (half > px * 0.5) {
+          const R = Math.ceil(half / px);
+          for (let dj = -R; dj <= R; dj++) for (let di = -R; di <= R; di++) if ((di * di + dj * dj) * px * px <= half * half) wet(at(x + di * px, y + dj * px));
         }
         last = k;
       }

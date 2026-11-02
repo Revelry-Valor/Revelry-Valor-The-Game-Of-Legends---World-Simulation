@@ -330,12 +330,9 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
   // times how wide it is here (a little room either side).
   const zoneWidth = new Float64Array(Z).fill(1);
   {
-    // How wide each strip zone is: its area over its length (half its edge points).
+    // How wide each strip zone is: its area over its length (half its edge, counted in sides of points).
     const edge = new Int32Array(Z);
-    for (let k = 0; k < n; k++) for (const m of nb(k, buf)) if (zone[m] !== zone[k]) {
-      edge[zone[k]]++;
-      break;
-    }
+    for (let k = 0; k < n; k++) for (const m of nb(k, buf)) if (zone[m] !== zone[k]) edge[zone[k]]++;
     for (let z = 0; z < Z; z++) if (strip(zm[z], zg[z])) zoneWidth[z] = Math.max(1, (2 * zoneSize[z]) / Math.max(1, edge[z]));
   }
   const target = (z: number) => (strip(zm[z], zg[z]) ? Math.sqrt(sizeFor(zm[z], zg[z])) * zoneWidth[z] : sizeFor(zm[z], zg[z]));
@@ -380,7 +377,10 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
     // Updating: new seeds only where provinces would otherwise come out over twice the size.
     if (have > 0 && size / have <= 2 * target(z)) continue;
     // About one seed to each cell of a lattice a province across (jittered), where the zone fills enough of the cell.
-    const sp = Math.sqrt(target(z));
+    // Seeds a province apart: across an area, or along a strip (a river, canyon or ravine).
+    const isStrip = strip(zm[z], zg[z]);
+    const sp = isStrip ? Math.sqrt(sizeFor(zm[z], zg[z])) : Math.sqrt(target(z));
+    const enough = isStrip ? 0.35 * sp * zoneWidth[z] : 0.35 * sp * sp;
     const offX = hash(z, 1, 7) * sp;
     const offY = hash(z, 2, 7) * sp;
     const cells = new Map<number, { count: number; best: number; bd: number }>();
@@ -415,7 +415,7 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
       seedPix.push(k);
       seedId.push(nextId++);
     };
-    for (const c of list) if (c.count >= 0.35 * sp * sp && !taken.has(c.best) && farFromOld(c.best)) sow(c.best);
+    for (const c of list) if (c.count >= enough && !taken.has(c.best) && farFromOld(c.best)) sow(c.best);
     for (const c of list) {
       if (zoneSeeds[z].length && size / zoneSeeds[z].length <= 2 * target(z)) break;
       if (!taken.has(c.best) && farFromOld(c.best)) sow(c.best);
@@ -569,7 +569,9 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
     return out;
   };
   const held = (l: number) => l >= 0;
-  const chains = traceChains(label, w, h, wrap, held, OFF_MAP, 0.9);
+  // Less straightening beside a narrow strip (a river province is a point or two wide), so its two banks never cross.
+  const narrow = (l: number) => l >= 0 && (provinces[l].kind === 'river' || provinces[l].terrain === 'Ravine');
+  const chains = traceChains(label, w, h, wrap, held, OFF_MAP, (a, b) => (narrow(a) || narrow(b) ? 0.35 : 0.9));
   const ringMap = assembleRings(chains, w, wrap, held);
   const borders = chains.map((c) => ({ pts: toKm(c.pts), a: c.left, b: c.right }));
   const rings = provinces.map((_, l) => (ringMap.get(l) ?? []).map(toKm));

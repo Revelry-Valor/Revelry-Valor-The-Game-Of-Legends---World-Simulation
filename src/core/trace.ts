@@ -13,8 +13,8 @@ export interface Chain {
   right: number;
 }
 
-/** Every edge between two different labels (at least one `held`), chained junction to junction and smoothed. Off the grid (north, south, and east–west unless it wraps) is `outside`; `tol` is how far (grid units) a staircase may be straightened. */
-export function traceChains(label: Int32Array, W: number, H: number, wrap: boolean, held: (l: number) => boolean, outside: number, tol = 0.7): Chain[] {
+/** Every edge between two different labels (at least one `held`), chained junction to junction and smoothed. Off the grid (north, south, and east–west unless it wraps) is `outside`; `tol` is how far (grid units) a staircase may be straightened (or, per chain, from the labels either side). */
+export function traceChains(label: Int32Array, W: number, H: number, wrap: boolean, held: (l: number) => boolean, outside: number, tol: number | ((left: number, right: number) => number) = 0.7): Chain[] {
   const L = (X: number, Y: number) => {
     if (Y < 0 || Y >= H) return outside;
     if (X < 0 || X >= W) {
@@ -98,7 +98,7 @@ export function traceChains(label: Int32Array, W: number, H: number, wrap: boole
     const pts: [number, number][] = [];
     for (let i = back.length - 2; i >= 0; i -= 2) pts.push([back[i], back[i + 1]]);
     for (let i = 0; i < fwd.length; i += 2) pts.push([fwd[i], fwd[i + 1]]);
-    chains.push({ pts: smooth(simplify(pts, tol)), left, right });
+    chains.push({ pts: smooth(simplify(pts, typeof tol === 'number' ? tol : tol(left, right))), left, right });
   }
   return chains;
 }

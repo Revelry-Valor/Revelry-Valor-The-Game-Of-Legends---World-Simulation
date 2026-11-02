@@ -1217,6 +1217,12 @@ Like Crusader Kings 3: the world is split into provinces, and much of the simula
   - The fine grid is fine enough for the smallest size set.
   - All sizes are saved with the provinces; changing any of them calls for new provinces.
 
+**Fixed after testing (river provinces hug the river):**
+- Big rivers are traced from their own course at their true width (never less than one point, unbroken point to point), not from the river as drawn on the map, which is widened so it shows at any zoom.
+- River, canyon and ravine seeds are spaced a province's length apart along the strip.
+- A strip's width is measured from its edge sides, so a one-point river is one point wide.
+- Borders beside a river or ravine province are straightened less, so its two banks never cross.
+
 ### 8.7 Settlements
 - Farmland is not drawn on the map; it is simulated inside settlements.
 - Settlements work the features within their reach (ore from mountains, timber from forests, fish from upwelling coasts, rift resources) and trade through markets, routes, caravans and guilds.
