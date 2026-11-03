@@ -28,6 +28,7 @@ import type { ProvinceMap } from '../core/provinces';
 import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
 import { manaAtPlace, manaLinesNow, manaNow } from '../sim/mana';
 import { CORRUPTION_RIFT, HOLD_NAMES, type Rift } from '../sim/rifts';
+import { tideAt, type Horde } from '../sim/monsters';
 import { manaWord } from '../core/mana';
 import type { ManaState } from './mana';
 import type { InfoItem, ResourceView } from './info';
@@ -717,6 +718,52 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.strokeStyle = hs.held ? '#f2c230' : 'rgba(60,60,60,0.8)';
           g.stroke();
         }
+        // Monster tides: the provinces they cover, shaded a dark, angry red.
+        const pmap = d.provinces();
+        if (pmap && e.prov.real) for (const t of s.tides ?? []) {
+          g.save();
+          g.beginPath();
+          for (const id of t.provinces) {
+            const pi = e.prov.ids.indexOf(id);
+            for (const r of pmap.rings[pi] ?? []) {
+              for (let i = 0; i < r.length; i += 2) {
+                const [px, py] = at(r[i], r[i + 1], c);
+                if (i) g.lineTo(px, py);
+                else g.moveTo(px, py);
+              }
+              g.closePath();
+            }
+          }
+          g.fillStyle = 'rgba(120,10,30,0.42)';
+          g.fill('evenodd');
+          g.strokeStyle = 'rgba(70,0,15,0.9)';
+          g.lineWidth = 1.5;
+          g.stroke();
+          g.restore();
+        }
+        // Hordes: a black shield with a red alpha's mark, and its name.
+        for (const hd of s.hordes ?? []) {
+          const [hx, hy] = at(hd.x, hd.y, c);
+          g.beginPath();
+          g.arc(hx, hy, 8, 0, Math.PI * 2);
+          g.fillStyle = '#1a0a0a';
+          g.fill();
+          g.strokeStyle = '#ff3a3a';
+          g.lineWidth = 2;
+          g.stroke();
+          g.beginPath();
+          g.moveTo(hx - 4, hy - 4);
+          g.lineTo(hx + 4, hy + 4);
+          g.moveTo(hx + 4, hy - 4);
+          g.lineTo(hx - 4, hy + 4);
+          g.stroke();
+          g.font = 'bold 11px system-ui, sans-serif';
+          g.fillStyle = '#ffd0d0';
+          g.strokeStyle = 'rgba(0,0,0,0.8)';
+          g.lineWidth = 3;
+          g.strokeText(hd.alpha, hx + 11, hy + 4);
+          g.fillText(hd.alpha, hx + 11, hy + 4);
+        }
         // Rifts: a swirling violet eye, bigger the stronger; ringed by how it is held (dashed while short-lived).
         for (const r of s.rifts ?? []) {
           const [rx, ry] = at(r.x, r.y, c);
@@ -1030,6 +1077,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         }
       }
       for (const r of s.rifts ?? []) if (Math.hypot(r.x - x, r.y - y) < pxKm * 12) push('Rift', riftLine(r));
+      if (env) {
+        const tide = tideAt(s, env, cellOf(x, y));
+        if (tide) push('Monsters', `${tide.name}: about ${Math.round(tide.strength)} monsters across ${tide.provinces.length} province${tide.provinces.length === 1 ? '' : 's'}`);
+      }
+      for (const hd of s.hordes ?? []) if (Math.hypot(hd.x - x, hd.y - y) < pxKm * 12) push('Monsters', hordeLine(hd));
       if (s.corruption && env) {
         const k = cellOf(x, y);
         if (k >= 0 && s.corruption[k] >= 0.05) push('Corruption', `${Math.round(s.corruption[k] * 100)}%${s.corruption[k] >= CORRUPTION_RIFT ? ' (rifts may open)' : ''}`);
@@ -1536,6 +1588,10 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       partners.length ? h('div', { class: 'muted' }, `Trades with: ${partners.join(', ')}.`) : null,
     ].filter(Boolean) as HTMLElement[];
   };
+  const hordeLine = (hd: Horde) => {
+    const target = sim?.settlements.find((q) => q.id === hd.target);
+    return `${hd.name.charAt(0).toUpperCase() + hd.name.slice(1)}: about ${Math.round(hd.strength)} monsters${target ? `, marching on ${target.name}` : ''}${hd.razed.length ? `; has razed ${hd.razed.join(', ')}` : ''}`;
+  };
   const riftLine = (r: Rift) => {
     const holder = r.holder >= 0 ? clanOf(r.holder) : undefined;
     const got = Object.entries(r.lastYield).filter(([, v]) => v >= 0.5).map(([id, v]) => `${Math.round(v)} ${resInfoOf(env!, id)?.name.toLowerCase() ?? id}`);
@@ -1741,6 +1797,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       h('h3', {}, 'Rifts'),
       h('p', { class: 'muted small' }, 'Rifts open where mana runs dense and nothing draws on it, where corruption runs high, and now and then anywhere; short-lived ones close in a few years. The realm holding the land works them (an encampment, soldiers, or parties) for goods rare or not found in the mortal plane; a rift left alone grows toward breaking. On the map: violet eyes, ringed gold (encampment), red (soldiers), blue (parties) or dark (left alone); dashed while short-lived; a blue drop where fresh water wells up.'),
       h('ul', { class: 'econ-list small' }, ...(s.rifts ?? []).map((r) => h('li', {}, h('span', {}, riftLine(r))))),
+    );
+    if (s.started && ((s.tides ?? []).length || (s.hordes ?? []).length)) parts.push(
+      h('h3', {}, 'Monster tides and hordes'),
+      h('p', { class: 'muted small' }, 'A rift at breaking point with nothing (or too little) holding it breaks: monsters pour out and spread slowly, province by province, besieging and overrunning the towns they reach, while the realms there fight back. After a year and a half alphas come through and lead hordes against the towns round about. On the map: tide provinces shaded dark red; hordes as black shields with their alpha named.'),
+      h('ul', { class: 'econ-list small' },
+        ...(s.tides ?? []).map((t) => h('li', {}, h('span', {}, `${t.name}: about ${Math.round(t.strength)} monsters across ${t.provinces.length} province${t.provinces.length === 1 ? '' : 's'}, since year ${yearOf(t.started)}`))),
+        ...(s.hordes ?? []).map((hd) => h('li', {}, h('span', {}, hordeLine(hd)))),
+      ),
     );
     if (s.started && wars.length) parts.push(h('h3', {}, 'Wars'), h('p', { class: 'muted small' }, 'Settled realms go to war for a reason (a claim, a throne, their faith, vengeance, their own people, or plain conquest). Banners on the map are armies; crossed swords are battles.'), ...wars.map((w) => warCard(w)));
 
@@ -2022,6 +2086,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       }
       if (sim) {
         for (const r of sim.rifts ?? []) if (env.prov.of[cellOf(r.x, r.y)] === index) out.push({ label: 'Rift', value: riftLine(r) });
+        const tide = (sim.tides ?? []).find((t) => t.provinces.includes(P.ids[index]));
+        if (tide) out.push({ label: 'Monsters', value: `Overrun by the ${tide.name}` });
         if (sim.corruption) {
           let cmax = 0;
           for (let q = P.start[index]; q < P.start[index + 1]; q++) cmax = Math.max(cmax, sim.corruption[P.cells[q]]);

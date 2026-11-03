@@ -1,3 +1,4 @@
+import type { Horde, Tide } from './monsters';
 import type { Rift } from './rifts';
 
 /**
@@ -543,6 +544,9 @@ export interface SimState {
   battles?: Battle[];
   /** Rifts open in the world (Phase 11 step 2), and the corruption at each point (0–1). */
   rifts?: Rift[];
+  /** Monster tides out of broken rifts, and the hordes their alphas lead (monsters.ts). */
+  tides?: Tide[];
+  hordes?: Horde[];
   corruption?: Float32Array;
   /** The world's setting for the gods (copied in from the world settings before each run). */
   gods?: { active: boolean; activity: number };

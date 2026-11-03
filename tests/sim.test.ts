@@ -25,6 +25,7 @@ import { acceptance, noteBetween } from '../src/sim/cultureChange';
 import { PK, provAt, setHolder, transferAll } from '../src/sim/land';
 import { manaAtPlace, manaLinesNow, manaNow, manaYear, TOWER_MANA } from '../src/sim/mana';
 import { PERMANENT_MANA, RIFT_KINDS, riftsYear, type Rift } from '../src/sim/rifts';
+import { hordesDay, monstersMonth } from '../src/sim/monsters';
 import { nextWaypoint, provinceRoute, routePlan } from '../src/sim/routes';
 import { generateProvinces } from '../src/core/provinces';
 import { VILLAGE_MAX } from '../src/sim/sim';
@@ -1642,5 +1643,95 @@ describe('rifts', () => {
     const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
     expect(back.rifts?.length).toBe(sim.rifts!.length);
     expect(back.rifts![0].gathered['rift-iron']).toBeCloseTo(held.gathered['rift-iron'], 3);
+  });
+});
+
+describe('rift breaks, monster tides and hordes', () => {
+  const mctx = (sim: SimState) => ({
+    sim,
+    env,
+    lib,
+    rand: testRand,
+    dist: (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by),
+    cellAt: cellOf,
+    log: (text: string, x?: number, y?: number) => sim.events.push({ day: sim.day, text, x, y }),
+    name: () => `N${sim.nextId++}`,
+    lifespan: () => 70,
+    might: () => 1,
+    speed: () => 20,
+  });
+  const spot = (pred: (k: number) => boolean) => {
+    const k = [...env.land.keys()].find((q) => env.land[q] && env.mzone[q] === 0 && pred(q))!;
+    return { x: env.x0 + (k % env.w) * env.step, y: env.y0 + Math.floor(k / env.w) * env.step };
+  };
+  const rift = (x: number, y: number, o: Partial<Rift> = {}): Rift => ({ id: 77, name: 'Test rift', kind: 'ember', x, y, permanent: true, opened: 0, strength: 1, water: false, holder: -1, hold: 'none', gathered: {}, lastYield: {}, ...o });
+  it('breaks a rift with nothing holding it into a monster tide that spreads and overruns towns', () => {
+    const sim = newSim(env, 961);
+    const at = spot((q) => (q % env.w) > 20 && (q % env.w) < env.w - 20);
+    const weak = addDawnCity(sim, env, lib, humanId(), at.x + env.step, at.y, 300, [])!;
+    weak.kind = 'village';
+    weak.warband = 10;
+    sim.rifts = [rift(at.x, at.y)];
+    monstersMonth(mctx(sim));
+    expect(sim.tides?.length).toBe(1);
+    expect(sim.events.some((e) => e.text.includes('broke with nothing to hold it'))).toBe(true);
+    for (let m = 0; m < 24; m++) {
+      sim.day += 30;
+      monstersMonth(mctx(sim));
+    }
+    expect(sim.tides![0]?.provinces.length ?? 0).toBeGreaterThan(1);
+    expect(weak.ruined).toBe(true);
+    expect(sim.events.some((e) => e.text.includes('overrun'))).toBe(true);
+  });
+  it('lets a strong encampment hold a breaking rift, pushing it back', () => {
+    const sim = newSim(env, 962);
+    const at = spot(() => true);
+    const town = addDawnCity(sim, env, lib, humanId(), at.x + env.step * 2, at.y, 3000, [])!;
+    town.warband = 2500;
+    const r = rift(at.x, at.y, { holder: town.clan, hold: 'soldiers' });
+    sim.rifts = [r];
+    monstersMonth(mctx(sim));
+    expect(sim.tides?.length ?? 0).toBe(0);
+    expect(r.strength).toBeLessThan(1);
+    expect(town.warband).toBeLessThan(2500);
+  });
+  it('sends hordes out of a lasting tide that raze towns, and lets realms beat a tide back until it ebbs', () => {
+    const sim = newSim(env, 963);
+    const at = spot((q) => (q % env.w) > 30 && (q % env.w) < env.w - 30);
+    sim.rifts = [rift(at.x, at.y)];
+    monstersMonth(mctx(sim));
+    const tide = sim.tides![0];
+    tide.strength = 1500;
+    tide.nextHorde = sim.day;
+    // A town some way off, in the horde's reach.
+    const far = addDawnCity(sim, env, lib, humanId(), at.x + 200, at.y, 400, [])!;
+    far.warband = 20;
+    sim.day += 30;
+    monstersMonth(mctx(sim));
+    expect(sim.hordes?.length).toBe(1);
+    const horde = sim.hordes![0];
+    for (let d = 0; d < 40 && !far.ruined; d++) hordesDay(mctx(sim));
+    expect(far.ruined).toBe(true);
+    expect(horde.razed).toContain(far.name);
+    // Saved with the world.
+    const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(back.tides?.length).toBe(sim.tides!.length);
+    expect(back.hordes?.length).toBe(sim.hordes!.length);
+    // A strong realm holding the land beats a small tide back until it ebbs.
+    const sim2 = newSim(env, 964);
+    sim2.rifts = [rift(at.x, at.y, { permanent: false })];
+    monstersMonth(mctx(sim2));
+    const t2 = sim2.tides![0];
+    t2.strength = 200;
+    sim2.rifts = [];
+    const guard = addDawnCity(sim2, env, lib, humanId(), at.x + 150, at.y, 4000, [])!;
+    guard.warband = 3000;
+    for (const id of t2.provinces) setHolder(sim2, env, env.prov.ids.indexOf(id), guard.clan);
+    for (let m = 0; m < 24 && sim2.tides!.length; m++) {
+      sim2.day += 30;
+      monstersMonth(mctx(sim2));
+    }
+    expect(sim2.tides!.length).toBe(0);
+    expect(sim2.events.some((e) => e.text.includes('ebbed away'))).toBe(true);
   });
 });

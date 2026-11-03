@@ -37,6 +37,8 @@ export interface PackedSim {
   armies?: SimState['armies'];
   battles?: SimState['battles'];
   rifts?: SimState['rifts'];
+  tides?: SimState['tides'];
+  hordes?: SimState['hordes'];
   /** Runs of corruption in hundredths. */
   corruption?: number[];
   clans: SimState['clans'];
@@ -123,6 +125,8 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     armies: sim.armies ?? [],
     battles: sim.battles ?? [],
     rifts: sim.rifts ?? [],
+    tides: sim.tides ?? [],
+    hordes: sim.hordes ?? [],
     ...(sim.corruption ? { corruption: runs(Float32Array.from(sim.corruption, (v) => Math.round(v * 100))) } : {}),
     clans: sim.clans,
     sorties: sim.sorties,
@@ -203,6 +207,8 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     armies: Array.isArray(p.armies) ? p.armies : [],
     battles: Array.isArray(p.battles) ? p.battles : [],
     rifts: Array.isArray(p.rifts) ? p.rifts : [],
+    tides: Array.isArray(p.tides) ? p.tides : [],
+    hordes: Array.isArray(p.hordes) ? p.hordes : [],
     ...(() => {
       const c = new Float32Array(n);
       return p.corruption && unruns(p.corruption, n, c) ? { corruption: Float32Array.from(c, (v) => v / 100) } : {};

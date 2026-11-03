@@ -378,6 +378,19 @@ How long the rift will last and how strong it is decide how often it must be loo
   - A province's card shows its rift and corruption.
   - Rifts and corruption are saved with the world.
 
+**Built (step 3): rift breaks, monster tides and hordes**
+
+- *Breaks:* once a year a rift at full strength is tested. A breach wave (about 320 for a permanent rift, 240 for a short-lived one) meets whatever holds it: an encampment or soldiers fight it with part of the holder's nearby warbands. If they win, the rift drops back to 75%. If they lose, or nothing holds it, the rift breaks and a **monster tide** begins.
+- *Monster kinds:* each rift kind has its own spawn, brutes and alphas (Ember, Crystal, Verdant, Deep, Tide), with their own might and speed.
+- *Tides:*
+  - A tide feeds from its rift while the rift stays strong, and slowly wears down otherwise. It loses provinces when it gets too thin, and is capped by its size.
+  - It spreads one land province at a time, mostly toward the nearest town.
+  - Towns in tide provinces are besieged every month; a small town that loses is overrun and left in ruins.
+  - Every three months the realms holding those provinces fight back with half the warbands of their nearby towns.
+  - When a tide falls below about 40 monsters it ebbs away and the rift settles at half strength.
+- *Hordes:* a year and a half after a break, and every two years after, an alpha leads part of the tide out as a horde. It marches on the nearest town within about 435 miles, fights it, and razes it if it wins. A horde is destroyed when its alpha falls or it dwindles.
+- *Map and panels:* tide provinces are shaded dark red; hordes are black shields with a red cross and their alpha's name. The Peoples tab lists tides and hordes, and the hover readout and province card show monsters. Tides and hordes are saved with the world.
+
 ## 7. Climate system
 
 Climate is built as a fixed chain of rule-based passes, run once for summer and once for winter, then the two seasons are compared to assign climate zones. The method follows Worldbuilding Pasta's climate series (Part VIa, Part VIb).

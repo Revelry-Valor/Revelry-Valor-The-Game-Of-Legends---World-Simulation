@@ -44,6 +44,8 @@ export interface Rift {
   hold: RiftHold;
   /** The last year a party went in. */
   partyYear?: number;
+  /** The last time it was tested at full strength (monsters.ts). */
+  lastStand?: number;
   /** Goods gathered from it in all (by resource id), and last year. */
   gathered: Record<string, number>;
   lastYield: Record<string, number>;

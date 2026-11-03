@@ -1,4 +1,5 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
+import { hordesDay, monstersMonth } from './monsters';
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
@@ -522,6 +523,8 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
     caravansDay(tradeContext(sim, env, lib, info));
     spiesDay({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
     if (sim.armies?.length) armiesDay(warContext(sim, env, lib, info));
+    // Monster hordes on the march (monsters.ts).
+    if (sim.hordes?.length) hordesDay(warContext(sim, env, lib, info));
     sim.day++;
     if (sim.day % DAYS_PER_MONTH === 0) monthly(sim, env, lib, info);
     if (sim.day % DAYS_PER_YEAR === 0) yearly(sim, env, lib, info);
@@ -924,6 +927,8 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
   }
   // Wars: weariness, peace, armies raised (wars.ts).
   if (sim.wars?.some((w) => w.ended === undefined)) warsMonth(warContext(sim, env, lib, info));
+  // Rifts at breaking point, monster tides and their hordes (monsters.ts).
+  if (sim.rifts?.length || sim.tides?.length) monstersMonth({ ...warContext(sim, env, lib, info), name: () => makeName(sim, lib, '') });
 }
 
 /** What wars and armies need: the realms' context, and each people's strength and marching pace. */
