@@ -219,8 +219,8 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface, provinces:
     }
   }
   const { res, resInfo } = resources(cl, lib.resources, { mzone, coast, fresh, volcanic });
-  // The land's own mana: natural nodes (volcanoes, whirlpools, the poles, highs), the world tree's roots and anchor.
-  const poles = { widthKm: w * step, heightKm: h * step, north: cl.lat[0] >= 84, south: cl.lat[h - 1] <= -84 };
+  // The land's own mana: natural nodes (volcanoes, whirlpools, the poles on a globe, highs), the world tree's roots and anchor.
+  const poles = { widthKm: w * step, heightKm: h * step, north: !!cl.globe && cl.lat[0] >= 84, south: !!cl.globe && cl.lat[h - 1] <= -84 };
   const manaLand = { nodes: naturalNodes(surface, poles), roots: rootLines(surface, cl.wrapKm), anchor: anchorOf(surface) };
   const manaBase = manaField({ x0: cl.x0, y0: cl.y0, step, w, h, wrapKm: cl.wrapKm }, [...leyLines(manaLand.nodes, cl.wrapKm), ...manaLand.roots], manaLand.nodes, manaLand.anchor);
   // Mana crystals are richest where mana is dense.

@@ -109,6 +109,8 @@ export interface Climate {
   w: number;
   h: number;
   wrapKm: number;
+  /** A globe map (the poles are mana nodes only on a globe). */
+  globe?: boolean;
   /** Latitude of each row. */
   lat: Float32Array;
   land: Uint8Array;
@@ -287,7 +289,7 @@ export function computeClimate(surface: Surface, s: WorldSettings): Climate {
   const zone = zones(ctx, summer, winter);
   const cover = groundCover(ctx, summer, winter, zone);
   const reef = reefs(ctx, surface, summer, winter);
-  const cl: Climate = { x0: stepX / 2, y0: stepY / 2, step: stepX, w, h, wrapKm: wrap ? W : 0, lat, land, ground, height, distSea, summer, winter, zone, cover, reef };
+  const cl: Climate = { x0: stepX / 2, y0: stepY / 2, step: stepX, w, h, wrapKm: wrap ? W : 0, globe: s.mapType === 'globe', lat, land, ground, height, distSea, summer, winter, zone, cover, reef };
   for (const se of [summer, winter]) {
     flowPaths(se);
     delete se.major;
