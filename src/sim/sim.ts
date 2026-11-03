@@ -1,4 +1,5 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
+import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
 import { PLANT_K, type Env } from './env';
@@ -1012,6 +1013,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   techYear(techContext(sim, env, lib));
   // Mana: towns on strong mana that chart ley lines raise mage towers, new nodes (mana.ts).
   manaYear({ sim, env, lib, rand: () => rand(sim), log: (text, x, y) => log(sim, text, x, y) });
+  // Rifts: corruption, rifts opening and closing, who holds them and how, what they give (rifts.ts).
+  riftsYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y), name: () => makeName(sim, lib, sim.clans[Math.floor(rand(sim) * Math.max(1, sim.clans.length))]?.culture ?? '') });
   // Cultures: peoples without one (older saves) grow their folk culture; then traditions and behaviours change (culture.ts).
   for (const g of [...sim.tribes, ...sim.settlements.filter((q) => !q.ruined)]) {
     if (g.culture && cultureOf(sim, g.culture)) continue;
@@ -1071,7 +1074,8 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
   // A village needs a way to feed itself: farming, herding, or fishing by water.
   const clan = sim.clans.find((c) => c.id === t.clan);
   const wk = cellOf(env, t.winter.x, t.winter.y);
-  if (!canSettle((id) => clanKnows(lib, clan, id), wk >= 0 && (env.coast[wk] === 1 || env.fresh[wk] === 1))) return false;
+  const spring = riftSpringNear(sim, (ax, ay, bx, by) => dist(env, ax, ay, bx, by), t.winter.x, t.winter.y);
+  if (!canSettle((id) => clanKnows(lib, clan, id), wk >= 0 && (env.coast[wk] === 1 || env.fresh[wk] === 1 || spring))) return false;
   const k = cellOf(env, t.winter.x, t.winter.y);
   if (k < 0 || !env.land[k] || !passable(env, ri, k)) return false;
   if (sim.settlements.some((s) => !s.ruined && dist(env, s.x, s.y, t.winter.x, t.winter.y) < ri.range * 3)) return false;
@@ -1127,7 +1131,10 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       if (sim.settlements.some((o) => dist(env, o.x, o.y, x, y) < R * 1.3)) continue;
       // Better in a province of its own (a new town needs a province without one); others' land worse.
       const pk = provAt(env, x, y);
-      const s = liveScore(env, ri, k) - (sim.owner[k] >= 0 && sim.owner[k] !== st.clan ? 0.5 : 0) + (seatOf.has(pk) ? -0.3 : 0.3);
+      // Rifts draw settlers: their wealth, and their springs.
+      const pull = riftPull(sim, (ax, ay, bx, by) => dist(env, ax, ay, bx, by), x, y);
+      if (pull < 0) continue;
+      const s = liveScore(env, ri, k) - (sim.owner[k] >= 0 && sim.owner[k] !== st.clan ? 0.5 : 0) + (seatOf.has(pk) ? -0.3 : 0.3) + pull;
       if (!spot || s > spot.s) spot = { x, y, s };
     }
     const clan = sim.clans.find((c) => c.id === st.clan);

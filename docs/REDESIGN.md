@@ -345,6 +345,39 @@ How long the rift will last and how strong it is decide how often it must be loo
   - **Magocracy** fits a realm with at least one tower and two towns whose capital stands on mana of 50% or more, more so for Mystic peoples.
   - Settlement cards show their tower.
 
+**Built (step 2: rifts)** (src/sim/rifts.ts):
+- *Opening* (once a year):
+  - A **permanent** rift may open on mana of 75% or more, away from any town (about 50 miles) and off mountains: dense mana that nothing draws on.
+  - **Short-lived** rifts open on mana of 60% or more, where corruption reaches 50%, and now and then anywhere (about one year in fifty). They last one to five years.
+  - Rifts keep about 190 miles apart.
+- *Corruption:*
+  - It builds where mana is drawn on: around mage towers, and around towns that work mana crystals or run mana engines (about 75 miles).
+  - It also builds around open rifts (about 95 miles), the more the stronger the rift.
+  - It fades by 7% a year.
+  - It shows under the cursor and on the province card.
+- *Kinds* (each with what it gives at full working, in units a year):
+  - Ember: rift iron, obsidian, sulfur.
+  - Crystal: mana crystals, gems.
+  - Verdant: herbs, exotic wood, honey, some mana crystals.
+  - Deep: rift iron, mana crystals, silver, gold.
+  - Tide: pearls, salt, mana crystals; always a spring.
+
+  Some kinds release **fresh water**: a spring settlers can live by.
+- *Holding:* the realm holding the rift's province chooses each year:
+  - an **encampment**, if a town of 300 or more is within about 95 miles and the rift is under 70% strength;
+  - **soldiers**, for a settled realm within about 190 miles of a strong rift;
+  - **parties**, within about 220 miles, going in every year or two;
+  - or **nothing**.
+
+  What is gathered goes to the holder's nearest town. Rift iron and mana crystals need **Rift lore** to bring out.
+- *Strength:* a rift grows each year, faster on denser mana (permanent about 0.035–0.05, short-lived about 0.07–0.1). An encampment takes off 0.10, soldiers 0.16, and a party 0.08 in the year it goes. At full strength a rift is at breaking point; breaks come in step 3.
+- *The rift economy:* new villages prefer spots within about 150 miles of a rift (springs most of all), but never on top of one. A rift's spring counts as fresh water for settling. Rift goods go into the towns' stores, and from there to market and trade.
+- *Map and panels:*
+  - Rifts are violet eyes, bigger the stronger and red-hot at breaking point. The ring shows how each is held: gold for an encampment, red for soldiers, blue for parties, dark when left alone. Short-lived rifts are dashed, and a blue drop marks a spring.
+  - The Peoples tab lists every rift (kind, strength, holder, hold, last year's goods).
+  - A province's card shows its rift and corruption.
+  - Rifts and corruption are saved with the world.
+
 ## 7. Climate system
 
 Climate is built as a fixed chain of rule-based passes, run once for summer and once for winter, then the two seasons are compared to assign climate zones. The method follows Worldbuilding Pasta's climate series (Part VIa, Part VIb).

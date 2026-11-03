@@ -23,7 +23,7 @@ export const INFO_GROUPS: { name: string; labels: string[] }[] = [
   { name: 'Peoples', labels: ['Tribe', 'Settlement', 'Realm'] },
   { name: 'War', labels: ['Army', 'Battle', 'Spy'] },
   { name: 'Faith', labels: ['Holy site'] },
-  { name: 'Mana', labels: ['Mana'] },
+  { name: 'Mana and rifts', labels: ['Mana', 'Rift', 'Corruption'] },
   { name: 'Travel and trade', labels: ['Way', 'Crossing', 'Caravan'] },
   { name: 'Resources and beasts', labels: ['Resource', 'Beast'] },
 ];

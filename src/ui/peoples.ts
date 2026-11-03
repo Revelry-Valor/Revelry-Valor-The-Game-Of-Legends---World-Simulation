@@ -27,6 +27,7 @@ import { assembleRings } from '../core/trace';
 import type { ProvinceMap } from '../core/provinces';
 import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
 import { manaAtPlace, manaLinesNow, manaNow } from '../sim/mana';
+import { CORRUPTION_RIFT, HOLD_NAMES, type Rift } from '../sim/rifts';
 import { manaWord } from '../core/mana';
 import type { ManaState } from './mana';
 import type { InfoItem, ResourceView } from './info';
@@ -716,6 +717,30 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.strokeStyle = hs.held ? '#f2c230' : 'rgba(60,60,60,0.8)';
           g.stroke();
         }
+        // Rifts: a swirling violet eye, bigger the stronger; ringed by how it is held (dashed while short-lived).
+        for (const r of s.rifts ?? []) {
+          const [rx, ry] = at(r.x, r.y, c);
+          const rad = 6 + 6 * r.strength;
+          const grad = g.createRadialGradient(rx, ry, 1, rx, ry, rad);
+          grad.addColorStop(0, '#fff2ff');
+          grad.addColorStop(0.35, r.strength >= 1 ? '#ff3a6a' : '#c56cff');
+          grad.addColorStop(1, 'rgba(60,10,90,0.85)');
+          g.beginPath();
+          g.arc(rx, ry, rad, 0, Math.PI * 2);
+          g.fillStyle = grad;
+          g.fill();
+          g.setLineDash(r.permanent ? [] : [3, 3]);
+          g.lineWidth = 2;
+          g.strokeStyle = r.hold === 'encampment' ? '#f2c230' : r.hold === 'soldiers' ? '#d23a2a' : r.hold === 'parties' ? '#4fb3e8' : 'rgba(20,10,30,0.9)';
+          g.stroke();
+          g.setLineDash([]);
+          if (r.water) {
+            g.beginPath();
+            g.arc(rx + rad * 0.8, ry + rad * 0.8, 3, 0, Math.PI * 2);
+            g.fillStyle = '#5fc4ef';
+            g.fill();
+          }
+        }
         // Trade routes: faint lines between trading settlements, bolder the more they are used; caravans on them.
         if (showTrade) {
           g.setLineDash([5, 4]);
@@ -1003,6 +1028,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           const w = clanOf(b.winner);
           push('Battle', `${b.name}, year ${yearOf(b.day)}: ${w ? realmName(lib(), w) : '?'} won (${b.a.lost} and ${b.b.lost} fell)`);
         }
+      }
+      for (const r of s.rifts ?? []) if (Math.hypot(r.x - x, r.y - y) < pxKm * 12) push('Rift', riftLine(r));
+      if (s.corruption && env) {
+        const k = cellOf(x, y);
+        if (k >= 0 && s.corruption[k] >= 0.05) push('Corruption', `${Math.round(s.corruption[k] * 100)}%${s.corruption[k] >= CORRUPTION_RIFT ? ' (rifts may open)' : ''}`);
       }
       for (const f of s.faiths ?? []) for (const hs of f.holySites) {
         if (Math.hypot(hs.x + 12 * pxKm - x, hs.y - 10 * pxKm - y) < pxKm * 8) push('Holy site', `${hs.name}: holy site of the ${f.name}${hs.held ? '' : ' (lost to it)'}`);
@@ -1506,6 +1536,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       partners.length ? h('div', { class: 'muted' }, `Trades with: ${partners.join(', ')}.`) : null,
     ].filter(Boolean) as HTMLElement[];
   };
+  const riftLine = (r: Rift) => {
+    const holder = r.holder >= 0 ? clanOf(r.holder) : undefined;
+    const got = Object.entries(r.lastYield).filter(([, v]) => v >= 0.5).map(([id, v]) => `${Math.round(v)} ${resInfoOf(env!, id)?.name.toLowerCase() ?? id}`);
+    return `${r.name} (${r.permanent ? 'permanent' : `short-lived, closing in year ${yearOf(r.closes ?? 0)}`}${r.water ? ', a spring' : ''}): strength ${Math.round(r.strength * 100)}%${r.strength >= 1 ? ' (at breaking point)' : ''}; ${holder ? `${realmName(lib(), holder)}, ${HOLD_NAMES[r.hold].toLowerCase()}` : 'nobody holds it'}${got.length ? `; last year ${got.join(', ')}` : ''}`;
+  };
   const settlementLine = (st: Settlement) => {
     const what = settlementTier(st).toLowerCase();
     if (st.ruined) return `Ruins of ${st.name} (${what})${st.holyTo.length ? `, holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
@@ -1702,6 +1737,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const wars = [...activeWars(s), ...(s.wars ?? []).filter((w) => w.ended !== undefined).slice(-6).reverse()];
     const openBattle = (s.battles ?? []).find((b) => b.id === selectedBattle);
     if (openBattle) parts.push(h('h3', {}, 'Battle report'), battleReport(openBattle));
+    if (s.started && (s.rifts ?? []).length) parts.push(
+      h('h3', {}, 'Rifts'),
+      h('p', { class: 'muted small' }, 'Rifts open where mana runs dense and nothing draws on it, where corruption runs high, and now and then anywhere; short-lived ones close in a few years. The realm holding the land works them (an encampment, soldiers, or parties) for goods rare or not found in the mortal plane; a rift left alone grows toward breaking. On the map: violet eyes, ringed gold (encampment), red (soldiers), blue (parties) or dark (left alone); dashed while short-lived; a blue drop where fresh water wells up.'),
+      h('ul', { class: 'econ-list small' }, ...(s.rifts ?? []).map((r) => h('li', {}, h('span', {}, riftLine(r))))),
+    );
     if (s.started && wars.length) parts.push(h('h3', {}, 'Wars'), h('p', { class: 'muted small' }, 'Settled realms go to war for a reason (a claim, a throne, their faith, vengeance, their own people, or plain conquest). Banners on the map are armies; crossed swords are battles.'), ...wars.map((w) => warCard(w)));
 
     // Treaties, the world over.
@@ -1979,6 +2019,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const cnt = P.start[index + 1] - P.start[index];
         for (let q = P.start[index]; q < P.start[index + 1]; q++) m += field[P.cells[q]];
         if (cnt) out.push({ label: 'Mana', value: `${manaWord(m / cnt)} (${Math.round((m / cnt) * 100)}%)` });
+      }
+      if (sim) {
+        for (const r of sim.rifts ?? []) if (env.prov.of[cellOf(r.x, r.y)] === index) out.push({ label: 'Rift', value: riftLine(r) });
+        if (sim.corruption) {
+          let cmax = 0;
+          for (let q = P.start[index]; q < P.start[index + 1]; q++) cmax = Math.max(cmax, sim.corruption[P.cells[q]]);
+          if (cmax >= 0.05) out.push({ label: 'Corruption', value: `${Math.round(cmax * 100)}%` });
+        }
       }
       let road = 0;
       for (let q = P.start[index]; q < P.start[index + 1]; q++) road = Math.max(road, sim?.way[P.cells[q]] ?? 0);

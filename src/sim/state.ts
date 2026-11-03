@@ -1,3 +1,5 @@
+import type { Rift } from './rifts';
+
 /**
  * The simulation's state (Phase 6: first peoples). Tribes are the groups that move on the map;
  * each carries its bands and its warband (the fighters) inside it. Clans hold tribes. Land is
@@ -539,6 +541,9 @@ export interface SimState {
   wars?: War[];
   armies?: Army[];
   battles?: Battle[];
+  /** Rifts open in the world (Phase 11 step 2), and the corruption at each point (0–1). */
+  rifts?: Rift[];
+  corruption?: Float32Array;
   /** The world's setting for the gods (copied in from the world settings before each run). */
   gods?: { active: boolean; activity: number };
   grudges: Grudge[];
