@@ -72,7 +72,14 @@ export type BrushId =
   | 'glowcave'
   | 'crystalcave'
   | 'entrance'
-  | 'shaft';
+  | 'shaft'
+  // Sky islands (the three sky layers)
+  | 'skyisland'
+  | 'skymeadow'
+  | 'skyforest'
+  | 'skyrock'
+  | 'skyfall'
+  | 'skypath';
 
 export type MountainMode = 'range' | 'spur' | 'massif';
 
@@ -91,7 +98,7 @@ export type BrushKind = 'area' | 'line' | 'point';
 export interface BrushInfo {
   id: BrushId;
   name: string;
-  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography' | 'World tree' | 'Underdark' | 'Underdark cover' | 'Ways down';
+  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography' | 'World tree' | 'Underdark' | 'Underdark cover' | 'Ways down' | 'Sky islands' | 'Island cover' | 'Island water & drift';
   kind: BrushKind;
   hint: string;
   /** Default brush settings. Size is the brush's width in miles. */
@@ -160,6 +167,12 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'crystalcave', name: 'Crystal caverns', group: 'Underdark cover', kind: 'area', hint: 'Halls of giant crystals: gems and mana crystals. Only on cavern and tunnel floors.', sizeMi: 15, strength: 0.9, softness: 0.3, roughness: 0.5, detailMi: 2 },
   { id: 'entrance', name: 'Cave entrance', group: 'Ways down', kind: 'point', hint: 'Click to place a cave mouth: a way between the surface and the Underdark at this spot, walked in and out. Put it over a cavern or tunnel to open into it.', sizeMi: 2, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'shaft', name: 'Shaft', group: 'Ways down', kind: 'point', hint: 'Click to place a shaft: a sheer drop from the surface into the Underdark. Climbers, flyers and those with ropes or lifts get through; others cannot.', sizeMi: 1, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'skyisland', name: 'Sky island', group: 'Sky islands', kind: 'area', hint: 'Paint floating islands on the sky layer chosen below. Strokes that touch make one island. They don’t block sunlight, rain or wind for the land below.', sizeMi: 40, strength: 1, softness: 0.3, roughness: 0.6, detailMi: 4 },
+  { id: 'skymeadow', name: 'Sky meadow', group: 'Island cover', kind: 'area', hint: 'Grass and flowers on an island. Islands without painted cover take it from their climate (meadow, tundra or snow).', sizeMi: 15, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 2 },
+  { id: 'skyforest', name: 'Sky forest', group: 'Island cover', kind: 'area', hint: 'Woods on an island. Only grows on island ground.', sizeMi: 15, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 2 },
+  { id: 'skyrock', name: 'Bare rock', group: 'Island cover', kind: 'area', hint: 'Bare stone crags on an island.', sizeMi: 15, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 2 },
+  { id: 'skyfall', name: 'Island waterfall', group: 'Island water & drift', kind: 'point', hint: 'Click at an island’s edge: water pours off it. Under a fixed island it lands as a pool and greens the land below; a drifting island’s falls blow away to mist and change nothing below.', sizeMi: 1, strength: 0.8, softness: 0.3, roughness: 0, detailMi: 1 },
+  { id: 'skypath', name: 'Drift path', group: 'Island water & drift', kind: 'line', hint: 'Drag a path starting on an island: it drifts along it (set how it drifts in the island list below). Islands can also drift with the wind, or stay fixed.', sizeMi: 2, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
 
@@ -172,6 +185,11 @@ export type CoverBrush = (typeof COVER_BRUSHES)[number];
 /** Brushes that paint the Underdark: they never change the surface, its climate or provinces. */
 export const UNDERDARK_BRUSHES: readonly BrushId[] = ['cavern', 'tunnel', 'undersea', 'fungus', 'glowcave', 'crystalcave', 'entrance', 'shaft'];
 export const isUnderdark = (b: BrushId): boolean => UNDERDARK_BRUSHES.includes(b);
+/** Brushes that paint the sky layers. All but island waterfalls leave the surface alone. */
+export const SKY_BRUSHES: readonly BrushId[] = ['skyisland', 'skymeadow', 'skyforest', 'skyrock', 'skyfall', 'skypath'];
+export const isSky = (b: BrushId): boolean => SKY_BRUSHES.includes(b);
+/** Brushes whose strokes never change the surface, its climate or its provinces. */
+export const offSurface = (b: BrushId): boolean => isUnderdark(b) || (isSky(b) && b !== 'skyfall');
 
 export interface Stroke {
   id: number;
@@ -236,6 +254,10 @@ export interface Stroke {
   nameOf?: 'land' | 'archipelago' | 'water' | 'region' | 'lake' | 'river';
   /** Rain Shadow Pen: high ground (the default) or a gap (pass) that lets moist air through. */
   penMode?: 'raise' | 'gap';
+  /** Sky layer brushes: which sky layer (1 lowest to 3 highest). */
+  sky?: 1 | 2 | 3;
+  /** Sky islands (on an island's first stroke): how it drifts. */
+  drift?: 'fixed' | 'wind' | 'path';
   /** World tree roots: a main root, or a smaller sprout. */
   rootSize?: 'main' | 'sprout';
   /** Drawn current (teaching sketch): what kind of water it carries. Its course is `ctrl`. */
@@ -333,7 +355,7 @@ export function strokeReach(s: Stroke): number {
   // Craters throw ejecta and rays well past their rim; cliffs cast shadows below their face.
   // Rivers reach as far as their widest stretch and the green banks and waterfall pools beside it.
   if (s.brush === 'river') return RIVER_REACH;
-  const extra = s.brush === 'volcano' ? 1.6 : s.brush === 'waterfall' ? 40 : s.brush === 'crater' ? 4 : s.brush === 'whirlpool' ? 1.1 : s.brush === 'cliffs' ? 3 : s.brush === 'canyon' ? 2.3 : s.brush === 'plateau' ? 1.55 : (1 + s.variation * 0.35) * (1 + s.roughness * 0.5) + 0.05;
+  const extra = s.brush === 'volcano' ? 1.6 : s.brush === 'waterfall' || s.brush === 'skyfall' ? 40 : s.brush === 'crater' ? 4 : s.brush === 'whirlpool' ? 1.1 : s.brush === 'cliffs' ? 3 : s.brush === 'canyon' ? 2.3 : s.brush === 'plateau' ? 1.55 : (1 + s.variation * 0.35) * (1 + s.roughness * 0.5) + 0.05;
   return r * extra;
 }
 

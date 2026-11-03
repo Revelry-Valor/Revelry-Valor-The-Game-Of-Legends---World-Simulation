@@ -1,5 +1,6 @@
 import { fbm, noise2, random2, ridged, strokeSeed } from './noise';
-import { COVER_BRUSHES, isUnderdark, strokeBounds, strokeReach, type CoverBrush, type Stroke, type Surface, type ZoneId } from './paint';
+import { skyFalls } from './sky';
+import { COVER_BRUSHES, offSurface, strokeBounds, strokeReach, type CoverBrush, type Stroke, type Surface, type ZoneId } from './paint';
 import { flowAt, pointAt, riverNetwork, widthForFlow, type RiverInfo } from './water';
 
 /**
@@ -485,7 +486,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
 
   for (const s of surface.strokes) {
     // Placed features and teaching sketches don't change the ground.
-    if (s.brush === 'whirlpool' || s.brush === 'crystal' || s.brush === 'current' || s.brush === 'high' || s.brush === 'wind' || s.brush === 'itcz' || s.brush === 'divide' || s.brush === 'join' || s.brush === 'name' || s.brush === 'root' || s.brush === 'treeAnchor' || isUnderdark(s.brush)) continue;
+    if (s.brush === 'whirlpool' || s.brush === 'crystal' || s.brush === 'current' || s.brush === 'high' || s.brush === 'wind' || s.brush === 'itcz' || s.brush === 'divide' || s.brush === 'join' || s.brush === 'name' || s.brush === 'root' || s.brush === 'treeAnchor' || offSurface(s.brush)) continue;
     if (!offsetsFor(s, g, o).length) continue;
     const seed = strokeSeed(o.seed, s.id);
     const er = !!s.erase;
@@ -766,6 +767,13 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
           }
           f.waterDepth[i] = Math.max(f.waterDepth[i], Math.min(1, (1 - e) * 2));
         });
+        break;
+      }
+      case 'skyfall': {
+        // Water pouring off a fixed sky island lands as a pool on the ground below; a drifting
+        // island's falls blow away to mist.
+        if (er || !skyFalls(surface).some((k) => k.stroke === s && k.lands)) break;
+        splash(f, g, o, [s.pts[0], s.pts[1]], s.pts[0], s.pts[1], s.size / 2, px);
         break;
       }
       case 'waterfall': {

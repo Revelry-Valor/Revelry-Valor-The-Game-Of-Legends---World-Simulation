@@ -133,6 +133,28 @@ The world can have up to five layers. The extra layers are optional and shown wh
   - Painting the Underdark switches the layer on.
 - *Still to come (step 4):* the peoples living, digging tunnels (dwarf holds, rabbit warrens) and travelling down here.
 
+**Built (Phase 12, step 2): sky islands.**
+
+- *Brushes* (the Sky tab, painting on the sky layer chosen there):
+  - Sky island (area); strokes that touch on a layer are one island.
+  - Cover: Sky meadow, Sky forest and Bare rock.
+  - Island waterfall (point) and Drift path (line).
+  - Each brush has only a size, plus roughness for areas.
+  - The strokes carry their layer, go in the world's one stroke list, and never change the surface, its climate or its provinces. The one exception is a fixed island's waterfalls (below).
+- *Heights and climate:* the layers float about 0.9, 1.9 and 3.1 miles up. Up there:
+  - the air cools with height at the world's altitude cooling, from sea level;
+  - winds blow 1.4×, 1.9× and 2.5× harder than at the ground;
+  - rain is 100%, 70% and 45% of the rain below (over the sea, at least a "wet" share of sea air).
+  - An island with no painted cover takes meadow, windswept tundra (cool or gale-swept) or snow and ice (summer at or below freezing) from its climate.
+- *Waterfalls:* a fall belongs to the island it is on or beside (within about 10 miles). Under a fixed island the water lands as a pool and greens the ground below, as a hand-placed waterfall does. A drifting island's falls blow away to mist and change nothing below.
+- *Drift:* each island is Fixed, With the wind (the layer's wind there; about 20–120 miles a year by its strength) or Along its path (a Drift path drawn starting on it, about 25 miles a year). Erasing over a path takes it away. The islands start moving when the peoples live (step 4). On a globe, drift is worked out in Phase 13.
+- *On the map:*
+  - The Sky tab, or View → Layers → Show: Sky layer N, draws the layer over a hazy copy of the land. The lower sky layers show faint beneath it, and the surface's labels are left off.
+  - Islands show their cover over a dark rocky underside and cast a soft shadow.
+  - Falls are white streaks, ending in a pool if they land or dashed if they blow away. Drift shows as an arrow with the wind, or the dashed path.
+  - The tab lists each island on the layer (size, cover, waterfalls, summer and winter climate, winds) with its drift. The hover readout gives the island and the climate up there.
+  - Painting a sky layer switches it on.
+
 ---
 
 ## 6. The builder

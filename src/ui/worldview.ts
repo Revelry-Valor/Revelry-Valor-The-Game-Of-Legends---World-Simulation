@@ -21,7 +21,9 @@ import { regionAt, waterAt } from '../core/finegeo';
 import { createProvinces, type ProvinceDisplay, type Provinces } from './provinces';
 import { createMana, type Mana, type ManaDisplay } from './mana';
 import { createUnderdark, type Underdark } from './underdark';
-import { isUnderdark } from '../core/paint';
+import { isSky, offSurface } from '../core/paint';
+import { createSky, type Sky } from './sky';
+import type { SkyLayer } from '../core/sky';
 import type { MapOverlay } from './mapview';
 
 /**
@@ -31,7 +33,7 @@ import type { MapOverlay } from './mapview';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay, layer: 'surface' as 'surface' | 'underdark' };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay, layer: 'surface' as 'surface' | 'underdark' | 'sky1' | 'sky2' | 'sky3' };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -49,6 +51,8 @@ export function showWorld(app: App, start: World): () => void {
   let provinces: Provinces | null = null;
   let mana: Mana | null = null;
   let under: Underdark | null = null;
+  let sky: Sky | null = null;
+  let tabNow = 'land';
   let climateBusy = true;
   const autosave = window.setInterval(() => dirty && save(), 30000);
 
@@ -83,7 +87,7 @@ export function showWorld(app: App, start: World): () => void {
     const ia = new Set(a);
     const ib = new Set(b);
     const diff = [...a.filter((s) => !ib.has(s)), ...b.filter((s) => !ia.has(s))];
-    return diff.length > 0 && diff.every((s) => isUnderdark(s.brush));
+    return diff.length > 0 && diff.every((s) => offSurface(s.brush));
   };
   const setStrokes = (strokes: Stroke[]) => {
     const before = world.surface.strokes;
@@ -94,6 +98,7 @@ export function showWorld(app: App, start: World): () => void {
     changed();
     if (!onlyUnder) climate.changed();
     under?.invalidate();
+    sky?.invalidate();
     updateUndo();
     tools.refresh();
   };
@@ -149,6 +154,8 @@ export function showWorld(app: App, start: World): () => void {
         peoples?.overlay.draw(g, at, scale, copies);
         under?.overlay.draw(g, at, scale, copies);
       }
+      // A sky layer floats over everything, the land hazy beneath it.
+      sky?.overlay.draw(g, at, scale, copies);
     },
     down: (x, y, pxKm) => !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false),
     drag(x, y) {
@@ -164,6 +171,10 @@ export function showWorld(app: App, start: World): () => void {
       const b = provinces?.overlay.describe?.(x, y) ?? [];
       const m = mana?.overlay.describe?.(x, y) ?? [];
       const u = under?.overlay.describe?.(x, y) ?? [];
+      if (sky?.showing()) {
+        const k = sky.overlay.describe?.(x, y) ?? [];
+        return [...k, ...m];
+      }
       if (under?.showing()) return u.length || m.length ? [...u, ...m] : null;
       return a.length || b.length || m.length || u.length ? [...a, ...b, ...m, ...u] : null;
     },
@@ -172,7 +183,7 @@ export function showWorld(app: App, start: World): () => void {
       return !!(peoples?.overlay.noPaint || provinces?.overlay.noPaint);
     },
     get hidesSurface() {
-      return !!under?.showing();
+      return !!under?.showing() || !!sky?.showing();
     },
   };
   // The right-hand readers: what is under the cursor, and the selection's resources.
@@ -196,14 +207,18 @@ export function showWorld(app: App, start: World): () => void {
       redoStack.length = 0;
       world = { ...world, surface: { strokes: [...others, live], nextId: id + 1 } };
       changed();
-      if (isUnderdark(live.brush)) {
-        // Painting the Underdark switches the layer on; the surface's climate is left alone.
-        if (!world.layers.underdark) {
-          world = { ...world, layers: { ...world.layers, underdark: true } };
-          renderLayers();
-        }
-        requestAnimationFrame(() => under?.invalidate());
-      } else climate.changed();
+      // Painting another layer switches it on; only the surface's own strokes change its climate.
+      if (isSky(live.brush) && sky) live.sky = sky.paintLayer();
+      const lid = isSky(live.brush) ? (`sky${live.sky ?? 1}` as const) : offSurface(live.brush) ? 'underdark' : null;
+      if (lid && !world.layers[lid]) {
+        world = { ...world, layers: { ...world.layers, [lid]: true } };
+        renderLayers();
+      }
+      if (!offSurface(live.brush)) climate.changed();
+      requestAnimationFrame(() => {
+        under?.invalidate();
+        sky?.invalidate();
+      });
       updateUndo();
       requestAnimationFrame(() => mana?.invalidate());
       return live;
@@ -215,7 +230,7 @@ export function showWorld(app: App, start: World): () => void {
       strokes[i] = stroke;
       world = { ...world, surface: { ...world.surface, strokes } };
       changed();
-      if (!isUnderdark(stroke.brush)) climate.changed();
+      if (!offSurface(stroke.brush)) climate.changed();
     },
     cancel: undo,
     snapshot,
@@ -550,12 +565,13 @@ export function showWorld(app: App, start: World): () => void {
                 type: 'checkbox',
                 checked: on,
                 'aria-label': `Use the ${l.name} layer`,
-                title: l.id === 'underdark' ? 'Caverns, tunnels and seas under the land (the Underdark tab)' : 'This layer gets its own view in a later step.',
+                title: l.id === 'underdark' ? 'Caverns, tunnels and seas under the land (the Underdark tab)' : l.id.startsWith('sky') ? 'Floating islands (the Sky tab)' : 'This layer gets its own view in a later step.',
                 onchange: (e: Event) => {
                   world = { ...world, layers: { ...world.layers, [l.id]: (e.target as HTMLInputElement).checked } };
                   changed();
                   renderLayers();
                   under?.invalidate();
+                  sky?.invalidate();
                   map.redraw();
                 },
               });
@@ -767,16 +783,16 @@ export function showWorld(app: App, start: World): () => void {
   window.addEventListener('keydown', keydown);
 
   const sideToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true' }, 'Tools');
-  const layerShow = choice<'surface' | 'underdark'>('Show', [{ value: 'surface', label: 'Surface' }, { value: 'underdark', label: 'Underdark' }], look.layer, (v) => {
+  const layerShow = choice<typeof look.layer>('Show', [{ value: 'surface', label: 'Surface' }, { value: 'underdark', label: 'Underdark' }, { value: 'sky1', label: 'Sky layer 1' }, { value: 'sky2', label: 'Sky layer 2' }, { value: 'sky3', label: 'Sky layer 3' }], look.layer, (v) => {
     look.layer = v;
-    if (v === 'underdark' && !world.layers.underdark) {
-      world = { ...world, layers: { ...world.layers, underdark: true } };
+    if (v !== 'surface' && !world.layers[v]) {
+      world = { ...world, layers: { ...world.layers, [v]: true } };
       changed();
       renderLayers();
     }
     map.redraw();
   });
-  const layersPanel = h('section', { class: 'view-panel' }, layerShow, layerList, h('p', { class: 'muted small' }, 'The Underdark has its own tab and view; the canopy and sky layers come in the next steps.'));
+  const layersPanel = h('section', { class: 'view-panel' }, layerShow, layerList, h('p', { class: 'muted small' }, 'The Underdark and the sky layers have their own tabs and views; the canopy comes in the next step.'));
   // Tabs: each shows only the tools and options for one kind of work.
   // The World tab: temperature, rain and the rest of the world's climate, applied as you go.
   const worldPanel = h('div', {});
@@ -880,11 +896,33 @@ export function showWorld(app: App, start: World): () => void {
   under = createUnderdark({
     world: () => world,
     climate: () => climate.climate,
-    shownElsewhere: () => look.layer === 'underdark',
+    shownElsewhere: () => look.layer === 'underdark' && tabNow !== 'sky',
     setUsed(on) {
       world = { ...world, layers: { ...world.layers, underdark: on } };
       changed();
       renderLayers();
+      map.redraw();
+    },
+  });
+  // The Sky tab: islands on the three sky layers (Phase 12).
+  sky = createSky({
+    world: () => world,
+    climate: () => climate.climate,
+    shownElsewhere: () => (tabNow === 'under' || !look.layer.startsWith('sky') ? null : (Number(look.layer.slice(3)) as SkyLayer)),
+    layerPicked: () => map.redraw(),
+    setUsed(l, on) {
+      world = { ...world, layers: { ...world.layers, [`sky${l}`]: on } };
+      changed();
+      renderLayers();
+      map.redraw();
+    },
+    setDrift(isl, drift) {
+      snapshot();
+      const ids = new Set(isl.strokes.map((s) => s.id));
+      const first = isl.strokes[0].id;
+      setStrokes(world.surface.strokes.map((s) => (ids.has(s.id) ? { ...s, drift: s.id === first ? drift : undefined } : s)));
+      // Its waterfalls land below only while it stays fixed.
+      for (const st of world.surface.strokes) if (st.brush === 'skyfall' && (st.sky ?? 1) === isl.layer) map.surfaceChanged(strokeBounds(st));
       map.redraw();
     },
   });
@@ -897,6 +935,7 @@ export function showWorld(app: App, start: World): () => void {
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
     { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel] },
     { id: 'mana', name: 'Mana', groups: ['World tree'], extra: [mana.panel] },
+    { id: 'sky', name: 'Sky', groups: ['Sky islands', 'Island cover', 'Island water & drift'], extra: [sky.panel] },
     { id: 'under', name: 'Underdark', groups: ['Underdark', 'Underdark cover', 'Ways down'], extra: [under.panel] },
     { id: 'peoples', name: 'Peoples', groups: [], extra: [peoples.panel] },
   ];
@@ -911,7 +950,9 @@ export function showWorld(app: App, start: World): () => void {
     peoples?.setActive(t.id === 'peoples');
     provinces?.setActive(t.id === 'provinces');
     mana?.setActive(t.id === 'mana');
+    tabNow = t.id;
     under?.setActive(t.id === 'under');
+    sky?.setActive(t.id === 'sky');
     tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
     if (t.groups.length) tools.showGroups(t.groups);
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
@@ -940,7 +981,7 @@ export function showWorld(app: App, start: World): () => void {
   const drops = [
     drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}`, false, mapPanel),
     drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}${look.provinces === 'lines' ? ' · province outlines' : look.provinces === 'colour' ? ' · provinces coloured' : ''}${look.mana === 'lines' ? ' · mana lines' : look.mana === 'heat' ? ' · mana heat map' : ''}`, false, lookPanel, zonesPanel),
-    drop('Layers', () => `${look.layer === 'underdark' ? 'Showing the Underdark · ' : ''}${LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface'}`, false, layersPanel),
+    drop('Layers', () => `${look.layer === 'underdark' ? 'Showing the Underdark · ' : look.layer.startsWith('sky') ? `Showing sky layer ${look.layer.slice(3)} · ` : ''}${LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface'}`, false, layersPanel),
     drop('Reference image', () => (world.reference ? 'One laid over the map' : 'None'), false, refPanel),
   ];
   const refreshDrops = () => drops.forEach((d) => d.refresh());

@@ -95,9 +95,9 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: current sketch' : b.name), ...currentFields());
       return;
     }
-    if (b.group === 'Underdark' || b.group === 'Underdark cover' || b.group === 'Ways down') {
-      // Underdark shapes have a size and (for areas) a ragged edge; nothing else.
-      const under: HTMLElement[] = [h('p', { class: 'muted small hint' }, state.erase ? (b.group === 'Ways down' ? 'Click a cave entrance or shaft to take it away.' : `Erasing ${b.name.toLowerCase()}. ${b.group === 'Underdark cover' ? 'Erasing clears any cover there.' : 'Other layers are left alone.'}`) : b.hint)];
+    if (['Underdark', 'Underdark cover', 'Ways down', 'Sky islands', 'Island cover', 'Island water & drift'].includes(b.group)) {
+      // Underdark and sky shapes have a size and (for areas) a ragged edge; nothing else.
+      const under: HTMLElement[] = [h('p', { class: 'muted small hint' }, state.erase ? (b.kind === 'point' ? `Click ${b.group === 'Ways down' ? 'a cave entrance or shaft' : 'a waterfall'} to take it away.` : `Erasing ${b.name.toLowerCase()}. ${b.group === 'Underdark cover' || b.group === 'Island cover' ? 'Erasing clears any cover there.' : 'Other layers are left alone.'}`) : b.hint)];
       if (b.kind !== 'point' || state.erase) {
         under.push(numberField({ label: b.kind === 'line' ? 'Width' : 'Brush size', value: Math.round(kmToMiles(s.size) * 10) / 10, min: 0.2, max: 800, step: 0.1, unit: 'miles', hint: 'Keys [ and ] make it smaller or larger.', change: (v) => { if (v > 0) s.size = milesToKm(v); changed(); } }));
       }

@@ -39,6 +39,40 @@ const FLOOR = '#8a7a64';
 const SEA = '#1d4d73';
 const COVER_COLOUR: Record<string, string> = { fungus: 'rgba(170,90,200,0.8)', glowcave: 'rgba(80,235,200,0.75)', crystalcave: 'rgba(200,170,255,0.85)' };
 
+/** Draw one painted shape (its dabs, or a line's path) onto a layer; erasers cut it away. */
+export function paintShape(g: CanvasRenderingContext2D, st: Stroke, colour: string, at: (x: number, y: number, c: number) => [number, number], scale: number, copies: number[]): void {
+  const sh = shapeOf(st);
+  g.globalCompositeOperation = st.erase ? 'destination-out' : 'source-over';
+  g.fillStyle = colour;
+  g.strokeStyle = colour;
+  for (const c of copies) {
+    if (!sh.dabs.length) {
+      g.lineWidth = Math.max(1.5, sh.half * 2 * scale);
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      g.beginPath();
+      const p = st.pts;
+      for (let i = 0; i < p.length; i += 2) {
+        const [x, y] = at(p[i], p[i + 1], c);
+        if (i) g.lineTo(x, y);
+        else g.moveTo(x, y);
+      }
+      if (p.length === 2) g.lineTo(...at(p[0] + 0.01, p[1], c));
+      g.stroke();
+      continue;
+    }
+    g.beginPath();
+    const dd = sh.dabs;
+    for (let i = 0; i < dd.length; i += 3) {
+      const [x, y] = at(dd[i], dd[i + 1], c);
+      const r = Math.max(0.8, dd[i + 2] * scale);
+      g.moveTo(x + r, y);
+      g.arc(x, y, r, 0, Math.PI * 2);
+    }
+    g.fill();
+  }
+}
+
 export function createUnderdark(d: UnderdarkDeps): Underdark {
   let active = false;
   let landImg: HTMLCanvasElement | null = null;
@@ -72,40 +106,6 @@ export function createUnderdark(d: UnderdarkDeps): Underdark {
     g.globalCompositeOperation = 'source-over';
     g.clearRect(0, 0, cv.width, cv.height);
     return g;
-  };
-
-  /** Draw one painted shape (its dabs, or a tunnel's line) onto a layer. */
-  const paint = (g: CanvasRenderingContext2D, st: Stroke, colour: string, at: (x: number, y: number, c: number) => [number, number], scale: number, copies: number[]) => {
-    const sh = shapeOf(st);
-    g.globalCompositeOperation = st.erase ? 'destination-out' : 'source-over';
-    g.fillStyle = colour;
-    g.strokeStyle = colour;
-    for (const c of copies) {
-      if (!sh.dabs.length) {
-        g.lineWidth = Math.max(1.5, sh.half * 2 * scale);
-        g.lineCap = 'round';
-        g.lineJoin = 'round';
-        g.beginPath();
-        const p = st.pts;
-        for (let i = 0; i < p.length; i += 2) {
-          const [x, y] = at(p[i], p[i + 1], c);
-          if (i) g.lineTo(x, y);
-          else g.moveTo(x, y);
-        }
-        if (p.length === 2) g.lineTo(...at(p[0] + 0.01, p[1], c));
-        g.stroke();
-        continue;
-      }
-      g.beginPath();
-      const dd = sh.dabs;
-      for (let i = 0; i < dd.length; i += 3) {
-        const [x, y] = at(dd[i], dd[i + 1], c);
-        const r = Math.max(0.8, dd[i + 2] * scale);
-        g.moveTo(x + r, y);
-        g.arc(x, y, r, 0, Math.PI * 2);
-      }
-      g.fill();
-    }
   };
 
   const drawWays = (g: CanvasRenderingContext2D, ways: WayDown[], at: (x: number, y: number, c: number) => [number, number], copies: number[], below: boolean) => {
@@ -223,9 +223,9 @@ export function createUnderdark(d: UnderdarkDeps): Underdark {
       const cover = layer(3, cv);
       for (const g2 of [floor, sea, cover]) g2.setTransform(tf);
       for (const st of underStrokes(w.surface)) {
-        if (st.brush === 'cavern' || st.brush === 'tunnel') paint(floor, st, FLOOR, at, scale, copies);
-        else if (st.brush === 'undersea') paint(sea, st, SEA, at, scale, copies);
-        else paint(cover, st, st.erase ? '#000' : COVER_COLOUR[st.brush], at, scale, copies);
+        if (st.brush === 'cavern' || st.brush === 'tunnel') paintShape(floor, st, FLOOR, at, scale, copies);
+        else if (st.brush === 'undersea') paintShape(sea, st, SEA, at, scale, copies);
+        else paintShape(cover, st, st.erase ? '#000' : COVER_COLOUR[st.brush], at, scale, copies);
       }
       for (const g2 of [floor, sea, cover]) g2.setTransform(1, 0, 0, 1, 0, 0);
       // Cover only on dry floor; seas over everything; all of it only under the land.

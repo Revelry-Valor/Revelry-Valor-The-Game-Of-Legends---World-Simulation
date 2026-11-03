@@ -1,7 +1,7 @@
 import { freshWaters, geoCell, geoNames, lakeAt, riverAt, type GeoFeature } from '../core/geography';
 import { regionAt, waterAt } from '../core/finegeo';
 import { autoCoverName, climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
-import { brushInfo, inSeason, isUnderdark, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
+import { brushInfo, inSeason, offSurface, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
@@ -1500,7 +1500,7 @@ export function createMapView(o: MapViewOptions): MapView {
     const live = o.begin(st);
     drawing = { stroke: live, pointer: e.pointerId };
     // The Underdark's brushes never change the surface picture.
-    if (!isUnderdark(live.brush)) cache.updateStroke(o.world().surface, live, strokeBounds(live));
+    if (!offSurface(live.brush)) cache.updateStroke(o.world().surface, live, strokeBounds(live));
     schedule();
     if (brushInfo(live.brush).kind === 'point') drawing = null;
     return true;
@@ -1532,7 +1532,7 @@ export function createMapView(o: MapViewOptions): MapView {
     drawing.stroke = grown;
     o.update(grown);
     // The Underdark's brushes never change the surface picture.
-    if (!isUnderdark(grown.brush)) cache.updateStroke(o.world().surface, grown, changedPart(grown));
+    if (!offSurface(grown.brush)) cache.updateStroke(o.world().surface, grown, changedPart(grown));
     schedule();
   };
 
