@@ -63,7 +63,16 @@ export type BrushId =
   | 'zone'
   // The world tree (mana)
   | 'treeAnchor'
-  | 'root';
+  | 'root'
+  // The Underdark (its own layer, beneath the land)
+  | 'cavern'
+  | 'tunnel'
+  | 'undersea'
+  | 'fungus'
+  | 'glowcave'
+  | 'crystalcave'
+  | 'entrance'
+  | 'shaft';
 
 export type MountainMode = 'range' | 'spur' | 'massif';
 
@@ -82,7 +91,7 @@ export type BrushKind = 'area' | 'line' | 'point';
 export interface BrushInfo {
   id: BrushId;
   name: string;
-  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography' | 'World tree';
+  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography' | 'World tree' | 'Underdark' | 'Underdark cover' | 'Ways down';
   kind: BrushKind;
   hint: string;
   /** Default brush settings. Size is the brush's width in miles. */
@@ -143,6 +152,14 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'name', name: 'Name', group: 'Geography', kind: 'point', hint: 'Click a continent, island, sea, bay, mountain range, region, lake or river to name it. Names stay with the land as you repaint.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'treeAnchor', name: 'Tree anchor', group: 'World tree', kind: 'point', hint: 'Click to place where the world tree’s roots enter the world (one anchor: placing it again moves it). Then grow the roots from it, or draw them yourself with the Root brush.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'root', name: 'Root', group: 'World tree', kind: 'line', hint: 'Draw a root of the world tree: tap points along it, then tap the last point again (or press Enter). Mana flows along roots, most where they meet, cross or run together. Use Adjust to move or add points, change a root to a main root or a sprout, or delete it.', sizeMi: 10, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'cavern', name: 'Cavern', group: 'Underdark', kind: 'area', hint: 'Hollow out caverns in the rock under the land: great halls, cave systems, open underground plains. Only under land: everything beyond the coast is sea.', sizeMi: 30, strength: 1, softness: 0.3, roughness: 0.6, detailMi: 4 },
+  { id: 'tunnel', name: 'Tunnel', group: 'Underdark', kind: 'line', hint: 'Drag a tunnel through the rock, joining caverns, seas and ways down. Tunnels are the Underdark’s roads.', sizeMi: 2, strength: 1, softness: 0.2, roughness: 0.4, detailMi: 1 },
+  { id: 'undersea', name: 'Underground sea', group: 'Underdark', kind: 'area', hint: 'Dark water filling a great cavern: underground lakes and seas. Fresh water for those who live below.', sizeMi: 50, strength: 1, softness: 0.3, roughness: 0.5, detailMi: 5 },
+  { id: 'fungus', name: 'Fungus forest', group: 'Underdark cover', kind: 'area', hint: 'Giant mushrooms and mould: the Underdark’s forests and its food. Only grows on cavern and tunnel floors.', sizeMi: 20, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 3 },
+  { id: 'glowcave', name: 'Glowing caves', group: 'Underdark cover', kind: 'area', hint: 'Caves lit by glow-worms, lichen and luminous moss. Only on cavern and tunnel floors.', sizeMi: 20, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 3 },
+  { id: 'crystalcave', name: 'Crystal caverns', group: 'Underdark cover', kind: 'area', hint: 'Halls of giant crystals: gems and mana crystals. Only on cavern and tunnel floors.', sizeMi: 15, strength: 0.9, softness: 0.3, roughness: 0.5, detailMi: 2 },
+  { id: 'entrance', name: 'Cave entrance', group: 'Ways down', kind: 'point', hint: 'Click to place a cave mouth: a way between the surface and the Underdark at this spot, walked in and out. Put it over a cavern or tunnel to open into it.', sizeMi: 2, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'shaft', name: 'Shaft', group: 'Ways down', kind: 'point', hint: 'Click to place a shaft: a sheer drop from the surface into the Underdark. Climbers, flyers and those with ropes or lifts get through; others cannot.', sizeMi: 1, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
 
@@ -151,6 +168,10 @@ export const brushInfo = (id: BrushId): BrushInfo => BRUSHES.find((b) => b.id ==
 /** Brushes that only colour the ground (no relief). */
 export const COVER_BRUSHES = ['forest', 'jungle', 'grassland', 'tundra', 'marsh', 'dunes', 'badlands', 'saltflats', 'glacier', 'beach', 'savanna', 'scrub', 'taiga', 'steppe', 'rockdesert'] as const;
 export type CoverBrush = (typeof COVER_BRUSHES)[number];
+
+/** Brushes that paint the Underdark: they never change the surface, its climate or provinces. */
+export const UNDERDARK_BRUSHES: readonly BrushId[] = ['cavern', 'tunnel', 'undersea', 'fungus', 'glowcave', 'crystalcave', 'entrance', 'shaft'];
+export const isUnderdark = (b: BrushId): boolean => UNDERDARK_BRUSHES.includes(b);
 
 export interface Stroke {
   id: number;

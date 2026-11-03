@@ -95,6 +95,18 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: current sketch' : b.name), ...currentFields());
       return;
     }
+    if (b.group === 'Underdark' || b.group === 'Underdark cover' || b.group === 'Ways down') {
+      // Underdark shapes have a size and (for areas) a ragged edge; nothing else.
+      const under: HTMLElement[] = [h('p', { class: 'muted small hint' }, state.erase ? (b.group === 'Ways down' ? 'Click a cave entrance or shaft to take it away.' : `Erasing ${b.name.toLowerCase()}. ${b.group === 'Underdark cover' ? 'Erasing clears any cover there.' : 'Other layers are left alone.'}`) : b.hint)];
+      if (b.kind !== 'point' || state.erase) {
+        under.push(numberField({ label: b.kind === 'line' ? 'Width' : 'Brush size', value: Math.round(kmToMiles(s.size) * 10) / 10, min: 0.2, max: 800, step: 0.1, unit: 'miles', hint: 'Keys [ and ] make it smaller or larger.', change: (v) => { if (v > 0) s.size = milesToKm(v); changed(); } }));
+      }
+      if (b.kind === 'area' && !state.erase) {
+        under.push(numberField({ label: 'Roughness', value: Math.round(s.roughness * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint: 'How lumpy and ragged the walls are.', change: (v) => { s.roughness = Math.max(0, Math.min(100, v)) / 100; changed(); } }));
+      }
+      settings.replaceChildren(h('h3', {}, state.erase ? `Erase: ${b.name}` : b.name), ...under);
+      return;
+    }
     const pct = (label: string, key: 'strength' | 'softness' | 'roughness' | 'variation' | 'sideRidges' | 'erosion', hint: string) =>
       numberField({ label, value: Math.round((s[key] ?? 0) * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint, change: (v) => { s[key] = Math.max(0, Math.min(100, v)) / 100; changed(); } });
     // A river's width comes from the water it carries, so its brush size only matters for erasing.

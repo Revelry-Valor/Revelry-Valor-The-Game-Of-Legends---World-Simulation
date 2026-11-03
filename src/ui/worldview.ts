@@ -20,6 +20,8 @@ import { createInfoPanel, createResourcePanel } from './info';
 import { regionAt, waterAt } from '../core/finegeo';
 import { createProvinces, type ProvinceDisplay, type Provinces } from './provinces';
 import { createMana, type Mana, type ManaDisplay } from './mana';
+import { createUnderdark, type Underdark } from './underdark';
+import { isUnderdark } from '../core/paint';
 import type { MapOverlay } from './mapview';
 
 /**
@@ -29,7 +31,7 @@ import type { MapOverlay } from './mapview';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay, layer: 'surface' as 'surface' | 'underdark' };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -46,6 +48,7 @@ export function showWorld(app: App, start: World): () => void {
   let peoples: Peoples | null = null;
   let provinces: Provinces | null = null;
   let mana: Mana | null = null;
+  let under: Underdark | null = null;
   let climateBusy = true;
   const autosave = window.setInterval(() => dirty && save(), 30000);
 
@@ -75,13 +78,22 @@ export function showWorld(app: App, start: World): () => void {
     if (!changedStrokes.length) return null;
     return changedStrokes.map(strokeBounds).reduce((m, k) => [Math.min(m[0], k[0]), Math.min(m[1], k[1]), Math.max(m[2], k[2]), Math.max(m[3], k[3])]);
   };
+  /** Whether every stroke in one list but not the other paints the Underdark (the surface is untouched). */
+  const onlyUnderdark = (a: Stroke[], b: Stroke[]): boolean => {
+    const ia = new Set(a);
+    const ib = new Set(b);
+    const diff = [...a.filter((s) => !ib.has(s)), ...b.filter((s) => !ia.has(s))];
+    return diff.length > 0 && diff.every((s) => isUnderdark(s.brush));
+  };
   const setStrokes = (strokes: Stroke[]) => {
     const before = world.surface.strokes;
     world = { ...world, surface: { ...world.surface, strokes } };
     const b = diffBounds(before, strokes);
-    if (b) map.surfaceChanged(b);
+    const onlyUnder = onlyUnderdark(before, strokes);
+    if (b && !onlyUnder) map.surfaceChanged(b);
     changed();
-    climate.changed();
+    if (!onlyUnder) climate.changed();
+    under?.invalidate();
     updateUndo();
     tools.refresh();
   };
@@ -128,9 +140,15 @@ export function showWorld(app: App, start: World): () => void {
   // What is drawn over the map: provinces under the peoples (their lands, towns, armies).
   const layers: MapOverlay = {
     draw(g, at, scale, copies) {
-      provinces?.overlay.draw(g, at, scale, copies);
+      // The Underdark, when shown, takes the surface's place (its peoples and provinces with it).
+      const below = !!under?.showing();
+      if (below) under?.overlay.draw(g, at, scale, copies);
+      else provinces?.overlay.draw(g, at, scale, copies);
       mana?.overlay.draw(g, at, scale, copies);
-      peoples?.overlay.draw(g, at, scale, copies);
+      if (!below) {
+        peoples?.overlay.draw(g, at, scale, copies);
+        under?.overlay.draw(g, at, scale, copies);
+      }
     },
     down: (x, y, pxKm) => !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false),
     drag(x, y) {
@@ -145,11 +163,16 @@ export function showWorld(app: App, start: World): () => void {
       const a = peoples?.overlay.describe?.(x, y) ?? [];
       const b = provinces?.overlay.describe?.(x, y) ?? [];
       const m = mana?.overlay.describe?.(x, y) ?? [];
-      return a.length || b.length || m.length ? [...a, ...b, ...m] : null;
+      const u = under?.overlay.describe?.(x, y) ?? [];
+      if (under?.showing()) return u.length || m.length ? [...u, ...m] : null;
+      return a.length || b.length || m.length || u.length ? [...a, ...b, ...m, ...u] : null;
     },
     pick: (x, y, pxKm) => peoples?.overlay.pick?.(x, y, pxKm) ?? false,
     get noPaint() {
       return !!(peoples?.overlay.noPaint || provinces?.overlay.noPaint);
+    },
+    get hidesSurface() {
+      return !!under?.showing();
     },
   };
   // The right-hand readers: what is under the cursor, and the selection's resources.
@@ -173,7 +196,14 @@ export function showWorld(app: App, start: World): () => void {
       redoStack.length = 0;
       world = { ...world, surface: { strokes: [...others, live], nextId: id + 1 } };
       changed();
-      climate.changed();
+      if (isUnderdark(live.brush)) {
+        // Painting the Underdark switches the layer on; the surface's climate is left alone.
+        if (!world.layers.underdark) {
+          world = { ...world, layers: { ...world.layers, underdark: true } };
+          renderLayers();
+        }
+        requestAnimationFrame(() => under?.invalidate());
+      } else climate.changed();
       updateUndo();
       requestAnimationFrame(() => mana?.invalidate());
       return live;
@@ -185,7 +215,7 @@ export function showWorld(app: App, start: World): () => void {
       strokes[i] = stroke;
       world = { ...world, surface: { ...world.surface, strokes } };
       changed();
-      climate.changed();
+      if (!isUnderdark(stroke.brush)) climate.changed();
     },
     cancel: undo,
     snapshot,
@@ -520,11 +550,13 @@ export function showWorld(app: App, start: World): () => void {
                 type: 'checkbox',
                 checked: on,
                 'aria-label': `Use the ${l.name} layer`,
-                title: 'Each layer gets its own view in a later phase.',
+                title: l.id === 'underdark' ? 'Caverns, tunnels and seas under the land (the Underdark tab)' : 'This layer gets its own view in a later step.',
                 onchange: (e: Event) => {
                   world = { ...world, layers: { ...world.layers, [l.id]: (e.target as HTMLInputElement).checked } };
                   changed();
                   renderLayers();
+                  under?.invalidate();
+                  map.redraw();
                 },
               });
         return h('li', { class: l.id === 'surface' ? 'current' : '' }, h('span', {}, l.name), toggle);
@@ -735,7 +767,16 @@ export function showWorld(app: App, start: World): () => void {
   window.addEventListener('keydown', keydown);
 
   const sideToggle = h('button', { type: 'button', class: 'ghost side-toggle', 'aria-expanded': 'true' }, 'Tools');
-  const layersPanel = h('section', { class: 'view-panel' }, layerList, h('p', { class: 'muted small' }, 'Other layers get their own views in a later phase.'));
+  const layerShow = choice<'surface' | 'underdark'>('Show', [{ value: 'surface', label: 'Surface' }, { value: 'underdark', label: 'Underdark' }], look.layer, (v) => {
+    look.layer = v;
+    if (v === 'underdark' && !world.layers.underdark) {
+      world = { ...world, layers: { ...world.layers, underdark: true } };
+      changed();
+      renderLayers();
+    }
+    map.redraw();
+  });
+  const layersPanel = h('section', { class: 'view-panel' }, layerShow, layerList, h('p', { class: 'muted small' }, 'The Underdark has its own tab and view; the canopy and sky layers come in the next steps.'));
   // Tabs: each shows only the tools and options for one kind of work.
   // The World tab: temperature, rain and the rest of the world's climate, applied as you go.
   const worldPanel = h('div', {});
@@ -835,6 +876,18 @@ export function showWorld(app: App, start: World): () => void {
     },
   });
   if (climate.climate) peoples.climateChanged();
+  // The Underdark tab: caverns, tunnels, seas and the ways down (Phase 12).
+  under = createUnderdark({
+    world: () => world,
+    climate: () => climate.climate,
+    shownElsewhere: () => look.layer === 'underdark',
+    setUsed(on) {
+      world = { ...world, layers: { ...world.layers, underdark: on } };
+      changed();
+      renderLayers();
+      map.redraw();
+    },
+  });
   const TABS: { id: string; name: string; groups: string[]; extra: HTMLElement[] }[] = [
     { id: 'land', name: 'Land & water', groups: ['Land & Sea', 'Water', 'Sea'], extra: [] },
     { id: 'terrain', name: 'Terrain', groups: ['Relief', 'Volcanic', 'Mountain zones'], extra: [] },
@@ -844,6 +897,7 @@ export function showWorld(app: App, start: World): () => void {
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
     { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel] },
     { id: 'mana', name: 'Mana', groups: ['World tree'], extra: [mana.panel] },
+    { id: 'under', name: 'Underdark', groups: ['Underdark', 'Underdark cover', 'Ways down'], extra: [under.panel] },
     { id: 'peoples', name: 'Peoples', groups: [], extra: [peoples.panel] },
   ];
   const tabBody = h('div', { class: 'tab-body' });
@@ -857,6 +911,7 @@ export function showWorld(app: App, start: World): () => void {
     peoples?.setActive(t.id === 'peoples');
     provinces?.setActive(t.id === 'provinces');
     mana?.setActive(t.id === 'mana');
+    under?.setActive(t.id === 'under');
     tabButtons.forEach((b, i) => b.setAttribute('aria-selected', TABS[i] === t ? 'true' : 'false'));
     if (t.groups.length) tools.showGroups(t.groups);
     tabBody.replaceChildren(...(t.groups.length ? [notice, tools.el] : []), ...t.extra);
@@ -885,7 +940,7 @@ export function showWorld(app: App, start: World): () => void {
   const drops = [
     drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}`, false, mapPanel),
     drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}${look.provinces === 'lines' ? ' · province outlines' : look.provinces === 'colour' ? ' · provinces coloured' : ''}${look.mana === 'lines' ? ' · mana lines' : look.mana === 'heat' ? ' · mana heat map' : ''}`, false, lookPanel, zonesPanel),
-    drop('Layers', () => LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface', false, layersPanel),
+    drop('Layers', () => `${look.layer === 'underdark' ? 'Showing the Underdark · ' : ''}${LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface'}`, false, layersPanel),
     drop('Reference image', () => (world.reference ? 'One laid over the map' : 'None'), false, refPanel),
   ];
   const refreshDrops = () => drops.forEach((d) => d.refresh());

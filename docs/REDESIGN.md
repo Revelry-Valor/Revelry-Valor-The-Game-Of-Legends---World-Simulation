@@ -99,6 +99,40 @@ The world can have up to five layers. The extra layers are optional and shown wh
 ### Travel between layers
 - Airships and flying races travel between layers. Designed later, with the simulation.
 
+### Phase 12 decisions (agreed)
+
+- **Four steps**, each tried before the next:
+  1. the Underdark;
+  2. sky islands;
+  3. the canopy and giant vines;
+  4. the peoples on every layer.
+- **Seeing a layer:** a layer is chosen under View → Layers (or its own tab is opened). A sky layer or the canopy is drawn over a faded copy of the land below; the Underdark is only under land.
+- **Who lives where:** cave-, sky- and tree-dwelling races prefer their layer, but anyone can live where the land suits them.
+- **Underdark climate:** steady temperature, no rain. Water comes from underground seas, food from fungus.
+- **Mana and rifts** work on every layer, so a tide can come up from below through the cave entrances.
+- **Airships** arrive with a later technology. Until then only flyers and vines reach the sky islands.
+
+**Built (Phase 12, step 1): the Underdark.**
+
+- *Brushes* (the Underdark tab):
+  - Cavern (area), Tunnel (line) and Underground sea (area).
+  - Cover: Fungus forest, Glowing caves and Crystal caverns.
+  - Ways down: Cave entrance and Shaft (points).
+  - Each brush has only a size, plus roughness for areas.
+- *How painting works:* the strokes go in the world's one stroke list, so undo, erase and saving work as on the surface. They never change the surface, its climate or its provinces, and painting them doesn't rerun the climate.
+- *Painting rules:*
+  - Caverns and tunnels hollow the rock; erasing fills it back.
+  - A sea floods whatever is there; erasing drains it back to what was under it.
+  - Cover grows only on open, dry floor; erasing any cover brush clears the cover there.
+  - Only what lies under land counts. Beyond the coast is sea.
+- *Ways down:* each entrance or shaft opens into what lies under it (or within about 2 miles). One over solid rock is marked red as leading nowhere. Entrances are walked; shafts are sheer drops (climbers, flyers, ropes or lifts).
+- *On the map:*
+  - The Underdark tab (or View → Layers → Show: Underdark) draws it in place of the surface: dark rock under the land, the deep beyond it, shadowed hollows, blue seas and coloured cover. The surface's labels, provinces and peoples are hidden.
+  - On the surface, entrances show as small cave mouths and shafts as ringed wells.
+  - The tab sums up the caverns, tunnels, seas and cover, and counts the ways down. The hover readout says what is below.
+  - Painting the Underdark switches the layer on.
+- *Still to come (step 4):* the peoples living, digging tunnels (dwarf holds, rabbit warrens) and travelling down here.
+
 ---
 
 ## 6. The builder

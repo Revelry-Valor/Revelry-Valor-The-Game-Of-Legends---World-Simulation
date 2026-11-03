@@ -1,7 +1,7 @@
 import { freshWaters, geoCell, geoNames, lakeAt, riverAt, type GeoFeature } from '../core/geography';
 import { regionAt, waterAt } from '../core/finegeo';
 import { autoCoverName, climateAt, climateCrystals, nearestPoint, rainClass, RAIN_NAMES, sampleField, ZONE_INFO, type Climate, type FlowPath } from '../core/climate';
-import { brushInfo, inSeason, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
+import { brushInfo, inSeason, isUnderdark, penColour, roundPath, sketchCourse, strokeBounds, ZONES, type BrushId, type Stroke } from '../core/paint';
 import { cToF, kmPerDegree, latitudeAt, southLatitude } from '../core/settings';
 import { surfaceAt } from '../core/terrain';
 import { finishCourse, onWater } from '../core/water';
@@ -96,6 +96,8 @@ export interface MapOverlay {
   describe?(x: number, y: number): InfoItem[] | null;
   /** While shown, pressing the map never paints (it pans instead). */
   noPaint?: boolean;
+  /** It covers the surface (another layer is shown): the surface's labels are left off. */
+  hidesSurface?: boolean;
   /** The hand tool: select what is at a place (a city, a tribe…) without moving or changing anything. */
   pick?(x: number, y: number, pxKm: number): boolean;
 }
@@ -231,7 +233,7 @@ export function createMapView(o: MapViewOptions): MapView {
       ov.draw(g, (x, y, c) => [x0 + c * span + x * view.scale, yTop + y * view.scale], view.scale, copies);
     }
     const labels = look.labels ?? 'all';
-    if (cl?.geo && labels !== 'off') drawLabels(g, r, cl, x0, span, copies, labels);
+    if (cl?.geo && labels !== 'off' && !ov?.hidesSurface) drawLabels(g, r, cl, x0, span, copies, labels);
     if (o.tool().tool === 'name') drawNamePins(g, r);
     if (o.tool().tool === 'itcz') {
       drawSketches(g, r, x0, span, copies, 'itcz');
@@ -1497,7 +1499,8 @@ export function createMapView(o: MapViewOptions): MapView {
     st.pts = roundPath(st.pts);
     const live = o.begin(st);
     drawing = { stroke: live, pointer: e.pointerId };
-    cache.updateStroke(o.world().surface, live, strokeBounds(live));
+    // The Underdark's brushes never change the surface picture.
+    if (!isUnderdark(live.brush)) cache.updateStroke(o.world().surface, live, strokeBounds(live));
     schedule();
     if (brushInfo(live.brush).kind === 'point') drawing = null;
     return true;
@@ -1528,7 +1531,8 @@ export function createMapView(o: MapViewOptions): MapView {
     const grown: Stroke = { ...st, pts: [...p, ...roundPath([x, y])] };
     drawing.stroke = grown;
     o.update(grown);
-    cache.updateStroke(o.world().surface, grown, changedPart(grown));
+    // The Underdark's brushes never change the surface picture.
+    if (!isUnderdark(grown.brush)) cache.updateStroke(o.world().surface, grown, changedPart(grown));
     schedule();
   };
 

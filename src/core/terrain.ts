@@ -1,5 +1,5 @@
 import { fbm, noise2, random2, ridged, strokeSeed } from './noise';
-import { COVER_BRUSHES, strokeBounds, strokeReach, type CoverBrush, type Stroke, type Surface, type ZoneId } from './paint';
+import { COVER_BRUSHES, isUnderdark, strokeBounds, strokeReach, type CoverBrush, type Stroke, type Surface, type ZoneId } from './paint';
 import { flowAt, pointAt, riverNetwork, widthForFlow, type RiverInfo } from './water';
 
 /**
@@ -485,7 +485,7 @@ export function evaluate(surface: Surface, g: Grid, o: Options): Fields {
 
   for (const s of surface.strokes) {
     // Placed features and teaching sketches don't change the ground.
-    if (s.brush === 'whirlpool' || s.brush === 'crystal' || s.brush === 'current' || s.brush === 'high' || s.brush === 'wind' || s.brush === 'itcz' || s.brush === 'divide' || s.brush === 'join' || s.brush === 'name' || s.brush === 'root' || s.brush === 'treeAnchor') continue;
+    if (s.brush === 'whirlpool' || s.brush === 'crystal' || s.brush === 'current' || s.brush === 'high' || s.brush === 'wind' || s.brush === 'itcz' || s.brush === 'divide' || s.brush === 'join' || s.brush === 'name' || s.brush === 'root' || s.brush === 'treeAnchor' || isUnderdark(s.brush)) continue;
     if (!offsetsFor(s, g, o).length) continue;
     const seed = strokeSeed(o.seed, s.id);
     const er = !!s.erase;
