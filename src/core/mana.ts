@@ -8,7 +8,7 @@ import { whirlpools } from './terrain';
  * physical feature: ley lines between nodes, and the roots of the world tree. Where lines meet,
  * cross or run alongside each other more mana is released; the heat map shows it.
  *
- * - Ley line nodes: volcanoes, whirlpools, the poles and high-pressure zones from the start; dawn
+ * - Ley line nodes: volcanoes, whirlpools, the poles (globe maps only) and high-pressure zones from the start; dawn
  *   cities, temples (holy sites) and mage towers as the peoples build them. Each node is joined
  *   to its two or three nearest, a loose web that grows as nodes are added.
  * - World tree roots: drawn by hand (Root brush) or grown from the anchor you place, then edited
@@ -62,9 +62,13 @@ export function rootLines(surface: Surface, wrapKm: number): ManaLine[] {
   return out;
 }
 
-/** Where the map reaches the poles (a pole node in the middle of that edge). */
+/**
+ * Where the poles are nodes. Only a globe has them: on a flat map a pole would sit in the middle of
+ * an edge and its ley lines would draw a fixed line down the map.
+ */
 export function polesOf(s: WorldSettings): { widthKm: number; heightKm: number; north: boolean; south: boolean } {
-  return { widthKm: s.widthKm, heightKm: s.heightKm, north: s.northLatitude >= 85, south: southLatitude(s) <= -85 };
+  const globe = s.mapType === 'globe';
+  return { widthKm: s.widthKm, heightKm: s.heightKm, north: globe && s.northLatitude >= 85, south: globe && southLatitude(s) <= -85 };
 }
 
 /** Nodes the world has from the start: volcanoes, whirlpools, the poles (where the map reaches them) and high-pressure zones. */

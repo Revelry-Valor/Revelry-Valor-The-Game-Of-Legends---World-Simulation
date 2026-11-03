@@ -62,6 +62,10 @@ describe('ley lines and the heat map', () => {
     expect(nodes.filter((n) => n.kind === 'volcano').length).toBe(2);
     expect(nodes.some((n) => n.kind === 'pole')).toBe(false);
     expect(naturalNodes(surface, { ...polesOf(settings), north: true }).some((n) => n.kind === 'pole')).toBe(true);
+    // A flat map never has pole nodes, even reaching the poles; a globe does.
+    const full = { ...settings, northLatitude: 90 };
+    expect(polesOf({ ...full, mapType: 'flat' }).north).toBe(false);
+    expect(polesOf({ ...full, mapType: 'globe' }).north).toBe(true);
   });
 });
 

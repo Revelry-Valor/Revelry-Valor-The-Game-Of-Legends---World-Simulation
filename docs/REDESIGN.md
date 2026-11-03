@@ -303,7 +303,7 @@ How long the rift will last and how strong it is decide how often it must be loo
   2. Rifts: where they open, what they yield, and how realms hold them.
   3. Rift breaks, monster tides and hordes.
 - **World tree:** optional. You place the anchor in the Mana tab, then grow roots from it or draw them yourself. **Every root can be edited:** added, moved, changed between a main root and a sprout, or deleted.
-- **Ley line nodes at the start:** volcanoes, whirlpools, the poles (where the map reaches them), high-pressure zones and dawn cities. Each node links to its two or three nearest. Temples (holy sites held) and mage towers add nodes as they are built.
+- **Ley line nodes at the start:** volcanoes, whirlpools, the poles (globe maps only; on a flat map they would draw a fixed line down the middle), high-pressure zones and dawn cities. Each node links to its two or three nearest. Temples (holy sites held) and mage towers add nodes as they are built.
 - **What mana does for now:**
   - mana crystal deposits are richer on strong mana;
   - mana-sensitive peoples are drawn to it;

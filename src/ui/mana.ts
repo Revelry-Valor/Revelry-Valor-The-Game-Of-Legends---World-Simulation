@@ -108,7 +108,7 @@ export function createMana(d: ManaDeps): Mana {
     const kinds = new Map<string, number>();
     for (const nd of st?.nodes ?? []) kinds.set(nd.kind, (kinds.get(nd.kind) ?? 0) + 1);
     body.replaceChildren(
-      h('p', { class: 'muted small' }, 'Mana flows along ley lines between nodes (volcanoes, whirlpools, the poles, high-pressure zones, and as peoples build them dawn cities, temples and mage towers) and along the world tree’s roots. Where lines meet, cross or run together it is strongest. Place the tree’s anchor and grow its roots, or draw them yourself with the Root brush; every root can be moved, changed or deleted (Adjust, or erase).'),
+      h('p', { class: 'muted small' }, 'Mana flows along ley lines between nodes (volcanoes, whirlpools, the poles on a globe, high-pressure zones, and as peoples build them dawn cities, temples and mage towers) and along the world tree’s roots. Where lines meet, cross or run together it is strongest. Place the tree’s anchor and grow its roots, or draw them yourself with the Root brush; every root can be moved, changed or deleted (Adjust, or erase).'),
       h('h3', {}, 'World tree'),
       h('p', { class: 'small' }, anchor ? `Anchor placed; ${roots.length} root${roots.length === 1 ? '' : 's'} (${roots.filter((r) => r.rootSize === 'sprout').length} sprouts).` : 'No anchor yet: pick Tree anchor above and click where the roots enter the world.'),
       numberField({ label: 'Main roots', value: mains, min: 2, max: 12, step: 1, hint: 'How many main roots grow out from the anchor.', change: (v) => { if (v > 0) mains = Math.max(2, Math.min(12, Math.round(v))); } }),
@@ -123,7 +123,7 @@ export function createMana(d: ManaDeps): Mana {
         h('button', { type: 'button', class: 'ghost danger', disabled: !roots.length, onclick: () => { d.replaceRoots([]); render(); } }, 'Remove all roots'),
       ),
       h('h3', {}, 'Nodes'),
-      h('p', { class: 'small' }, kinds.size ? [...kinds].map(([k, n]) => `${n} ${NODE_NAMES[k as keyof typeof NODE_NAMES].toLowerCase()}${n === 1 ? '' : 's'}`).join(', ') + '.' : 'No nodes yet: volcanoes, whirlpools, high-pressure zones and the poles (where the map reaches them) are nodes from the start.'),
+      h('p', { class: 'small' }, kinds.size ? [...kinds].map(([k, n]) => `${n} ${NODE_NAMES[k as keyof typeof NODE_NAMES].toLowerCase()}${n === 1 ? '' : 's'}`).join(', ') + '.' : 'No nodes yet: volcanoes, whirlpools, high-pressure zones and the poles (on a globe) are nodes from the start.'),
       h('p', { class: 'muted small' }, 'While this tab is open the map shows the mana heat map, lines and nodes; elsewhere choose how mana shows under View.'),
     );
   };
