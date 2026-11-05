@@ -1,3 +1,4 @@
+import { buildLayerLand, type LayerLand } from './layers';
 import type { Climate } from '../core/climate';
 import { COVER_BRUSHES } from '../core/paint';
 import type { Beast, Library, Resource } from '../core/library';
@@ -101,6 +102,8 @@ export interface Env {
   /** The land's own mana (Phase 11): natural nodes, the world tree's roots and anchor, and the mana they give (0–1 at each point). */
   manaLand: { nodes: ManaNode[]; roots: ManaLine[]; anchor: { x: number; y: number } | null };
   manaBase: Float32Array;
+  /** The other layers' land (Phase 12): Underdark spots, ways down, islands, giant trees and vines. */
+  layers: LayerLand;
 }
 
 const smooth = (a: number, b: number, x: number) => {
@@ -226,7 +229,7 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface, provinces:
   // Mana crystals are richest where mana is dense.
   const crystal = res['mana-crystal'];
   if (crystal) for (let k = 0; k < n; k++) crystal[k] = Math.min(1, crystal[k] * (0.25 + 1.5 * manaBase[k]));
-  const env: Env = { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, res, resInfo, prov: null as unknown as ProvIndex, manaLand, manaBase };
+  const env: Env = { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, res, resInfo, prov: null as unknown as ProvIndex, manaLand, manaBase, layers: buildLayerLand(surface, cl) };
   attachProvinces(env, provinces);
   return env;
 }

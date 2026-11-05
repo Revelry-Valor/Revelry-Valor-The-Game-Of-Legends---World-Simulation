@@ -39,6 +39,9 @@ export interface PackedSim {
   rifts?: SimState['rifts'];
   tides?: SimState['tides'];
   hordes?: SimState['hordes'];
+  tunnels?: SimState['tunnels'];
+  dug?: SimState['dug'];
+  drift?: SimState['drift'];
   /** Runs of corruption in hundredths. */
   corruption?: number[];
   clans: SimState['clans'];
@@ -127,6 +130,9 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     rifts: sim.rifts ?? [],
     tides: sim.tides ?? [],
     hordes: sim.hordes ?? [],
+    tunnels: sim.tunnels ?? [],
+    dug: sim.dug ?? [],
+    drift: sim.drift ?? {},
     ...(sim.corruption ? { corruption: runs(Float32Array.from(sim.corruption, (v) => Math.round(v * 100))) } : {}),
     clans: sim.clans,
     sorties: sim.sorties,
@@ -209,6 +215,9 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     rifts: Array.isArray(p.rifts) ? p.rifts : [],
     tides: Array.isArray(p.tides) ? p.tides : [],
     hordes: Array.isArray(p.hordes) ? p.hordes : [],
+    tunnels: Array.isArray(p.tunnels) ? p.tunnels : [],
+    dug: Array.isArray(p.dug) ? p.dug : [],
+    drift: p.drift && typeof p.drift === 'object' ? p.drift : {},
     ...(() => {
       const c = new Float32Array(n);
       return p.corruption && unruns(p.corruption, n, c) ? { corruption: Float32Array.from(c, (v) => v / 100) } : {};

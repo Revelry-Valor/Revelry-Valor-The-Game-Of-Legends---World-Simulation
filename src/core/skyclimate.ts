@@ -1,6 +1,6 @@
 import { climateAt, sampleField, type Climate } from './climate';
 import { pathLength } from './paint';
-import { CLIMATE_DEFAULTS, type WorldSettings } from './settings';
+import { CLIMATE_DEFAULTS } from './settings';
 import { SKY_ALT_KM, SKY_RAIN, SKY_WIND, type SkyCover, type SkyIsland, type SkyLayer } from './sky';
 
 /** The climate up on the sky layers (kept apart from sky.ts, which the terrain reads). */
@@ -22,9 +22,9 @@ export interface SkyClimate {
  * world's altitude cooling), the winds blow harder and less rain falls the higher it is. Over the
  * sea the islands still get a sea-air share of rain.
  */
-export function skyClimate(cl: Climate, settings: WorldSettings, layer: SkyLayer, x: number, y: number): SkyClimate {
+export function skyClimate(cl: Climate, settings: { climate?: { altitudeCoolingC?: number } } | null, layer: SkyLayer, x: number, y: number): SkyClimate {
   const c = climateAt(cl, x, y);
-  const cooling = settings.climate?.altitudeCoolingC ?? CLIMATE_DEFAULTS.altitudeCoolingC;
+  const cooling = settings?.climate?.altitudeCoolingC ?? CLIMATE_DEFAULTS.altitudeCoolingC;
   const ground = Math.max(0, sampleField(cl, cl.height, x, y));
   // The ground's own air, brought back to sea level, then up to the layer.
   const lift = cooling * (SKY_ALT_KM[layer] - (c.land ? ground : 0));

@@ -8,6 +8,8 @@ import { choice, h } from './dom';
 import type { InfoItem } from './info';
 import type { MapOverlay } from './mapview';
 import { paintShape } from './underdark';
+import { drawLayerTowns } from './layertowns';
+import type { SimState } from '../sim/state';
 
 /**
  * The Trees & vines tab and the canopy view (Phase 12 step 3): giant trees (trunks on the land,
@@ -26,6 +28,9 @@ export interface CanopyDeps {
   /** Which layer the other views show now (when the canopy isn't shown). */
   shownLayer(): ShownLayer;
   setUsed(on: boolean): void;
+  /** The living peoples (their towns in the treetops), if any. */
+  live?(): SimState | null;
+  colourOf?(clan: number): string;
 }
 
 export interface Canopy {
@@ -270,6 +275,8 @@ export function createCanopy(d: CanopyDeps): Canopy {
       }
       g.restore();
       drawVines(g, vines(), at, scale, copies);
+      const sim = d.live?.();
+      if (sim) drawLayerTowns(g, sim.settlements.filter((st) => st.layer === 'canopy'), at, copies, (st) => d.colourOf?.(st.clan) ?? '#f3d27a');
     },
     describe(x, y) {
       const w = d.world();
@@ -290,7 +297,9 @@ export function createCanopy(d: CanopyDeps): Canopy {
         const n = t ? trees.indexOf(t) + 1 : 0;
         const city = treeCities(w.surface).find((c) => Math.hypot(c.x - x, c.y - y) < 4);
         items.push({ label: 'Canopy', value: t ? `Crown of giant tree ${n} (${Math.round(kmToMiles(t.crown * 2))} miles across)` : limbAt(w.surface, x, y) ? 'A great limb' : canopyGround(w.surface, x, y) ? 'Treetops' : 'Open air above the land' });
-        if (city) items.push({ label: 'Tree city', value: city.tree ? 'A site for a city in the treetops' : 'Not on a crown or limb' });
+        const town = d.live?.()?.settlements.find((st) => st.layer === 'canopy' && !st.ruined && Math.hypot(st.x - x, st.y - y) < 12);
+        if (town) items.push({ label: 'Town', value: `${town.name}, ${Math.round(town.pop).toLocaleString('en-US')} people` });
+        else if (city) items.push({ label: 'Tree city', value: city.tree ? 'A site for a city in the treetops' : 'Not on a crown or limb' });
       } else if (shown === 'surface') {
         const t = trees.find((k) => Math.hypot(k.x - x, k.y - y) <= k.crown);
         if (t) items.push({ label: 'Giant tree', value: Math.hypot(t.x - x, t.y - y) <= Math.max(t.trunk, 2) ? `Its trunk, ${Math.round(kmToMiles(t.trunk * 2) * 10) / 10} miles across` : 'Under its crown' });

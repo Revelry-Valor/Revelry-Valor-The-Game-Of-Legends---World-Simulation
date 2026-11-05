@@ -9,6 +9,9 @@ import { choice, h } from './dom';
 import type { InfoItem } from './info';
 import type { MapOverlay } from './mapview';
 import { paintShape } from './underdark';
+import { drawLayerTowns } from './layertowns';
+import type { SimState } from '../sim/state';
+import type { Stroke } from '../core/paint';
 
 /**
  * The Sky tab and map layer (Phase 12 step 2): floating islands on three sky layers, each with its
@@ -27,6 +30,9 @@ export interface SkyDeps {
   setUsed(l: SkyLayer, on: boolean): void;
   /** Set how an island drifts (one undo step). */
   setDrift(isl: SkyIsland, drift: SkyIsland['drift']): void;
+  /** The living peoples (their towns up here, and how far each island has drifted), if any. */
+  live?(): SimState | null;
+  colourOf?(clan: number): string;
 }
 
 export interface Sky {
@@ -82,6 +88,13 @@ export function createSky(d: SkyDeps): Sky {
     const strokes = w.surface.strokes.filter((s) => (s.sky ?? 1) === l);
     if (!strokes.some((s) => s.brush === 'skyisland' && !s.erase)) return;
     const islands = skyIslands(w.surface).filter((i) => i.layer === l);
+    // Where each island has drifted to while the peoples live (painted strokes follow their island).
+    const sim = d.live?.() ?? null;
+    const shiftOf = (id: number | undefined) => (id !== undefined && sim?.drift?.[id]) || { dx: 0, dy: 0 };
+    const islandOfStroke = new Map<number, number>();
+    for (const isl of islands) for (const s of isl.strokes) islandOfStroke.set(s.id, isl.id);
+    const strokeShift = (st: Stroke) => shiftOf(islandOfStroke.get(st.id) ?? islandAt(w.surface, l, st.pts[0], st.pts[1])?.id);
+    const moved = (sh: { dx: number; dy: number }) => (sh.dx || sh.dy ? (x: number, y: number, c: number) => at(x + sh.dx, y + sh.dy, c) : at);
     const colourOf = new Map<number, string>();
     for (const isl of islands) {
       const k = climateOf(isl);
@@ -96,8 +109,8 @@ export function createSky(d: SkyDeps): Sky {
     ground.setTransform(tf);
     cover.setTransform(tf);
     for (const st of strokes) {
-      if (st.brush === 'skyisland') paintShape(ground, st, colourOf.get(st.id) ?? COVER_COLOUR.meadow, at, scale, copies);
-      else if (PAINTED[st.brush]) paintShape(cover, st, PAINTED[st.brush], at, scale, copies);
+      if (st.brush === 'skyisland') paintShape(ground, st, colourOf.get(st.id) ?? COVER_COLOUR.meadow, moved(strokeShift(st)), scale, copies);
+      else if (PAINTED[st.brush]) paintShape(cover, st, PAINTED[st.brush], moved(strokeShift(st)), scale, copies);
     }
     ground.setTransform(1, 0, 0, 1, 0, 0);
     cover.setTransform(1, 0, 0, 1, 0, 0);
@@ -125,8 +138,9 @@ export function createSky(d: SkyDeps): Sky {
     g.save();
     for (const f of skyFalls(w.surface)) {
       if ((f.stroke.sky ?? 1) !== l) continue;
+      const fs = shiftOf(f.island?.id);
       for (const c of copies) {
-        const [x, y] = at(f.stroke.pts[0], f.stroke.pts[1], c);
+        const [x, y] = at(f.stroke.pts[0] + fs.dx, f.stroke.pts[1] + fs.dy, c);
         const grad = g.createLinearGradient(x, y, x, y + 22);
         grad.addColorStop(0, 'rgba(235,248,255,0.95)');
         grad.addColorStop(1, f.lands ? 'rgba(160,210,240,0.85)' : 'rgba(235,248,255,0)');
@@ -174,7 +188,8 @@ export function createSky(d: SkyDeps): Sky {
           const u = k?.windU ?? 1;
           const v = k?.windV ?? 0;
           const m = Math.hypot(u, v) || 1;
-          from = at(isl.x, isl.y, c);
+          const sh = shiftOf(isl.id);
+          from = at(isl.x + sh.dx, isl.y + sh.dy, c);
           tip = [from[0] + (u / m) * 34, from[1] - (v / m) * 34];
           g.beginPath();
           g.moveTo(...from);
@@ -191,6 +206,7 @@ export function createSky(d: SkyDeps): Sky {
       }
     }
     g.restore();
+    if (sim) drawLayerTowns(g, sim.settlements.filter((st) => st.layer === `sky${l}`), at, copies, (st) => d.colourOf?.(st.clan) ?? '#f3d27a');
   };
 
   // ---- The tab ----
@@ -266,7 +282,14 @@ export function createSky(d: SkyDeps): Sky {
       const l = showing();
       if (!l) return null;
       const w = d.world();
-      const isl = islandAt(w.surface, l, x, y);
+      // The island here, wherever it has drifted to.
+      const sim = d.live?.() ?? null;
+      let isl: SkyIsland | null = null;
+      for (const k of skyIslands(w.surface)) {
+        if (k.layer !== l) continue;
+        const sh = sim?.drift?.[k.id] ?? { dx: 0, dy: 0 };
+        if (islandAt(w.surface, l, x - sh.dx, y - sh.dy)?.id === k.id) isl = k;
+      }
       const items: InfoItem[] = [];
       if (!isl) {
         items.push({ label: `Sky layer ${l}`, value: 'Open sky' });
@@ -277,6 +300,8 @@ export function createSky(d: SkyDeps): Sky {
       const cl = d.climate();
       const here = cl ? skyClimate(cl, w.settings, l, x, y) : null;
       const cov = skyPaintedCover(w.surface, l, x, y) ?? (k ? autoSkyCover(k) : null);
+      const town = sim?.settlements.find((st) => st.layer === `sky${l}` && !st.ruined && Math.hypot(st.x - x, st.y - y) < 12);
+      if (town) items.push({ label: 'Town', value: `${town.name}, ${Math.round(town.pop).toLocaleString('en-US')} people` });
       items.push({ label: `Sky layer ${l}`, value: `Island ${n}${cov ? ` · ${SKY_COVER_NAMES[cov].toLowerCase()}` : ''} · ${isl.drift === 'fixed' ? 'fixed' : isl.drift === 'wind' ? 'drifts with the wind' : 'drifts along its path'}` });
       if (here) {
         items.push({ label: 'Up here, summer', value: `${fmtT(here.summerT)}, ${RAIN_NAMES[rainClass(here.summerRain)]}` });

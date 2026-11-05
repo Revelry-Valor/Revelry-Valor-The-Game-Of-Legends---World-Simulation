@@ -175,6 +175,41 @@ The world can have up to five layers. The extra layers are optional and shown wh
   - Painting switches the canopy (and a vine's sky layers) on.
 - *Still to come (step 4):* the peoples climbing, crossing and building up here.
 
+**Built (Phase 12, step 4): the peoples on every layer.** (`sim/layers.ts`)
+
+- *Towns on other layers:* a town can stand in the Underdark, the canopy or on a sky island. It is tagged with its layer and stands at a place on the map like any town, holding the province over or under it.
+- *Which layers a race likes:*
+  - From its species' preferred layers (Underdark, Trees, Sky), its movement (Digs, Tree-dwelling) and its traits' effects (Digs tunnels, Lives in trees, Flies between layers, Sees in the dark).
+  - Tunnelers count as at home below.
+- *Founding:* a full town sending out a village may found it on another layer when the way there is open. Peoples at home on a layer (or a town already up or down there) try that 80% of the time and take it if the way is open. Others try 15% of the time and take it when it suits them about as well as the land at hand. Only worlds with something painted on another layer make these rolls.
+  - *The Underdark:* down a cave entrance within about 95 miles (anyone), a shaft (climbers and flyers), or a way the people dig themselves (tunnelers; it is recorded as a dug way down). It favours fungus, crystal caverns, glowing caves and a nearby underground sea. Those who can't see in the dark like it less.
+  - *The canopy:* up a giant tree within about 135 miles (anyone can climb the bark). Tree-city sites come first, then crowns.
+  - *A sky layer:* on wings (about 250 miles), by airship (Airships or Mana airships, about 370 miles), or up a giant vine whose foot is within about 95 miles on the town's own layer. Island spots score by good ground, cold, and height.
+- *Food:* a town on another layer gets a share of what the land below gives, with a floor from its layer:
+  - Underdark: fungus farms, more with fungus and water close by.
+  - Canopy: the tree's fruit.
+  - Sky: the island's fields, by its ground and climate.
+- *Room:* towns there fill sooner.
+  - Underdark: by the open floor round them.
+  - Canopy: by the crown, shared.
+  - Sky: about 3 people per km² of island, shared.
+- *Defence:* storming a town on another layer is harder:
+  - Sky: ×1.8, or ×1.15 against flyers and airships.
+  - Underdark: ×1.4, or ×1.1 against diggers.
+  - Canopy: ×1.3, or ×1.1 against flyers.
+  - Monster tides and hordes can't reach the treetops or the islands.
+- *Tunnels:* each year a tunneling realm may dig a tunnel between two of its towns not yet joined, up to about 160 miles apart. A town it founds below is joined to its mother town. A realm's orders travel a tunnel at twice the walking pace (an underground road).
+- *Drift:* drifting islands move each year and carry their towns with them. With the wind, they are blown back off the edge of a map that leads nowhere. Along a path, they go there and back.
+- *On the map:*
+  - On the surface, a town on another layer carries a badge: ▼ the Underdark, ♣ the canopy, or the sky layer's number.
+  - Each layer's view draws its own towns in their realm's colours. The Underdark view adds the dug tunnels (dashed) and dug ways down.
+  - Islands are drawn where they have drifted to.
+  - The town card says which layer it is on, and the hover readouts name the town there.
+- *Saving:* tunnels, dug ways and drift are saved with the peoples.
+- *Painting while they live:* the peoples pick up new painting on the other layers as it happens.
+
+**Phase 12 is complete.**
+
 ---
 
 ## 6. The builder

@@ -289,6 +289,10 @@ export interface Settlement {
   tower?: number;
   /** The seat of its province: the one settlement there that can grow into a town or city (the rest stay villages). */
   seat?: boolean;
+  /** Built on another layer (Phase 12): the Underdark, the canopy or a sky layer; on the surface if unset. */
+  layer?: 'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3';
+  /** On a sky layer: the island it stands on (it moves with it). */
+  island?: number;
   /** Its economy (Phase 7): what it has in store and how its workers are split (both in units). */
   economy?: Economy;
   /** Technologies it knows beyond those every people starts with (library ids). */
@@ -547,6 +551,12 @@ export interface SimState {
   /** Monster tides out of broken rifts, and the hordes their alphas lead (monsters.ts). */
   tides?: Tide[];
   hordes?: Horde[];
+  /** Tunnels dug between towns (Phase 12): underground roads. */
+  tunnels?: { a: number; b: number; ax: number; ay: number; bx: number; by: number; clan: number; day: number }[];
+  /** Ways down dug by tunnelers where there was no cave entrance. */
+  dug?: { x: number; y: number; clan: number; day: number }[];
+  /** How far each drifting sky island has moved (by its first stroke's id), and where it is on its way. */
+  drift?: Record<number, { dx: number; dy: number; t: number; dir: number }>;
   corruption?: Float32Array;
   /** The world's setting for the gods (copied in from the world settings before each run). */
   gods?: { active: boolean; activity: number };

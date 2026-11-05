@@ -1,5 +1,6 @@
 import { fight, total, type Ground, type Side } from './battle';
 import { PK } from './land';
+import { beyondMonsters } from './layers';
 import { riftKind, type Rift } from './rifts';
 import type { Hero, Settlement, SimState, Units } from './state';
 import { WALL_MIGHT, wallLevel, type WarContext } from './wars';
@@ -75,7 +76,8 @@ export interface Horde {
 /** A tide with fewer monsters than this has ebbed away. */
 const TIDE_ENDS = 40;
 
-const live = (sim: SimState) => sim.settlements.filter((s) => !s.ruined);
+// Monsters walk the land: towns in the treetops and on the sky islands are beyond them (layers.ts).
+const live = (sim: SimState) => sim.settlements.filter((s) => !s.ruined && !beyondMonsters(s));
 const cellAt = (c: WarContext, x: number, y: number) => c.cellAt(x, y);
 
 /** The ground at a place, for a battle. */

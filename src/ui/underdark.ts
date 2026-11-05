@@ -4,6 +4,8 @@ import { shapeOf, tunnelLength, underdarkAt, underdarkSummary, underStrokes, UND
 import { formatDistance, kmToMiles } from '../core/units';
 import type { World } from '../core/world';
 import { h } from './dom';
+import { drawLayerTowns } from './layertowns';
+import type { SimState } from '../sim/state';
 import type { InfoItem } from './info';
 import type { MapOverlay } from './mapview';
 
@@ -21,6 +23,10 @@ export interface UnderdarkDeps {
   shownElsewhere(): boolean;
   /** Switch the layer on or off for this world. */
   setUsed(on: boolean): void;
+  /** The living peoples (their towns down here, their tunnels and the ways they dug), if any. */
+  live?(): SimState | null;
+  /** A realm's colour on the map. */
+  colourOf?(clan: number): string;
 }
 
 export interface Underdark {
@@ -245,7 +251,25 @@ export function createUnderdark(d: UnderdarkDeps): Underdark {
       g.shadowBlur = 0;
       g.shadowColor = 'transparent';
       g.setTransform(tf);
-      if (ways.length) drawWays(g, ways, at, copies, true);
+      const sim = d.live?.() ?? null;
+      // Tunnels the peoples dug between their towns: underground roads.
+      if (sim?.tunnels?.length) {
+        g.strokeStyle = '#d9b97c';
+        g.lineWidth = 2;
+        g.setLineDash([5, 4]);
+        for (const t of sim.tunnels) {
+          for (const c of copies) {
+            g.beginPath();
+            g.moveTo(...at(t.ax, t.ay, c));
+            g.lineTo(...at(t.bx, t.by, c));
+            g.stroke();
+          }
+        }
+        g.setLineDash([]);
+      }
+      const dug: WayDown[] = (sim?.dug ?? []).map((q, i) => ({ id: -1 - i, kind: 'entrance', x: q.x, y: q.y, below: 'tunnel' }));
+      if (ways.length || dug.length) drawWays(g, [...ways, ...dug], at, copies, true);
+      if (sim) drawLayerTowns(g, sim.settlements.filter((st) => st.layer === 'underdark'), at, copies, (st) => d.colourOf?.(st.clan) ?? '#f3d27a');
       g.restore();
     },
     describe(x, y) {
@@ -266,6 +290,8 @@ export function createUnderdark(d: UnderdarkDeps): Underdark {
       }
       const u = underdarkAt(underStrokes(w.surface), x, y);
       items.push({ label: 'Underdark', value: UNDER_NAMES[u.kind] + (u.cover ? ` · ${UNDER_NAMES[u.cover].toLowerCase()}` : '') });
+      const town = d.live?.()?.settlements.find((st) => st.layer === 'underdark' && !st.ruined && Math.hypot(st.x - x, st.y - y) < 12);
+      if (town) items.push({ label: 'Town below', value: `${town.name}, ${Math.round(town.pop).toLocaleString('en-US')} people` });
       return items;
     },
   };

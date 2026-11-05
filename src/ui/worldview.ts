@@ -921,6 +921,8 @@ export function showWorld(app: App, start: World): () => void {
   under = createUnderdark({
     world: () => world,
     climate: () => climate.climate,
+    live: () => peoples?.live() ?? null,
+    colourOf: (clan) => peoples?.live()?.clans.find((q) => q.id === clan)?.colour ?? '#f3d27a',
     shownElsewhere: () => look.layer === 'underdark' && tabNow !== 'sky' && tabNow !== 'canopy',
     setUsed(on) {
       world = { ...world, layers: { ...world.layers, underdark: on } };
@@ -933,6 +935,8 @@ export function showWorld(app: App, start: World): () => void {
   sky = createSky({
     world: () => world,
     climate: () => climate.climate,
+    live: () => peoples?.live() ?? null,
+    colourOf: (clan) => peoples?.live()?.clans.find((q) => q.id === clan)?.colour ?? '#f3d27a',
     shownElsewhere: () => (tabNow === 'under' || tabNow === 'canopy' || !look.layer.startsWith('sky') ? null : (Number(look.layer.slice(3)) as SkyLayer)),
     layerPicked: () => map.redraw(),
     setUsed(l, on) {
@@ -955,6 +959,8 @@ export function showWorld(app: App, start: World): () => void {
   canopy = createCanopy({
     world: () => world,
     climate: () => climate.climate,
+    live: () => peoples?.live() ?? null,
+    colourOf: (clan) => peoples?.live()?.clans.find((q) => q.id === clan)?.colour ?? '#f3d27a',
     shownElsewhere: () => look.layer === 'canopy' && tabNow !== 'sky' && tabNow !== 'under',
     shownLayer: (): ShownLayer => {
       if (under?.showing()) return 'underdark';

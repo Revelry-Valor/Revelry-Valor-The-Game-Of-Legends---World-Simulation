@@ -11,7 +11,8 @@ import { hasPact, noteAttack, relationOf } from './politics';
 import type { Army, Battle, BattleReport, Clan, Hero, RealmRelation, Settlement, SimState, Units, War, WarReason } from './state';
 import { fight, kindName, total, UNIT_KINDS, type Ground, type Side } from './battle';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer } from './state';
-import { armsMight, knows } from './tech';
+import { armsMight, clanKnows, knows } from './tech';
+import { layerWalls } from './layers';
 import { FORD_SLOW, WAYS } from './ways';
 
 /**
@@ -42,7 +43,7 @@ export interface WarContext extends NationContext {
   might: (race: string, culture: string) => number;
   speed: (race: string, culture: string) => number;
   /** A race's gifts in war: flying, mountain-born, and its specialty (for its specialist troops). */
-  racial?: (race: string) => { flies: boolean; mountains: boolean; specialty: string };
+  racial?: (race: string) => { flies: boolean; mountains: boolean; specialty: string; digs?: boolean };
 }
 
 // ---- Fighters by kind (Phase 10 step 2).
@@ -598,9 +599,14 @@ function assault(c: WarContext, war: War, a: Army, st: Settlement, wallsNow?: nu
   // Starving defenders fight the weaker.
   const hunger = clamp(st.fed, 0.4, 1);
   const guards = (freeing ? st.occupied!.garrison : Math.max(1, st.warband + st.pop * 0.05)) * hunger;
-  const walls = wallsNow ?? (!freeing ? WALL_MIGHT[wallLevel(lib, st, isCapital(sim, st))] : 1);
   const ground = groundAt(c, st.x, st.y);
   const sa = sideOfArmy(c, a, false);
+  // A town on another layer is harder to reach (layers.ts): sky islands most of all, unless the
+  // attackers fly or come by airship.
+  const att = clan && c.racial ? c.racial(clan.race) : null;
+  const ships = !!clan && (clanKnows(lib, clan, 'airships') || clanKnows(lib, clan, 'mana-airships'));
+  const height = layerWalls(st, { flies: !!att?.flies, airships: ships, digs: !!att?.digs });
+  const walls = (wallsNow ?? (!freeing ? WALL_MIGHT[wallLevel(lib, st, isCapital(sim, st))] : 1)) * height;
   const race = holder && c.racial ? c.racial(holder.race) : { flies: false, mountains: false, specialty: '' };
   const sd: Side = { label: freeing ? `the garrison of ${st.name}` : `the defenders of ${st.name}`, units: { foot: guards * 0.7, archers: guards * 0.3, riders: 0, specialists: 0 }, heroes: [], morale: 1, might: holder ? c.might(holder.race, holder.culture) : 1, arms: holder ? armsOf(c, holder) : 1, ranged: rangedOf(c, holder), defending: true, walls: walls * 1.2, mountain: race.mountains, flies: race.flies, specialistName: 'specialists' };
   const before: [Units, Units] = [{ ...sa.units }, { ...sd.units }];

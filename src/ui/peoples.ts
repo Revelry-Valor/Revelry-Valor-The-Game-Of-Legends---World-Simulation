@@ -28,6 +28,7 @@ import type { ProvinceMap } from '../core/provinces';
 import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
 import { manaAtPlace, manaLinesNow, manaNow } from '../sim/mana';
 import { CORRUPTION_RIFT, HOLD_NAMES, type Rift } from '../sim/rifts';
+import { buildLayerLand, LAYER_NAMES } from '../sim/layers';
 import { tideAt, type Horde } from '../sim/monsters';
 import { manaWord } from '../core/mana';
 import type { ManaState } from './mana';
@@ -75,6 +76,8 @@ export interface Peoples {
   climateChanged(): void;
   /** The simulation packed for saving (null if there is none). */
   pack(): PackedSim | null;
+  /** The live simulation, for the other layers' views (their towns, tunnels and drifting islands); null when none. */
+  live(): SimState | null;
   /** The selected settlement's or realm's resources (for the resource panel), or null. */
   resources(): ResourceView | null;
   dispose(): void;
@@ -125,10 +128,23 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   // ---------------------------------------------------------------------------------------------
   // The environment and the state
 
+  /**
+   * The other layers' land, read again when their painting changed (painting the Underdark, the
+   * sky or the trees leaves the surface's climate, and so the rest of the environment, alone).
+   */
+  let layersFor: unknown = null;
+  const freshLayers = () => {
+    const c = cl();
+    const strokes = d.surface().strokes;
+    if (!env || !c || layersFor === strokes) return;
+    env.layers = buildLayerLand(d.surface(), c);
+    layersFor = strokes;
+  };
   const climateChanged = () => {
     const c = cl();
     if (!c) return;
     env = buildEnv(c, lib(), d.surface(), d.provinces());
+    layersFor = d.surface().strokes;
     if (!sim && pending) {
       sim = unpackSim(pending, env);
       if (!sim) {
@@ -210,6 +226,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     if (n > 0) {
       acc -= n;
       sim.gods = d.world().settings.gods ?? { active: true, activity: 50 };
+      freshLayers();
       stepDays(sim, env, lib(), n);
       afterStep();
       if (!alive()) {
@@ -248,6 +265,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       while (left > 0 && performance.now() - t0 < 30) {
         const n = Math.min(DAYS_PER_MONTH, left);
         sim!.gods = d.world().settings.gods ?? { active: true, activity: 50 };
+        freshLayers();
         stepDays(sim!, env!, lib(), n);
         left -= n;
       }
@@ -834,6 +852,25 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.strokeStyle = st.id === selected ? '#ffffff' : st.holyTo.length ? '#f2c230' : 'rgba(0,0,0,0.8)';
           g.stroke();
           g.setLineDash([]);
+          // A town on another layer: a badge for where it is (▼ the Underdark, ♣ the canopy, ▲ a sky layer).
+          if (st.layer) {
+            const bx = sx - r - 2;
+            const by = sy - r - 2;
+            g.beginPath();
+            g.arc(bx, by, 5.5, 0, Math.PI * 2);
+            g.fillStyle = st.layer === 'underdark' ? '#3b2f28' : st.layer === 'canopy' ? '#2f6b2a' : '#3a6fa8';
+            g.fill();
+            g.strokeStyle = '#ffffff';
+            g.lineWidth = 1;
+            g.stroke();
+            g.fillStyle = '#ffffff';
+            g.font = 'bold 8px sans-serif';
+            g.textAlign = 'center';
+            g.textBaseline = 'middle';
+            g.fillText(st.layer === 'underdark' ? '▼' : st.layer === 'canopy' ? '♣' : st.layer.slice(3), bx, by + 0.5);
+            g.textAlign = 'start';
+            g.textBaseline = 'alphabetic';
+          }
           // A realm's capital: a crown above the house.
           const cap = !st.ruined && clanOf(st.clan)?.realm?.capital === st.id;
           if (cap) {
@@ -1922,6 +1959,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         h('h3', {}, st.name),
         h('div', { class: 'tribe-card small' },
           h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)}` : `${settlementTier(st)}${st.seat === false ? ': another settlement is its province’s seat, so it stays a village' : ''}`),
+          st.layer ? h('div', {}, `In ${LAYER_NAMES[st.layer]}${st.layer.startsWith('sky') ? ' (on an island; it moves if the island drifts)' : st.layer === 'underdark' ? ' (fed by its fungus farms and the land above)' : ' (up a giant tree)'}.`) : null,
           st.holyTo.length ? h('div', { class: 'holy-tag' }, `Holy to all the ${st.holyTo.map(raceName).join(', ')}, wherever they are${st.ruined ? ', even in ruin' : ''}.`) : null,
           st.tower !== undefined && !st.ruined ? h('div', {}, `A mage tower (raised in year ${yearOf(st.tower)}): a node on the ley lines; mana here is ${env ? manaWord(manaAtPlace(sim!, env, st.x, st.y)) : '?'}.`) : null,
           st.ruined
@@ -2133,6 +2171,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       return { lines, nodes, anchor: env.manaLand.anchor, grid: { x0: env.x0, y0: env.y0, step: env.step, w: env.w, h: env.h, wrapKm: env.wrapKm }, field: manaNow(sim, env) };
     },
     provincesChanged,
+    live: () => (sim && env && !gridProblem ? sim : null),
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),
     resources: resourceView,
     dispose() {

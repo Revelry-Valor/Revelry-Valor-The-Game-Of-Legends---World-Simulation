@@ -1,5 +1,6 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { hordesDay, monstersMonth } from './monsters';
+import { digYear, driftYear, layerFood, layerRoom, layerSpot, layerWays, LAYER_NAMES, type LayerContext, type LayerLand, type LayerWays } from './layers';
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
@@ -54,6 +55,8 @@ export interface RaceInfo {
   attitude: string;
   /** Feels mana: drawn to dense mana, unsettled where it is thin (the Mana-sensitive trait). */
   manaSensitive: boolean;
+  /** What it brings to the other layers: digging, and the layers it prefers (Phase 12). */
+  lw: LayerWays;
 }
 
 const SIZE_NEED: Record<string, number> = { Tiny: 0.3, Small: 0.6, Medium: 1, Large: 1.6, Giant: 3 };
@@ -97,6 +100,7 @@ export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures:
       lifestyle: race.lifestyle || species.lifestyle || 'Semi-nomadic',
       attitude: p.attitude || 'Wary',
       manaSensitive: traits.has('mana-sensitive'),
+      lw: layerWays(lib, species, race),
     };
   }
   return null;
@@ -155,6 +159,12 @@ function dist(env: Env, ax: number, ay: number, bx: number, by: number): number 
   if (env.wrapKm) dx = Math.min(dx, env.wrapKm - dx);
   return Math.hypot(dx, ay - by);
 }
+const NO_LAYERS: LayerLand = { under: [], underStep: 20, ways: [], islands: [], trees: [], cities: [], vines: [] };
+/** What the layer rules (layers.ts) need. */
+function layerContext(sim: SimState, env: Env, lib: Library): LayerContext {
+  return { sim, layers: env.layers ?? NO_LAYERS, dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), rand: () => rand(sim), has: (st, id) => knows(lib, st, id), log: (text, x, y) => log(sim, text, x, y) };
+}
+
 /** Cells within `r` km of a place (always at least the one under it). */
 function cellsNear(env: Env, x: number, y: number, r: number): number[] {
   const out: number[] = [];
@@ -877,6 +887,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   // Settlements: fed from the land round them, worked harder than a tribe can (gardens and stores).
+  const lc = layerContext(sim, env, lib);
   for (const st of sim.settlements) {
     if (st.ruined) continue;
     const ri = info(st);
@@ -887,6 +898,11 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     // Under siege only the fields within the walls are worked, and the besiegers trample the crop.
     if (st.besieged && st.economy) st.economy.crop *= 0.7;
     st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
+    // On another layer: less from the land below, and what the layer itself grows (layers.ts).
+    if (st.layer) {
+      const lf = layerFood(lc, st);
+      st.fed = Math.max(st.fed * lf.mul, lf.floor);
+    }
     if (st.fed < 0.8) st.hardship = { famine: (st.hardship?.famine ?? 0) + (1 - st.fed) / 6, war: st.hardship?.war ?? 0 };
     if (st.fed < 0.6) note(sim, st.culture, 'famines');
     if (st.fed < 0.6 && !sim.events.some((e) => e.text.startsWith(`Famine in ${st.name}`) && sim.day - e.day < DAYS_PER_YEAR)) log(sim, `Famine in ${st.name}: its stores are gone${st.economy?.harvest && st.economy.harvest.year < 0.8 ? ' after a bad harvest' : ''}.`, st.x, st.y);
@@ -945,7 +961,7 @@ function warContext(sim: SimState, env: Env, lib: Library, info: Info): WarConte
     speed: (race, culture) => (info({ race, culture })?.speed ?? 15) * 0.9,
     racial: (race) => {
       const ri = info({ race, culture: '' });
-      return { flies: !!ri?.flies, mountains: !!ri?.mountains, specialty: ri?.race.specialty ?? '' };
+      return { flies: !!ri?.flies, mountains: !!ri?.mountains, specialty: ri?.race.specialty ?? '', digs: !!ri?.lw.digs };
     },
   };
 }
@@ -1014,6 +1030,12 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   settlementsYearly(sim, env, lib, info);
+  // The other layers: drifting islands carry their towns; tunnelers join their towns underground.
+  if (env.layers) {
+    const lc = layerContext(sim, env, lib);
+    driftYear(lc, env.w * env.step, env.h * env.step, env.wrapKm);
+    digYear(lc, (st) => !!info(st)?.lw.digs);
+  }
   // Discoveries, learning and forgetting (tech.ts).
   techYear(techContext(sim, env, lib));
   // Mana: towns on strong mana that chart ley lines raise mage towers, new nodes (mana.ts).
@@ -1083,7 +1105,7 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
   if (!canSettle((id) => clanKnows(lib, clan, id), wk >= 0 && (env.coast[wk] === 1 || env.fresh[wk] === 1 || spring))) return false;
   const k = cellOf(env, t.winter.x, t.winter.y);
   if (k < 0 || !env.land[k] || !passable(env, ri, k)) return false;
-  if (sim.settlements.some((s) => !s.ruined && dist(env, s.x, s.y, t.winter.x, t.winter.y) < ri.range * 3)) return false;
+  if (sim.settlements.some((s) => !s.ruined && !s.layer && dist(env, s.x, s.y, t.winter.x, t.winter.y) < ri.range * 3)) return false;
   const score = liveScore(env, ri, k);
   const rich = score >= 1.4 ? 1 : score >= 1.05 ? 0.5 : 0;
   let crowd = 0;
@@ -1105,8 +1127,10 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
  */
 function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // Every settlement on the painted land (older ones set down between the grid's points moved onto it).
-  for (const st of sim.settlements) Object.assign(st, landPoint(env, st.x, st.y));
+  // (Sky towns float with their islands, over land or sea.)
+  for (const st of sim.settlements) if (!st.layer?.startsWith('sky')) Object.assign(st, landPoint(env, st.x, st.y));
   const seatOf = chooseSeats(sim, env);
+  const lc = layerContext(sim, env, lib);
   for (const st of [...sim.settlements]) {
     if (st.ruined) continue;
     const ri = info(st);
@@ -1118,8 +1142,10 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       st.pop -= go;
       seat.pop += go;
     }
-    const full = st.pop > (st.kind === 'dawn' ? 900 : st.seat ? 450 : 300) && st.fed >= 0.9;
-    const pressed = st.pop > 300 && st.fed < 0.85;
+    // A town on another layer is full sooner where there is little room (layers.ts).
+    const room = layerRoom(lc, st);
+    const full = st.pop > Math.min(st.kind === 'dawn' ? 900 : st.seat ? 450 : 300, room) && st.fed >= 0.9;
+    const pressed = (st.pop > 300 && st.fed < 0.85) || st.pop > room * 1.3;
     if (!full && !pressed) continue;
     const n = Math.round(Math.max(80, Math.min(250, st.pop * (0.15 + 0.1 * rand(sim)))));
     const village = rand(sim) < (ri.lifestyle === 'Settled' ? 0.7 : ri.lifestyle === 'Nomadic' ? 0.2 : 0.5);
@@ -1133,7 +1159,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       const y = st.y + Math.sin(a) * d;
       const k = cellOf(env, x, y);
       if (k < 0 || !env.land[k] || !passable(env, ri, k)) continue;
-      if (sim.settlements.some((o) => dist(env, o.x, o.y, x, y) < R * 1.3)) continue;
+      if (sim.settlements.some((o) => !o.layer && dist(env, o.x, o.y, x, y) < R * 1.3)) continue;
       // Better in a province of its own (a new town needs a province without one); others' land worse.
       const pk = provAt(env, x, y);
       // Rifts draw settlers: their wealth, and their springs.
@@ -1144,6 +1170,26 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     }
     const clan = sim.clans.find((c) => c.id === st.clan);
     if (!clan) continue;
+    // A village on another layer, where the way is open: likelier for peoples at home there, and
+    // for a town already up or down there (layers.ts).
+    const otherLayers = lc.layers.under.length || lc.layers.trees.length || lc.layers.islands.length;
+    if (village && otherLayers) {
+      const lw = ri.lw;
+      const p = st.layer ? 0.8 : lw.under || lw.trees || lw.sky ? 0.8 : 0.15;
+      const alt = rand(sim) < p ? layerSpot(lc, st, ri, lw, R * 1.3) : null;
+      const home = alt && ((alt.layer === 'underdark' && lw.under) || (alt.layer === 'canopy' && lw.trees) || (alt.layer.startsWith('sky') && lw.sky));
+      // Others go where it suits them about as well as the land at hand (the layers score lower than the open land).
+      if (alt && alt.s > 0 && (home || st.layer || !spot || alt.s >= spot.s * 0.5)) {
+        st.pop -= n;
+        const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: alt.x, y: alt.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, alt.x, alt.y, sim.day)), techs: [...(st.techs ?? [])], layer: alt.layer, ...(alt.island ? { island: alt.island } : {}) };
+        sim.settlements.push(v);
+        if (alt.dug) (sim.dug ??= []).push({ x: st.x, y: st.y, clan: st.clan, day: sim.day });
+        if (lw.digs && alt.layer === 'underdark') (sim.tunnels ??= []).push({ a: st.id, b: v.id, ax: st.x, ay: st.y, bx: v.x, by: v.y, clan: st.clan, day: sim.day });
+        const how = alt.layer === 'underdark' ? (alt.dug ? 'dug down and founded' : 'went down into the Underdark and founded') : alt.layer === 'canopy' ? 'climbed a giant tree and founded' : ri.flies ? 'flew up and founded' : knows(lib, st, 'airships') || knows(lib, st, 'mana-airships') ? 'sailed up by airship and founded' : 'climbed a giant vine and founded';
+        log(sim, `People of ${st.name} ${how} ${v.name} in ${LAYER_NAMES[alt.layer]}.`, v.x, v.y);
+        continue;
+      }
+    }
     if (village && spot && spot.s > 0) {
       st.pop -= n;
       Object.assign(spot, landPoint(env, spot.x, spot.y));

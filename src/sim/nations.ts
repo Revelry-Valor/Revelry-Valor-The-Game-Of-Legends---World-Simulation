@@ -8,6 +8,7 @@ import type { Clan, Realm, Ruler, Settlement, SimState } from './state';
 import { DAYS_PER_YEAR } from './state';
 import { clanKnows, knows } from './tech';
 import { pathCells, pathSpeed } from './ways';
+import { tunnelBetween } from './layers';
 
 /**
  * Nations and how they are ruled (REDESIGN.md 8.4a–c, Phase 9 step 1).
@@ -270,6 +271,9 @@ export function ensureRealm(c: RulerContext, clan: Clan): Realm {
 function orderDays(c: NationContext, from: Settlement, to: Settlement, riders: boolean): number {
   const km = c.dist(from.x, from.y, to.x, to.y);
   if (km < 1) return 0;
+  // A tunnel between them is an underground road (layers.ts).
+  const tunnel = tunnelBetween(c.sim, from, to);
+  if (tunnel !== null) return tunnel / ((riders ? RIDER_KM : FOOT_KM) * 2);
   const speed = pathSpeed(c.sim, pathCells(c.env, from.x, from.y, to.x, to.y, c.cellAt), c.env.fresh);
   return km / ((riders ? RIDER_KM : FOOT_KM) * speed);
 }
