@@ -155,6 +155,26 @@ The world can have up to five layers. The extra layers are optional and shown wh
   - The tab lists each island on the layer (size, cover, waterfalls, summer and winter climate, winds) with its drift. The hover readout gives the island and the climate up there.
   - Painting a sky layer switches it on.
 
+**Built (Phase 12, step 3): giant trees, the canopy and giant vines.**
+
+- *Brushes* (the Trees & vines tab):
+  - **Giant tree** (point): its width is the crown's, about a tenth of that is the trunk, and the crown is lobed and leafy.
+  - **Limb** (line): roads through the canopy, and bridges where they reach another crown. Erasing cuts them.
+  - **Tree city** (point): a site on a crown or limb.
+  - **Giant vine** (line, dragged from start to end): the tab sets the layer each end is on (surface, canopy, or sky 1–3).
+  - None of it changes the surface, its climate or its provinces.
+  - Erasing at a trunk fells its tree. Erasing over a vine or city takes it away.
+- *Checks:*
+  - A tree city on neither crown nor limb is marked red.
+  - A vine's ends must hold, each within a few miles: a surface end on land, a canopy end on a crown or limb, a sky end on an island of that layer. If one doesn't, the vine is outlined red and the tab says which end and why.
+  - Vines can't be cut.
+- *On the map:*
+  - The Trees & vines tab, or View → Layers → Show: Canopy, draws the canopy over a hazy copy of the land, with crowns, limbs, tree cities (gold, or red) and every vine. Each vine end is marked S, C, 1, 2 or 3 for its layer.
+  - On the surface, trunks show with the crown's outline dashed around them, along with the vines with an end on the surface. Each sky layer shows the vines that reach it.
+  - The tab sums up the trees, limbs, cities and vines. The hover readout gives the crown, limb, city or vine.
+  - Painting switches the canopy (and a vine's sky layers) on.
+- *Still to come (step 4):* the peoples climbing, crossing and building up here.
+
 ---
 
 ## 6. The builder

@@ -1,4 +1,4 @@
-import { pathLength, type BrushId, type Stroke, type Surface } from './paint';
+import { brushInfo, pathLength, type BrushId, type Stroke, type Surface } from './paint';
 
 /**
  * The Underdark (REDESIGN.md, section 5): caverns, tunnels and underground seas cut into the rock
@@ -53,6 +53,17 @@ export function dabsOf(st: Stroke): number[] {
     }
     k++;
   };
+  if (p.length < 4 && st.brush === 'gianttree') {
+    // A giant tree's crown: a round middle ringed by leafy lobes.
+    out.push(p[0], p[1], r0 * 0.68);
+    const lobes = 7;
+    for (let i = 0; i < lobes; i++) {
+      const a = (i / lobes) * Math.PI * 2 + hash(st.id, 91) * 6;
+      const d = r0 * (0.42 + 0.12 * hash(st.id * 31 + i, 5));
+      out.push(p[0] + Math.cos(a) * d, p[1] + Math.sin(a) * d, r0 * (0.42 + 0.14 * hash(st.id * 37 + i, 9)));
+    }
+    return out;
+  }
   if (p.length < 4) {
     put(p[0], p[1]);
     return out;
@@ -105,7 +116,8 @@ const shapeCache = new WeakMap<Stroke, UnderShape>();
 export function shapeOf(st: Stroke): UnderShape {
   const hit = shapeCache.get(st);
   if (hit) return hit;
-  const dabs = st.brush === 'tunnel' ? [] : dabsOf(st);
+  // Lines (tunnels, limbs, vines, paths) are a path with a width; everything else is dabs.
+  const dabs = brushInfo(st.brush).kind === 'line' ? [] : dabsOf(st);
   const half = st.size / 2;
   let x0 = Infinity;
   let y0 = Infinity;
