@@ -3,7 +3,7 @@ import { computeClimate, type Climate } from '../src/core/climate';
 import { evaluate } from '../src/core/terrain';
 import { brushDefaults, offSurface, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { defaultSettings } from '../src/core/settings';
-import { islandArea, islandAt, skyFalls, skyGround, skyIslands, skyPaintedCover } from '../src/core/sky';
+import { DRIFT, islandArea, islandAt, skyFalls, skyGround, skyIslands, skyPaintedCover } from '../src/core/sky';
 import { autoSkyCover, driftPerYear, skyClimate } from '../src/core/skyclimate';
 
 const settings = defaultSettings({ widthKm: 2000, heightKm: 1500, northLatitude: 50, seed: 9 });
@@ -45,36 +45,20 @@ describe('sky islands', () => {
     expect(skyPaintedCover(surface, 1, 110, 100)).toBeNull();
   });
 
-  it('drifts along a path drawn from it, or with the wind, or stays fixed', () => {
-    const { surface, add } = mk();
-    const first = add('skyisland', [100, 100], { size: 40, sky: 1 });
-    expect(skyIslands(surface)[0].drift).toBe('fixed');
-    add('skypath', [100, 100, 300, 100, 400, 200], { sky: 1 });
-    expect(skyIslands(surface)[0].drift).toBe('path');
-    expect(driftPerYear(skyIslands(surface)[0], null)).toBeGreaterThan(0);
-    first.drift = 'wind';
-    surface.strokes = surface.strokes.slice();
-    expect(skyIslands(surface)[0].drift).toBe('wind');
-    first.drift = 'path';
-    add('skypath', [300, 100], { sky: 1, size: 10, erase: true });
-    expect(skyIslands(surface)[0].path).toBeNull();
-    expect(skyIslands(surface)[0].drift).toBe('fixed');
-  });
-
-  it('lands a fixed island’s waterfalls on the ground below, never a drifting one’s', () => {
+  it('keeps every island fixed while drifting is on hold, and lands its waterfalls on the ground below', () => {
     const { surface, add } = mk();
     add('land', [1000, 750], { size: 1200, softness: 0.2 });
     const isl = add('skyisland', [1000, 750], { size: 60, sky: 1 });
+    add('skypath', [1000, 750, 1300, 750], { sky: 1 });
+    isl.drift = 'wind';
+    surface.strokes = surface.strokes.slice();
+    expect(DRIFT).toBe(false);
+    expect(skyIslands(surface)[0].drift).toBe('fixed');
     add('skyfall', [1029, 750], { sky: 1 });
     expect(skyFalls(surface)[0].lands).toBe(true);
     const grid = { x0: 1000, y0: 730, px: 1, w: 60, h: 40 };
-    const pool = (s: Surface) => Array.from(evaluate(s, grid, { seed: 9, wrapKm: 0 }).water).reduce((a, b) => a + b, 0);
-    const fixed = pool(surface);
-    expect(fixed).toBeGreaterThan(1);
-    isl.drift = 'wind';
-    surface.strokes = surface.strokes.slice();
-    expect(skyFalls(surface)[0].lands).toBe(false);
-    expect(pool(surface)).toBeLessThan(fixed * 0.1);
+    expect(Array.from(evaluate(surface, grid, { seed: 9, wrapKm: 0 }).water).reduce((a, b) => a + b, 0)).toBeGreaterThan(1);
+    expect(driftPerYear(skyIslands(surface)[0], null)).toBe(0);
   });
 
   describe('climate up there', () => {

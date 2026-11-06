@@ -199,7 +199,7 @@ The world can have up to five layers. The extra layers are optional and shown wh
   - Canopy: ×1.3, or ×1.1 against flyers.
   - Monster tides and hordes can't reach the treetops or the islands.
 - *Tunnels:* each year a tunneling realm may dig a tunnel between two of its towns not yet joined, up to about 160 miles apart. A town it founds below is joined to its mother town. A realm's orders travel a tunnel at twice the walking pace (an underground road).
-- *Drift:* drifting islands move each year and carry their towns with them. With the wind, they are blown back off the edge of a map that leads nowhere. Along a path, they go there and back.
+- *Drift:* drifting islands move each year and carry their towns with them (now on hold: see "Provinces on the other layers" below). With the wind, they are blown back off the edge of a map that leads nowhere. Along a path, they go there and back.
 - *On the map:*
   - On the surface, a town on another layer carries a badge: ▼ the Underdark, ♣ the canopy, or the sky layer's number.
   - Each layer's view draws its own towns in their realm's colours. The Underdark view adds the dug tunnels (dashed) and dug ways down.
@@ -209,6 +209,40 @@ The world can have up to five layers. The extra layers are optional and shown wh
 - *Painting while they live:* the peoples pick up new painting on the other layers as it happens.
 
 **Phase 12 is complete.**
+
+### Provinces on the other layers (agreed with the designer)
+
+- **The Underdark:**
+  - All the rock under the land is split into provinces, and the caves, tunnels and seas reshape them.
+  - Solid-rock provinces can be held.
+  - Roads work two ways down here. The main roads run, as on the surface, through the open caverns and tunnels. Through the solid rock, the tunnels the peoples dig are the roads, and towns are built along them.
+- **The canopy:** the canopy layer is the flying airspace of the ground layer, whether or not there are trees.
+  - All of it has air provinces, which are where airships fly.
+  - Giant trees show only their trunk, where the limbs reach out: what matters there is travel and settlements, not the leaves.
+  - Limbs and vines get provinces along them.
+  - Sky islands can be in the canopy layer too.
+- **Sky layers 1–3:** like the canopy, open-air provinces everywhere, with their islands' land provinces.
+- **Sizes:** each layer has its own province-size sliders.
+- **Between layers:** cave entrances, shafts, trunks and vine ends link provinces of one layer to another.
+- **Drifting islands:** on hold until it is worked out how they should work. Every island is fixed for now and the Drift path brush is hidden; the code stays behind a switch, `DRIFT` in core/sky.ts.
+- **Order:** (1) Underdark provinces; (2) canopy and sky provinces (with the canopy changes); (3) the peoples on them (holding them, roads and tunnels, travel between layers, airships).
+
+**Built (layers' provinces, step 1): Underdark provinces** (`core/underprov.ts`, `ui/underprovinces.ts`)
+
+- *Painting:* the Underdark's painting is laid onto a fine grid in the order painted. Points beyond the land have nothing below. Tunnels are at least one point wide, so even a narrow tunnel runs unbroken.
+- *Zones and kinds:* each connected stretch of rock, of cavern, of tunnel or of sea is a zone no province crosses.
+  - Rock and caverns get provinces across their area.
+  - Tunnels are strips, a province every so far along (like rivers).
+  - Seas get bigger provinces.
+  - A cave pocket too small for a province is part of the rock's; slivers join what they border most.
+- *Sizes:* four sliders, in miles: rock (60), caverns (40), tunnels (40 along), and underground seas (80).
+- *Seeds:* as on the surface, provinces grow from seeds kept with the world. "Update to the map" keeps each province, and its id, where it was. New sizes start afresh.
+- *Each province* records its kind, its terrain name, its main cover (fungus, glowing caves or crystal caverns, when they cover a quarter or more of its floor), its area and its neighbours.
+- *In the Provinces tab:* under the surface's settings, an Underdark section with its sliders, Generate, Update, Remove and a "Show the Underdark" switch. The provinces are made away from the page (the province worker).
+- *On the map:*
+  - In the Underdark view, the provinces are coloured while the Provinces tab is open (rock brown, caverns tan, tunnels ochre, seas blue). Elsewhere they are outlined, as View → Map look sets for provinces.
+  - A click in the tab shows a province's card. The hover readout gives the province.
+- *Saving:* saved with the world (`underProvinces`), grown again from their seeds when it opens, and moved with the land when the map grows.
 
 ---
 

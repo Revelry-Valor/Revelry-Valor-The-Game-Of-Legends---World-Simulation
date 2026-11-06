@@ -607,7 +607,7 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
 }
 
 /** Zones smaller than about a fifth of a province join the zone they border most (see generateProvinces). */
-function mergeSmallZones(zone: Int32Array, zones: number, nb: (k: number, out: number[]) => number[], target: (z: number) => number, medium: Uint8Array): void {
+export function mergeSmallZones(zone: Int32Array, zones: number, nb: (k: number, out: number[]) => number[], target: (z: number) => number, medium: Uint8Array): void {
   const n = zone.length;
   const buf: number[] = [];
   const parent = new Int32Array(zones);
@@ -671,7 +671,7 @@ function mergeSmallZones(zone: Int32Array, zones: number, nb: (k: number, out: n
  * more or less by the noise, never leaving the seed's zone (Dial's shortest paths: costs are
  * whole numbers, so a ring of buckets serves as the queue).
  */
-function grow(seeds: number[], zone: Int32Array, noise: Uint8Array, height: Float32Array, cliff: Uint8Array, w: number, h: number, wrap: boolean, px: number): Int32Array {
+export function grow(seeds: number[], zone: Int32Array, noise: Uint8Array, height: Float32Array, cliff: Uint8Array, w: number, h: number, wrap: boolean, px: number): Int32Array {
   const n = w * h;
   const B = 1024;
   const MASK = B - 1;
@@ -782,7 +782,7 @@ function grow(seeds: number[], zone: Int32Array, noise: Uint8Array, height: Floa
  * Each province in one piece: a piece cut off from the rest of its province (where growth went
  * across a corner) joins the province in its zone that it borders most.
  */
-function wholeProvinces(label: Int32Array, zone: Int32Array, w: number, h: number, wrap: boolean): void {
+export function wholeProvinces(label: Int32Array, zone: Int32Array, w: number, h: number, wrap: boolean): void {
   const n = w * h;
   const piece = new Int32Array(n);
   const stack = new Int32Array(n);

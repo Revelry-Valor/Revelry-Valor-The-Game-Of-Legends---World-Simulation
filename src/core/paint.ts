@@ -103,7 +103,7 @@ export type BrushKind = 'area' | 'line' | 'point';
 export interface BrushInfo {
   id: BrushId;
   name: string;
-  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography' | 'World tree' | 'Underdark' | 'Underdark cover' | 'Ways down' | 'Sky islands' | 'Island cover' | 'Island water & drift' | 'Giant trees' | 'Giant vines';
+  group: 'Land & Sea' | 'Relief' | 'Water' | 'Volcanic' | 'Ground cover' | 'Sea' | 'Climate' | 'Mountain zones' | 'Geography' | 'World tree' | 'Underdark' | 'Underdark cover' | 'Ways down' | 'Sky islands' | 'Island cover' | 'Island water' | 'Giant trees' | 'Giant vines';
   kind: BrushKind;
   hint: string;
   /** Default brush settings. Size is the brush's width in miles. */
@@ -176,8 +176,8 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'skymeadow', name: 'Sky meadow', group: 'Island cover', kind: 'area', hint: 'Grass and flowers on an island. Islands without painted cover take it from their climate (meadow, tundra or snow).', sizeMi: 15, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 2 },
   { id: 'skyforest', name: 'Sky forest', group: 'Island cover', kind: 'area', hint: 'Woods on an island. Only grows on island ground.', sizeMi: 15, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 2 },
   { id: 'skyrock', name: 'Bare rock', group: 'Island cover', kind: 'area', hint: 'Bare stone crags on an island.', sizeMi: 15, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 2 },
-  { id: 'skyfall', name: 'Island waterfall', group: 'Island water & drift', kind: 'point', hint: 'Click at an island’s edge: water pours off it. Under a fixed island it lands as a pool and greens the land below; a drifting island’s falls blow away to mist and change nothing below.', sizeMi: 1, strength: 0.8, softness: 0.3, roughness: 0, detailMi: 1 },
-  { id: 'skypath', name: 'Drift path', group: 'Island water & drift', kind: 'line', hint: 'Drag a path starting on an island: it drifts along it (set how it drifts in the island list below). Islands can also drift with the wind, or stay fixed.', sizeMi: 2, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'skyfall', name: 'Island waterfall', group: 'Island water', kind: 'point', hint: 'Click at an island’s edge: water pours off it, lands as a pool and greens the land below.', sizeMi: 1, strength: 0.8, softness: 0.3, roughness: 0, detailMi: 1 },
+  { id: 'skypath', name: 'Drift path', group: 'Island water', kind: 'line', hint: 'Drag a path starting on an island: it drifts along it (set how it drifts in the island list below). Islands can also drift with the wind, or stay fixed.', sizeMi: 2, strength: 1, softness: 0, roughness: 0, detailMi: 1, hidden: true },
   { id: 'gianttree', name: 'Giant tree', group: 'Giant trees', kind: 'point', hint: 'Click to plant a giant tree. Its width is the crown’s; the trunk is about a tenth of it. Crowns show in the Canopy view, with their limbs and tree cities.', sizeMi: 20, strength: 1, softness: 0, roughness: 0.5, detailMi: 1 },
   { id: 'limb', name: 'Limb', group: 'Giant trees', kind: 'line', hint: 'Drag a great limb out from a crown: a road through the canopy, and a bridge where it reaches another tree’s crown.', sizeMi: 1.5, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'treecity', name: 'Tree city', group: 'Giant trees', kind: 'point', hint: 'Click on a crown or limb to mark a site for a city in the canopy. The peoples build there in a later step.', sizeMi: 3, strength: 1, softness: 0, roughness: 0, detailMi: 1 },

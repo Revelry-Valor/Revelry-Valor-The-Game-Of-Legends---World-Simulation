@@ -95,7 +95,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       settings.replaceChildren(h('h3', {}, state.erase ? 'Erase: current sketch' : b.name), ...currentFields());
       return;
     }
-    if (['Underdark', 'Underdark cover', 'Ways down', 'Sky islands', 'Island cover', 'Island water & drift', 'Giant trees', 'Giant vines'].includes(b.group)) {
+    if (['Underdark', 'Underdark cover', 'Ways down', 'Sky islands', 'Island cover', 'Island water', 'Giant trees', 'Giant vines'].includes(b.group)) {
       // Underdark and sky shapes have a size and (for areas) a ragged edge; nothing else.
       const under: HTMLElement[] = [h('p', { class: 'muted small hint' }, state.erase ? (b.kind === 'point' ? `Click ${b.group === 'Ways down' ? 'a cave entrance or shaft' : b.id === 'skyfall' ? 'a waterfall' : b.id === 'gianttree' ? 'a trunk to fell its tree' : 'a tree city'} to take it away.` : `Erasing ${b.name.toLowerCase()}. ${b.group === 'Underdark cover' || b.group === 'Island cover' ? 'Erasing clears any cover there.' : 'Other layers are left alone.'}`) : b.hint)];
       if (b.kind !== 'point' || state.erase || b.id === 'gianttree') {

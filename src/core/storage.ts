@@ -3,6 +3,7 @@ import { newWorldId, WORLD_FORMAT, type ReferenceImage, type World } from './wor
 import { BRUSHES, emptySurface, type Surface } from './paint';
 import { upgradeLibrary } from './libstore';
 import type { SavedProvinces } from './provinces';
+import { readUnderProvinces } from './underprov';
 
 /** Where saved worlds live: the browser's local storage, or anything shaped like it (tests). */
 export interface KeyValueStore {
@@ -83,6 +84,7 @@ export function parseWorld(text: string): World {
     ...(reference ? { reference } : {}),
     ...(w.library ? { library: upgradeLibrary(w.library) } : {}),
     ...(readProvinces(w.provinces) ? { provinces: readProvinces(w.provinces) } : {}),
+    ...(readUnderProvinces(w.underProvinces) ? { underProvinces: readUnderProvinces(w.underProvinces) } : {}),
     ...(w.sim && typeof w.sim === 'object' && (w.sim as { v?: number }).v === 1 ? { sim: w.sim } : {}),
     createdAt: typeof w.createdAt === 'number' ? w.createdAt : now,
     updatedAt: typeof w.updatedAt === 'number' ? w.updatedAt : now,

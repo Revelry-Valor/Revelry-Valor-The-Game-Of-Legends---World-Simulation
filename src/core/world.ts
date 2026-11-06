@@ -3,6 +3,7 @@ import { centreLatitude, kmPerDegree, southLatitude, validateSettings, type Worl
 import { emptySurface, shiftSurface, type Surface } from './paint';
 import type { Library } from './library';
 import type { SavedProvinces } from './provinces';
+import type { SavedUnderProvinces } from './underprov';
 
 /** The world's layers, bottom to top (REDESIGN.md, section 5). Only the surface is always on. */
 export const LAYERS = [
@@ -60,6 +61,8 @@ export interface World {
   library?: Library;
   /** Its provinces: their size settings and seeds (the provinces are grown again from them when the world opens). */
   provinces?: SavedProvinces | null;
+  /** Its Underdark provinces (Phase 12): their sizes and seeds, grown again when the world opens. */
+  underProvinces?: SavedUnderProvinces | null;
   /** The simulation of its peoples (Phase 6), packed for saving. */
   sim?: PackedSim | null;
   createdAt: number;
@@ -114,6 +117,7 @@ onMapShift((w, dx, dy) => {
 // Province seeds stay on the land they were sown on.
 onMapShift((w, dx, dy) => {
   if (w.provinces) w.provinces = { ...w.provinces, seeds: w.provinces.seeds.map((v, i) => v + (i % 2 ? dy : dx)) };
+  if (w.underProvinces) w.underProvinces = { ...w.underProvinces, seeds: w.underProvinces.seeds.map((v, i) => v + (i % 2 ? dy : dx)) };
 });
 
 /**

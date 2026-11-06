@@ -9,6 +9,9 @@ import { covers, shapeOf } from './underdark';
  * the wind, or drift along a drawn path; a fixed island's waterfalls land on the ground below.
  */
 
+/** Whether islands may drift (on hold for now: all are fixed). */
+export const DRIFT = false;
+
 export type SkyLayer = 1 | 2 | 3;
 export const SKY_LAYERS: SkyLayer[] = [1, 2, 3];
 /** How high each layer floats above sea level (km). */
@@ -105,9 +108,11 @@ export function skyIslands(surface: Surface): SkyIsland[] {
     const isl = islandAt(surface, layerOf(p), p.pts[0], p.pts[1], out);
     if (isl) isl.path = p.pts;
   }
+  // Drifting islands are on hold (how they should work is still to be decided): every island is
+  // fixed for now, whatever older worlds set. (DRIFT turns it back on.)
   for (const isl of out) {
     const set = isl.strokes.find((s) => s.drift)?.drift;
-    isl.drift = set ?? (isl.path ? 'path' : 'fixed');
+    isl.drift = DRIFT ? set ?? (isl.path ? 'path' : 'fixed') : 'fixed';
     if (isl.drift === 'path' && !isl.path) isl.drift = 'fixed';
   }
   islandCache.set(surface.strokes, out);

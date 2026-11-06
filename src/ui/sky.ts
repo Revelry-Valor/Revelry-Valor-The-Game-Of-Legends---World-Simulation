@@ -1,7 +1,7 @@
 import type { Climate } from '../core/climate';
 import { RAIN_NAMES, rainClass } from '../core/climate';
 import { cToF } from '../core/settings';
-import { islandArea, islandAt, skyFalls, skyIslands, skyPaintedCover, SKY_ALT_KM, SKY_COVER_NAMES, SKY_LAYERS, type SkyIsland, type SkyLayer } from '../core/sky';
+import { DRIFT, islandArea, islandAt, skyFalls, skyIslands, skyPaintedCover, SKY_ALT_KM, SKY_COVER_NAMES, SKY_LAYERS, type SkyIsland, type SkyLayer } from '../core/sky';
 import { autoSkyCover, driftPerYear, skyClimate, type SkyClimate } from '../core/skyclimate';
 import { kmToMiles } from '../core/units';
 import type { World } from '../core/world';
@@ -227,14 +227,14 @@ export function createSky(d: SkyDeps): Sky {
       return h('div', { class: 'sky-island' },
         h('p', { class: 'small' }, h('strong', {}, `Island ${n + 1}`), ` · about ${sq.toLocaleString('en-US')} sq mi${cov ? ` · ${SKY_COVER_NAMES[cov].toLowerCase()}` : ''}${nf ? ` · ${nf} waterfall${nf === 1 ? '' : 's'}` : ''}`),
         h('p', { class: 'muted small' }, k ? `Summer ${fmtT(k.summerT)}, ${RAIN_NAMES[rainClass(k.summerRain)]}; winter ${fmtT(k.winterT)}, ${RAIN_NAMES[rainClass(k.winterRain)]}; ${windWord(k.wind)}.` : 'Working out its climate…'),
-        choice<SkyIsland['drift']>('Drift', [{ value: 'fixed', label: 'Fixed' }, { value: 'wind', label: 'With the wind' }, { value: 'path', label: isl.path ? 'Along its path' : 'Along a path (draw one)' }], isl.drift, (v) => {
+        DRIFT ? choice<SkyIsland['drift']>('Drift', [{ value: 'fixed', label: 'Fixed' }, { value: 'wind', label: 'With the wind' }, { value: 'path', label: isl.path ? 'Along its path' : 'Along a path (draw one)' }], isl.drift, (v) => {
           if (v === 'path' && !isl.path) {
             render();
             return;
           }
           d.setDrift(isl, v);
           render();
-        }),
+        }) : null,
         isl.drift !== 'fixed' ? h('p', { class: 'muted small' }, `Drifts about ${Math.round(kmToMiles(per))} miles a year once the peoples live (step 4); its waterfalls blow away to mist.`) : null,
       );
     });

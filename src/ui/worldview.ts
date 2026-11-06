@@ -21,6 +21,7 @@ import { regionAt, waterAt } from '../core/finegeo';
 import { createProvinces, type ProvinceDisplay, type Provinces } from './provinces';
 import { createMana, type Mana, type ManaDisplay } from './mana';
 import { createUnderdark, type Underdark } from './underdark';
+import { createUnderProvinces, type UnderProvinces } from './underprovinces';
 import { isCanopy, isSky, offSurface } from '../core/paint';
 import { createCanopy, type Canopy, type ShownLayer } from './canopy';
 import { createSky, type Sky } from './sky';
@@ -52,6 +53,7 @@ export function showWorld(app: App, start: World): () => void {
   let provinces: Provinces | null = null;
   let mana: Mana | null = null;
   let under: Underdark | null = null;
+  let underProv: UnderProvinces | null = null;
   let sky: Sky | null = null;
   let canopy: Canopy | null = null;
   let layerTabsTimer = 0;
@@ -151,7 +153,10 @@ export function showWorld(app: App, start: World): () => void {
     draw(g, at, scale, copies) {
       // The Underdark, when shown, takes the surface's place (its peoples and provinces with it).
       const below = !!under?.showing();
-      if (below) under?.overlay.draw(g, at, scale, copies);
+      if (below) {
+        under?.overlay.draw(g, at, scale, copies);
+        underProv?.overlay.draw(g, at, scale, copies);
+      }
       else provinces?.overlay.draw(g, at, scale, copies);
       mana?.overlay.draw(g, at, scale, copies);
       if (!below) {
@@ -163,7 +168,7 @@ export function showWorld(app: App, start: World): () => void {
       sky?.overlay.draw(g, at, scale, copies);
       canopy?.overlay.draw(g, at, scale, copies);
     },
-    down: (x, y, pxKm) => !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false),
+    down: (x, y, pxKm) => (under?.showing() ? !!underProv?.overlay.down?.(x, y, pxKm) : !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false)),
     drag(x, y) {
       provinces?.overlay.drag?.(x, y);
       peoples?.overlay.drag?.(x, y);
@@ -183,7 +188,10 @@ export function showWorld(app: App, start: World): () => void {
         const k = sky.overlay.describe?.(x, y) ?? [];
         return [...k, ...t, ...m];
       }
-      if (under?.showing()) return u.length || m.length ? [...u, ...m] : null;
+      if (under?.showing()) {
+        const up = underProv?.overlay.describe?.(x, y) ?? [];
+        return u.length || m.length || up.length ? [...u, ...up, ...m] : null;
+      }
       return a.length || b.length || m.length || u.length || t.length ? [...t, ...a, ...b, ...m, ...u] : null;
     },
     pick: (x, y, pxKm) => peoples?.overlay.pick?.(x, y, pxKm) ?? false,
@@ -459,6 +467,7 @@ export function showWorld(app: App, start: World): () => void {
       map.climateChanged();
       peoples?.climateChanged();
       provinces?.climateChanged();
+      underProv?.climateChanged();
     },
     (st) => {
       climateBusy = st !== 'idle';
@@ -899,6 +908,29 @@ export function showWorld(app: App, start: World): () => void {
     provinceInfo: (i) => peoples?.provinceInfo(i) ?? [],
   });
   if (climate.climate) provinces.climateChanged();
+  // The Underdark's provinces, in the same tab (Phase 12).
+  underProv = createUnderProvinces({
+    world: () => world,
+    setSaved(saved) {
+      world = { ...world, underProvinces: saved };
+      changed();
+    },
+    climate: () => climate.climate,
+    redraw: () => map.redraw(),
+    display: () => look.provinces,
+    tabOpen: () => tabNow === 'provinces',
+    showing: () => !!under?.showing(),
+    show(on) {
+      look.layer = on ? 'underdark' : 'surface';
+      if (on && !world.layers.underdark) {
+        world = { ...world, layers: { ...world.layers, underdark: true } };
+        changed();
+        renderLayers();
+      }
+      map.redraw();
+    },
+  });
+  if (climate.climate) underProv.climateChanged();
   // The Mana tab: the world tree and the mana heat map (Phase 11).
   mana = createMana({
     world: () => world,
@@ -981,9 +1013,9 @@ export function showWorld(app: App, start: World): () => void {
     { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
     { id: 'geo', name: 'Geography', groups: ['Geography'], extra: [geoPanel] },
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
-    { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel] },
+    { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel, underProv.panel] },
     { id: 'mana', name: 'Mana', groups: ['World tree'], extra: [mana.panel] },
-    { id: 'sky', name: 'Sky', groups: ['Sky islands', 'Island cover', 'Island water & drift'], extra: [sky.panel] },
+    { id: 'sky', name: 'Sky', groups: ['Sky islands', 'Island cover', 'Island water'], extra: [sky.panel] },
     { id: 'canopy', name: 'Trees & vines', groups: ['Giant trees', 'Giant vines'], extra: [canopy.panel] },
     { id: 'under', name: 'Underdark', groups: ['Underdark', 'Underdark cover', 'Ways down'], extra: [under.panel] },
     { id: 'peoples', name: 'Peoples', groups: [], extra: [peoples.panel] },
@@ -1094,6 +1126,7 @@ export function showWorld(app: App, start: World): () => void {
     climate.dispose();
     peoples?.dispose();
     provinces?.dispose();
+    underProv?.dispose();
     map.dispose();
     window.removeEventListener('beforeunload', beforeUnload);
     window.removeEventListener('keydown', keydown);
