@@ -5,7 +5,7 @@ import { isFood, NEEDS, resInfoOf } from './economy';
 import type { RaceInfo } from './sim';
 import type { Caravan, Settlement, SimState } from './state';
 import { allRail, knows, pathCells, pathSpeed, TRAIN_COAL_PER_100KM, WAYS } from './ways';
-import { nextWaypoint, routePlan, SHIP_PACE, type RoutePlan } from './routes';
+import { AIR_PACE, nextWaypoint, routePlan, SHIP_PACE, type RoutePlan } from './routes';
 import { cultureFx, note } from './culture';
 import { acceptance, noteBetween } from './cultureChange';
 
@@ -258,18 +258,32 @@ export function tradeMonth(c: TradeContext): void {
     if (workers < people * 3) continue;
     const animals = animalsHere ? people * 2 : 0;
     const baseCapacity = (people * CARRY_PERSON + animals * CARRY_ANIMAL) * (wagons ? 1.5 : 1);
-    let best: { b: Settlement; cargo: Record<string, number>; gain: number; worth: number; train: boolean; coal: number; ship: boolean } | null = null;
+    let best: { b: Settlement; cargo: Record<string, number>; gain: number; worth: number; train: boolean; coal: number; ship: boolean; air: boolean } | null = null;
+    // Towns that know airships fly their goods straight through the open air (the canopy's and sky
+    // layers' air provinces), to towns with sky docks or airships of their own. A town on a sky
+    // island trades only by air: by airship, or on its people's wings.
+    const flies = knows(c.lib, a, 'airships') || knows(c.lib, a, 'mana-airships');
+    const winged = ra.flies;
+    const aloft = (st: Settlement) => !!st.layer && st.layer.startsWith('sky');
     // Coastal towns that know sailing may send their goods by ship, through the sea provinces.
     const sails = env.prov.real && coastal(c, a) && knows(c.lib, a, 'sailing');
     for (const b of live) {
       if (b === a) continue;
       const d = c.dist(a.x, a.y, b.x, b.y);
-      if (d > speed * Math.max(fastest, sails ? SHIP_PACE : 1) * 25) continue;
+      if (d > speed * Math.max(fastest, sails ? SHIP_PACE : 1, flies ? AIR_PACE : 1) * 25) continue;
+      const docks = flies && (knows(c.lib, b, 'sky-docks') || knows(c.lib, b, 'airships') || knows(c.lib, b, 'mana-airships'));
+      // To or from the islands: by air only.
+      if ((aloft(a) || aloft(b)) && !docks && !winged) continue;
       // Days on the road, faster along trails, roads and railways; up to about 25 days away.
       const cells = pathBetween(c, a, b);
       let days = d / (speed * pathSpeed(sim, cells, env.fresh));
       let ship = false;
-      if (sails && coastal(c, b)) {
+      let air = false;
+      if (docks) {
+        const ad = d / (speed * AIR_PACE);
+        if (ad < days || aloft(a) || aloft(b)) [days, air] = [ad, true];
+      } else if (winged && (aloft(a) || aloft(b))) [days, air] = [d / (speed * 1.5), true];
+      if (!air && sails && coastal(c, b)) {
         const sp = seaPlanBetween(c, a, b);
         const sd = sp.landKm / speed + sp.seaKm / (speed * SHIP_PACE);
         if (sp.seaKm > 0 && sd < days) [days, ship] = [sd, true];
@@ -277,7 +291,7 @@ export function tradeMonth(c: TradeContext): void {
       if (days > 25) continue;
       // A train, where the whole way is railway and there is coal to burn there and back.
       const coal = (2 * d * TRAIN_COAL_PER_100KM) / 100;
-      const train = !ship && allRail(sim, cells) && (a.economy!.stores.coal ?? 0) >= coal + 1;
+      const train = !ship && !air && allRail(sim, cells) && (a.economy!.stores.coal ?? 0) >= coal + 1;
       const capacity = baseCapacity * (train ? 10 : 1);
       const w = willingness(c, a, b);
       if (w <= 0) continue;
@@ -309,14 +323,14 @@ export function tradeMonth(c: TradeContext): void {
       let got = 0;
       for (const [id, u] of Object.entries(back)) got += u * (pA[id] ?? baseWorth(env, id));
       const gain = (got / cost - given) * w;
-      if (gain > 2 && (!best || gain > best.gain)) best = { b, cargo, gain, worth: given, train, coal, ship };
+      if (gain > 2 && (!best || gain > best.gain)) best = { b, cargo, gain, worth: given, train, coal, ship, air };
     }
     if (!best) continue;
     // Off it goes.
     for (const [id, u] of Object.entries(best.cargo)) a.economy!.stores[id] -= u;
     if (best.train) a.economy!.stores.coal -= best.coal;
     a.economy!.away = (a.economy!.away ?? 0) + people;
-    const cv: Caravan = { id: sim.nextId++, from: a.id, to: best.b.id, clan: a.clan, x: a.x, y: a.y, leg: 'out', cargo: best.cargo, people, animals, speed, worth: best.worth, started: sim.day, ...(best.train ? { train: true } : {}), ...(best.ship ? { ship: true } : {}) };
+    const cv: Caravan = { id: sim.nextId++, from: a.id, to: best.b.id, clan: a.clan, x: a.x, y: a.y, leg: 'out', cargo: best.cargo, people, animals, speed, worth: best.worth, started: sim.day, ...(best.train ? { train: true } : {}), ...(best.ship ? { ship: true } : {}), ...(best.air ? { air: true } : {}) };
     sim.caravans.push(cv);
     traded(a, sim.day).out += best.worth;
     traded(a, sim.day).caravans++;
@@ -350,7 +364,16 @@ export function caravansDay(c: TradeContext): void {
     if (k >= 0 && env.land[k]) sim.traffic[k] += (cv.people + cv.animals) / 10;
     const d = c.dist(cv.x, cv.y, goal.x, goal.y);
     // Faster along the way it is on (or under sail).
-    const step = cv.ship ? cv.speed * SHIP_PACE : cv.speed * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
+    const step = cv.air ? cv.speed * AIR_PACE : cv.ship ? cv.speed * SHIP_PACE : cv.speed * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
+    if (d > step && cv.air) {
+      // Aloft: straight through the open air, over land and sea alike.
+      let dx = goal.x - cv.x;
+      if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
+      cv.x += (dx * step) / d;
+      cv.y += ((goal.y - cv.y) * step) / d;
+      if (env.wrapKm) cv.x = ((cv.x % env.wrapKm) + env.wrapKm) % env.wrapKm;
+      continue;
+    }
     if (d > step && cv.ship) {
       // Under sail: straight from one sea province's middle to the next.
       const way = nextWaypoint(env, cv.x, cv.y, goal.x, goal.y, true);

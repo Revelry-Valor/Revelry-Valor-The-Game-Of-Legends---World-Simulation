@@ -1,5 +1,7 @@
 import { airSizesOf, generateAirProvinces, type AirProvinceMap, type AirSizes, type LayerSeeds, type SavedAirProvinces } from '../core/airprov';
 import { fineIndex } from '../core/finegeo';
+import { giantTrees, giantVines, VINE_END_NAMES } from '../core/canopy';
+import type { VineEnd } from '../core/paint';
 import { PROVINCE_SIZE_MI } from '../core/provinces';
 import { SKY_LAYERS, skyLayerId, type SkyLayer } from '../core/sky';
 import type { World } from '../core/world';
@@ -26,6 +28,8 @@ export interface AirProvincesDeps {
   /** Show this layer on the map (null: the surface). */
   show(l: SkyLayer | null): void;
   mapChanged?(): void;
+  /** Who holds a province of a layer (by id), when the peoples live. */
+  holder?(l: SkyLayer, id: number): { name: string; colour: string } | null;
 }
 
 export interface AirProvinces {
@@ -251,6 +255,16 @@ export function createAirProvinces(d: AirProvincesDeps): AirProvinces {
           g.fillStyle = dr.colours[i];
           g.fill(dr.paths[i]);
         }
+        else if (d.holder) {
+          g.globalAlpha = 0.45;
+          for (let i = 0; i < dr.paths.length; i++) {
+            const hd = d.holder(l, m.provinces[i].id);
+            if (!hd) continue;
+            g.fillStyle = hd.colour;
+            g.fill(dr.paths[i]);
+          }
+          g.globalAlpha = 1;
+        }
         g.lineJoin = 'round';
         g.strokeStyle = show === 'colour' ? 'rgba(20,40,70,0.55)' : 'rgba(40,70,110,0.4)';
         g.lineWidth = 1 / scale;
@@ -267,7 +281,23 @@ export function createAirProvinces(d: AirProvincesDeps): AirProvinces {
       const l = d.shown();
       if (l === null) return null;
       const p = pick(l, x, y);
-      return p ? [{ label: `${NAME(l)} province`, value: `No. ${p.id} · ${p.terrain} · ${fmt(p.area / SQ_KM_PER_SQ_MI)} sq mi · ${p.neighbours.length} neighbours` }] : null;
+      if (!p) return null;
+      // Its links to the other layers: trunks down to the ground, and vine ends.
+      const links: string[] = [];
+      const surf = d.world().surface;
+      if (l === 0) {
+        const trunks = giantTrees(surf).filter((t) => pick(l, t.x, t.y) === p).length;
+        if (trunks) links.push(`${trunks} trunk${trunks === 1 ? '' : 's'} down to the ground`);
+      }
+      for (const v of giantVines(surf, () => true)) {
+        const pts = v.stroke.pts;
+        for (const [x, y, here, there] of [[pts[0], pts[1], v.from, v.to], [pts[pts.length - 2], pts[pts.length - 1], v.to, v.from]] as [number, number, VineEnd, VineEnd][]) {
+          const onThis = here === skyLayerId(l) || (l === 0 && here === 'surface');
+          if (onThis && there !== here && pick(l, x, y) === p) links.push(`a vine to ${VINE_END_NAMES[there]}`);
+        }
+      }
+      const hd = d.holder?.(l, p.id);
+      return [{ label: `${NAME(l)} province`, value: `No. ${p.id} · ${p.terrain}${p.kind === 'air' ? ' (airships fly here)' : ''} · ${fmt(p.area / SQ_KM_PER_SQ_MI)} sq mi · ${p.neighbours.length} neighbours` }, ...(hd ? [{ label: 'Held by', value: hd.name }] : []), ...(links.length ? [{ label: 'Links', value: links.join('; ') }] : [])];
     },
   };
 

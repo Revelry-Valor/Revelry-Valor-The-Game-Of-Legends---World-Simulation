@@ -1,5 +1,6 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { hordesDay, monstersMonth } from './monsters';
+import { holdLayersYear } from './layerprovs';
 import { digYear, driftYear, layerFood, layerRoom, layerSpot, layerWays, LAYER_NAMES, type LayerContext, type LayerLand, type LayerWays } from './layers';
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
@@ -162,7 +163,7 @@ function dist(env: Env, ax: number, ay: number, bx: number, by: number): number 
 const NO_LAYERS: LayerLand = { under: [], underStep: 20, ways: [], islands: [], trees: [], cities: [], vines: [] };
 /** What the layer rules (layers.ts) need. */
 function layerContext(sim: SimState, env: Env, lib: Library): LayerContext {
-  return { sim, layers: env.layers ?? NO_LAYERS, dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), rand: () => rand(sim), has: (st, id) => knows(lib, st, id), log: (text, x, y) => log(sim, text, x, y) };
+  return { sim, layers: env.layers ?? NO_LAYERS, provs: env.layerProv, dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), rand: () => rand(sim), has: (st, id) => knows(lib, st, id), log: (text, x, y) => log(sim, text, x, y) };
 }
 
 /** Cells within `r` km of a place (always at least the one under it). */
@@ -1034,6 +1035,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   if (env.layers) {
     const lc = layerContext(sim, env, lib);
     driftYear(lc, env.w * env.step, env.h * env.step, env.wrapKm);
+    // Each town on another layer holds the provinces of its layer round it (layerprovs.ts).
+    if (env.layerProv) holdLayersYear(sim, env.layerProv, (st) => { const ri = info(st); return ri ? settleRange(ri, st) * 1.5 : 30; }, (ax, ay, bx, by) => dist(env, ax, ay, bx, by));
     digYear(lc, (st) => !!info(st)?.lw.digs);
   }
   // Discoveries, learning and forgetting (tech.ts).

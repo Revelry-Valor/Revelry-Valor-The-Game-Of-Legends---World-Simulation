@@ -270,6 +270,27 @@ The world can have up to five layers. The extra layers are optional and shown wh
 - *Grid fine enough for the narrowest feature:* each layer's grid is fine enough for its narrowest painted feature (two and a half points across a tunnel's, limb's or vine's width), down to the map's limit of points. A strip's provinces are as wide as the strip itself.
 - *The coastline:* the Underdark takes its coastline from a coarser grid, which needs no finer.
 
+**Built (layers' provinces, step 3): the peoples on the layers' provinces** (`sim/layerprovs.ts`)
+
+- *Holding:* each year every town on another layer holds the provinces of its layer round it: its own, and those whose near side lies within its reach. Where two reach the same province, it goes to the nearest town's realm.
+  - Rock, caverns, tunnels, limbs and trunks, vines and islands can be held.
+  - Open air and underground seas are nobody's: airships cross the air, boats the seas.
+  - Holdings are saved with the peoples (`layerHold`).
+  - The layer views tint held provinces in their realm's colour, and the hover readout names the holder.
+- *Roads below:*
+  - The Underdark's main roads run through its open caverns and tunnels, province to province. Between two towns below that are joined that way, a realm's orders travel at one and a half times the walking pace.
+  - Through solid rock, the only roads are the tunnels the peoples dig (twice the walking pace).
+  - Tunnelers can dig out into the rock and found a town there, at the end of the tunnel they dig. Those towns are built along the tunnels.
+- *Between layers:* a province's hover readout lists its links.
+  - Underdark: the cave entrances and shafts that open into it (ways up to the surface).
+  - Canopy: the trunks in it (down to the ground).
+  - Any air layer: the ends of vines that reach other layers.
+- *Airships:* a town that knows Airships (or Mana airships) sends caravans by air to towns with sky docks or airships of their own.
+  - They fly straight through the open-air provinces, over land and sea alike, four times a walker's pace.
+  - A town on a sky island trades only by air: by airship, or on its people's wings.
+  - Airships show on the map as small gasbags with a gondola, and hovering one says "Airship".
+- *Still to come:* armies by airship or through the tunnels, and travel by vine (for now a vine opens the way for settling only).
+
 ---
 
 ## 6. The builder

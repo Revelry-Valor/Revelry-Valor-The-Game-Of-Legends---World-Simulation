@@ -56,6 +56,13 @@ export function showWorld(app: App, start: World): () => void {
   let under: Underdark | null = null;
   let underProv: UnderProvinces | null = null;
   let airProv: AirProvinces | null = null;
+  /** Who holds a province of another layer, when the peoples live: the realm's name and colour. */
+  const layerHolderOf = (tag: 'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3', id: number): { name: string; colour: string } | null => {
+    const sim = peoples?.live();
+    const clan = sim?.layerHold?.[tag]?.[id];
+    const q = clan === undefined ? null : sim!.clans.find((c) => c.id === clan);
+    return q ? { name: q.name, colour: q.colour } : null;
+  };
   /** The canopy (0) or sky layer the map shows now, or null for the surface or the Underdark. */
   const airShown = (): SkyLayer | null => (canopy?.showing() ? 0 : sky?.showing() ?? null);
   let sky: Sky | null = null;
@@ -893,6 +900,10 @@ export function showWorld(app: App, start: World): () => void {
     selectionChanged: () => resources.show(peoples?.resources() ?? null),
     openPeoples: () => showTab('peoples'),
     provinces: () => provinces?.map() ?? null,
+    layerProvinces: () => {
+      const air = airProv?.maps();
+      return { underdark: underProv?.map() ?? undefined, canopy: air?.get(0), sky1: air?.get(1), sky2: air?.get(2), sky3: air?.get(3) };
+    },
     openProvinces: () => showTab('provinces'),
     openLibrary: () => {
       save();
@@ -926,6 +937,7 @@ export function showWorld(app: App, start: World): () => void {
     redraw: () => map.redraw(),
     display: () => look.provinces,
     tabOpen: () => tabNow === 'provinces',
+    holder: (id) => layerHolderOf('underdark', id),
     showing: () => !!under?.showing(),
     show(on) {
       look.layer = on ? 'underdark' : 'surface';
@@ -949,6 +961,7 @@ export function showWorld(app: App, start: World): () => void {
     redraw: () => map.redraw(),
     display: () => look.provinces,
     tabOpen: () => tabNow === 'provinces',
+    holder: (l, id) => layerHolderOf(skyLayerId(l), id),
     shown: airShown,
     show(l) {
       look.layer = l === null ? 'surface' : skyLayerId(l);

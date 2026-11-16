@@ -372,6 +372,8 @@ export interface Caravan {
   train?: boolean;
   /** By ship, through the sea provinces (coastal towns that know sailing). */
   ship?: boolean;
+  /** By airship, straight through the open-air provinces (towns that know airships). */
+  air?: boolean;
 }
 
 /** A trade route between two settlements: how often it is used and how much goes along it. */
@@ -555,6 +557,8 @@ export interface SimState {
   tunnels?: { a: number; b: number; ax: number; ay: number; bx: number; by: number; clan: number; day: number }[];
   /** Ways down dug by tunnelers where there was no cave entrance. */
   dug?: { x: number; y: number; clan: number; day: number }[];
+  /** Who holds each province of the other layers (by layer, then province id → clan), worked out each year. */
+  layerHold?: Partial<Record<'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3', Record<number, number>>>;
   /** How far each drifting sky island has moved (by its first stroke's id), and where it is on its way. */
   drift?: Record<number, { dx: number; dy: number; t: number; dir: number }>;
   corruption?: Float32Array;

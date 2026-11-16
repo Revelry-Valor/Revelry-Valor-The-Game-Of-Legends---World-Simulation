@@ -9,6 +9,7 @@ import { DAYS_PER_YEAR } from './state';
 import { clanKnows, knows } from './tech';
 import { pathCells, pathSpeed } from './ways';
 import { tunnelBetween } from './layers';
+import { underRouteKm } from './layerprovs';
 
 /**
  * Nations and how they are ruled (REDESIGN.md 8.4a–c, Phase 9 step 1).
@@ -274,6 +275,12 @@ function orderDays(c: NationContext, from: Settlement, to: Settlement, riders: b
   // A tunnel between them is an underground road (layers.ts).
   const tunnel = tunnelBetween(c.sim, from, to);
   if (tunnel !== null) return tunnel / ((riders ? RIDER_KM : FOOT_KM) * 2);
+  // Below, the main roads through the caverns and tunnels (layerprovs.ts).
+  const below = c.env.layerProv?.underdark;
+  if (below && from.layer === 'underdark' && to.layer === 'underdark') {
+    const road = underRouteKm(below, from.x, from.y, to.x, to.y);
+    if (road !== null) return road / ((riders ? RIDER_KM : FOOT_KM) * 1.5);
+  }
   const speed = pathSpeed(c.sim, pathCells(c.env, from.x, from.y, to.x, to.y, c.cellAt), c.env.fresh);
   return km / ((riders ? RIDER_KM : FOOT_KM) * speed);
 }

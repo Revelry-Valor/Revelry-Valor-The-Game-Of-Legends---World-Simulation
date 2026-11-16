@@ -202,3 +202,5 @@ export function nextWaypoint(env: Env, x: number, y: number, tx: number, ty: num
 
 /** Ships go this much faster than a caravan on foot. */
 export const SHIP_PACE = 2.5;
+/** Airships go this much faster than a caravan on foot, straight through the air. */
+export const AIR_PACE = 4;

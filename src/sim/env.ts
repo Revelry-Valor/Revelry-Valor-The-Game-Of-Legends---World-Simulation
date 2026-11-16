@@ -1,4 +1,5 @@
 import { buildLayerLand, type LayerLand } from './layers';
+import type { LayerProvs } from './layerprovs';
 import type { Climate } from '../core/climate';
 import { COVER_BRUSHES } from '../core/paint';
 import type { Beast, Library, Resource } from '../core/library';
@@ -104,6 +105,8 @@ export interface Env {
   manaBase: Float32Array;
   /** The other layers' land (Phase 12): Underdark spots, ways down, islands, giant trees and vines. */
   layers: LayerLand;
+  /** The other layers' provinces, when they have been made (the Underdark's, the canopy's, each sky layer's). */
+  layerProv?: LayerProvs;
 }
 
 const smooth = (a: number, b: number, x: number) => {

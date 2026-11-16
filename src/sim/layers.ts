@@ -6,6 +6,7 @@ import { islandArea, skyIslands, skyLayerId, skyPaintedCover, type SkyLayer } fr
 import { autoSkyCover, driftPerYear, skyClimate } from '../core/skyclimate';
 import { shapeOf, underdarkAt, underStrokes, waysDown } from '../core/underdark';
 import type { Settlement, SimState } from './state';
+import { rockSites, type LayerProvs } from './layerprovs';
 
 /**
  * The peoples on every layer (Phase 12 step 4). A town on another layer stands at a place on the
@@ -178,6 +179,8 @@ export interface LayerContext {
   /** The settlement's people know a technology. */
   has(st: Settlement, id: string): boolean;
   log(text: string, x: number, y: number): void;
+  /** The other layers' provinces, when made. */
+  provs?: LayerProvs;
 }
 
 /** Where an island is now (its drift so far). */
@@ -214,6 +217,14 @@ export function layerSpot(c: LayerContext, st: Settlement, ri: { flies: boolean;
         const sea = L.under.some((q) => q.sea && Math.hypot(q.x - u.x, q.y - u.y) < 40);
         const s = 0.3 + pref + (u.cover === 1 ? 0.5 : u.cover === 3 ? 0.35 : u.cover === 2 ? 0.2 : 0) + (sea ? 0.3 : 0);
         options.push({ x: u.x, y: u.y, layer: 'underdark', s, dug: from !== 'underdark' && !walk && lw.digs });
+      }
+      // Tunnelers dig out into the solid rock too, and build at the end of the tunnel (layerprovs.ts).
+      if (lw.digs) {
+        const rock = rockSites(c.provs?.underdark, st.x, st.y, 260, c.dist).filter((q) => !crowded(q.x, q.y, 'underdark'));
+        for (let i = 0; i < 4 && rock.length; i++) {
+          const q = rock[Math.floor(c.rand() * rock.length)];
+          options.push({ x: q.x, y: q.y, layer: 'underdark', s: 0.45 + pref, dug: from !== 'underdark' && !walk });
+        }
       }
     }
   }

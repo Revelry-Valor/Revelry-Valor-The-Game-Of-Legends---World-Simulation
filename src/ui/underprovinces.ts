@@ -1,7 +1,7 @@
 import type { Climate } from '../core/climate';
 import { fineIndex } from '../core/finegeo';
 import { PROVINCE_SIZE_MI } from '../core/provinces';
-import { UNDER_NAMES } from '../core/underdark';
+import { UNDER_NAMES, waysDown } from '../core/underdark';
 import { generateUnderProvinces, underSizesOf, type SavedUnderProvinces, type UnderProvinceMap, type UnderSizes } from '../core/underprov';
 import type { World } from '../core/world';
 import ProvinceWorker from '../render/provinceworker?worker&inline';
@@ -28,6 +28,8 @@ export interface UnderProvincesDeps {
   /** Show the Underdark (or the surface) on the map. */
   show(on: boolean): void;
   mapChanged?(): void;
+  /** Who holds a province (by id), when the peoples live: its realm's name and colour. */
+  holder?(id: number): { name: string; colour: string } | null;
 }
 
 export interface UnderProvinces {
@@ -223,6 +225,17 @@ export function createUnderProvinces(d: UnderProvincesDeps): UnderProvinces {
           g.fillStyle = colours[i];
           g.fill(paths[i]);
         }
+        else if (d.holder) {
+          // Held provinces in their realm's colour.
+          g.globalAlpha = 0.38;
+          for (let i = 0; i < paths.length; i++) {
+            const hd = d.holder(map.provinces[i].id);
+            if (!hd) continue;
+            g.fillStyle = hd.colour;
+            g.fill(paths[i]);
+          }
+          g.globalAlpha = 1;
+        }
         g.lineJoin = 'round';
         if (lines) {
           g.strokeStyle = show === 'colour' ? 'rgba(14,10,8,0.85)' : 'rgba(235,220,190,0.45)';
@@ -242,6 +255,14 @@ export function createUnderProvinces(d: UnderProvincesDeps): UnderProvinces {
       const p = pick(x, y);
       if (!p) return null;
       const items: InfoItem[] = [{ label: 'Underdark province', value: `No. ${p.id} · ${p.terrain}${p.cover ? ` (${UNDER_NAMES[p.cover].toLowerCase()})` : ''} · ${fmt(p.area / SQ_KM_PER_SQ_MI)} sq mi · ${p.neighbours.length} neighbours` }];
+      const hd = d.holder?.(p.id);
+      if (hd) items.push({ label: 'Held by', value: hd.name });
+      // Its links to the surface: the cave entrances and shafts that open into it.
+      const idx = map!.provinces.indexOf(p);
+      const ways = waysDown(d.world().surface).filter((w) => w.below !== 'rock' && pick(w.x, w.y) === map!.provinces[idx]);
+      const ent = ways.filter((w) => w.kind === 'entrance').length;
+      const sh = ways.length - ent;
+      if (ways.length) items.push({ label: 'Ways up', value: [ent ? `${ent} cave entrance${ent === 1 ? '' : 's'}` : '', sh ? `${sh} shaft${sh === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ') + ' to the surface' });
       return items;
     },
   };

@@ -42,6 +42,7 @@ export interface PackedSim {
   tunnels?: SimState['tunnels'];
   dug?: SimState['dug'];
   drift?: SimState['drift'];
+  layerHold?: SimState['layerHold'];
   /** Runs of corruption in hundredths. */
   corruption?: number[];
   clans: SimState['clans'];
@@ -133,6 +134,7 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     tunnels: sim.tunnels ?? [],
     dug: sim.dug ?? [],
     drift: sim.drift ?? {},
+    layerHold: sim.layerHold ?? {},
     ...(sim.corruption ? { corruption: runs(Float32Array.from(sim.corruption, (v) => Math.round(v * 100))) } : {}),
     clans: sim.clans,
     sorties: sim.sorties,
@@ -218,6 +220,7 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     tunnels: Array.isArray(p.tunnels) ? p.tunnels : [],
     dug: Array.isArray(p.dug) ? p.dug : [],
     drift: p.drift && typeof p.drift === 'object' ? p.drift : {},
+    layerHold: p.layerHold && typeof p.layerHold === 'object' ? p.layerHold : {},
     ...(() => {
       const c = new Float32Array(n);
       return p.corruption && unruns(p.corruption, n, c) ? { corruption: Float32Array.from(c, (v) => v / 100) } : {};

@@ -7,6 +7,7 @@ import { defaultSettings } from '../src/core/settings';
 import { buildEnv, type Env } from '../src/sim/env';
 import { buildLayerLand, digYear, driftYear, layerFood, layerRoom, layerSpot, layerWalls, tunnelBetween, type LayerContext, type LayerWays } from '../src/sim/layers';
 import { packSim, unpackSim } from '../src/sim/pack';
+import { generateUnderProvinces } from '../src/core/underprov';
 import { addDawnCity, eligibleRaces, newSim, stepDays } from '../src/sim/sim';
 import type { Settlement, SimState } from '../src/sim/state';
 
@@ -136,6 +137,14 @@ describe('the peoples on every layer', () => {
     expect(sim.events.some((e) => /into the Underdark/.test(e.text))).toBe(true);
     const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
     expect(back.settlements.filter((s) => s.layer === 'underdark').length).toBe(below.length);
+    // With Underdark provinces made, the towns below hold the provinces round them (kept when saved).
+    env.layerProv = { underdark: generateUnderProvinces(surface, settings, {}) };
+    stepDays(sim, env, lib, 360);
+    const held = Object.keys(sim.layerHold?.underdark ?? {}).length;
+    expect(held).toBeGreaterThan(below.length);
+    const again = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
+    expect(Object.keys(again.layerHold?.underdark ?? {}).length).toBe(held);
+    env.layerProv = undefined;
     race.species.profile.layers = [];
   }, 120000);
 });

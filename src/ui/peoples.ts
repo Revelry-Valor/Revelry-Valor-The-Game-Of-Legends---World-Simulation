@@ -29,6 +29,7 @@ import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
 import { manaAtPlace, manaLinesNow, manaNow } from '../sim/mana';
 import { CORRUPTION_RIFT, HOLD_NAMES, type Rift } from '../sim/rifts';
 import { buildLayerLand, LAYER_NAMES } from '../sim/layers';
+import type { LayerProvs } from '../sim/layerprovs';
 import { tideAt, type Horde } from '../sim/monsters';
 import { manaWord } from '../core/mana';
 import type { ManaState } from './mana';
@@ -56,6 +57,8 @@ export interface PeoplesDeps {
   selectionChanged?(): void;
   /** Open the Peoples tab (to show what the hand tool picked). */
   openPeoples?(): void;
+  /** The other layers' provinces, as far as they have been made (the peoples hold them too). */
+  layerProvinces?(): LayerProvs;
   /** The provinces (the peoples hold land by province), and opening the Provinces tab to make them. */
   provinces(): ProvinceMap | null;
   openProvinces?(): void;
@@ -136,6 +139,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   const freshLayers = () => {
     const c = cl();
     const strokes = d.surface().strokes;
+    if (env) env.layerProv = d.layerProvinces?.();
     if (!env || !c || layersFor === strokes) return;
     env.layers = buildLayerLand(d.surface(), c);
     layersFor = strokes;
@@ -825,6 +829,19 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.setLineDash([]);
           for (const cv of s.caravans) {
             const [sx, sy] = at(cv.x, cv.y, c);
+            if (cv.air) {
+              // An airship: a gasbag with a gondola beneath.
+              g.beginPath();
+              g.ellipse(sx, sy - 2, 7, 3.5, 0, 0, Math.PI * 2);
+              g.fillStyle = '#e8dcc4';
+              g.fill();
+              g.strokeStyle = '#2a1a08';
+              g.lineWidth = 1.2;
+              g.stroke();
+              g.fillStyle = '#6b4826';
+              g.fillRect(sx - 2.5, sy + 1.5, 5, 2.5);
+              continue;
+            }
             g.fillStyle = cv.train ? '#222' : cv.ship ? '#f4f1e8' : '#c8913c';
             g.strokeStyle = '#2a1a08';
             g.lineWidth = 1.5;
@@ -1100,7 +1117,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const from = s.settlements.find((q) => q.id === cv.from)?.name ?? '?';
         const to = s.settlements.find((q) => q.id === cv.to)?.name ?? '?';
         const goods = Object.entries(cv.cargo).map(([id, u]) => `${Math.round(u)} ${resInfoOf(env!, id)?.name.toLowerCase() ?? id}`).join(', ');
-        push('Caravan', `${cv.train ? 'Train' : cv.ship ? 'Ship' : 'Caravan'} of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
+        push('Caravan', `${cv.train ? 'Train' : cv.air ? 'Airship' : cv.ship ? 'Ship' : 'Caravan'} of ${from} (${cv.people} people${cv.animals ? `, ${cv.animals} pack animals` : ''}) ${cv.leg === 'out' ? `going to ${to}` : `coming home from ${to}`}${goods ? `, carrying ${goods}` : ''}`);
         break;
       }
       const k = cellOf(x, y);
