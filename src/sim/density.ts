@@ -38,6 +38,8 @@ export interface DensityContext {
   race(id: string): DensityRace | null;
   /** Plant food still to be had this month (person-months), after the tribes and towns. */
   left: Float32Array;
+  /** Points round a town (1): its pooled stores and market make life in the wild easier there. */
+  boost?: Float32Array;
 }
 
 /** Below this many people, and hungry, a point's families are gone. */
@@ -120,7 +122,7 @@ export function densityMonth(c: DensityContext): void {
       }
       const f = need > 0 ? Math.min(1.2, got / need) : 1;
       fed[k] = f;
-      const births = (r.births / 12) * Math.min(1, f) * (f >= 1 ? 1.2 : 1);
+      const births = (r.births / 12) * Math.min(1, f) * (f >= 1 ? 1.2 : 1) * (c.boost?.[k] ? 1.5 : 1);
       const deaths = r.deaths / 12 + (f < 1 ? ((1 - f) * 0.6) / 12 : 0);
       D[k] = P * (1 + births - deaths);
       // A last few, hungry, are gone (well fed, even a family or two at the edge holds on).

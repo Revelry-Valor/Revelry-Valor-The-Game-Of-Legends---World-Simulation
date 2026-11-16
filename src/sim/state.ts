@@ -289,6 +289,8 @@ export interface Settlement {
   tower?: number;
   /** The seat of its province: the one settlement there that can grow into a town or city (the rest stay villages). */
   seat?: boolean;
+  /** A village joined to a town (REDESIGN.md 8.0): its people work and eat with the town's, its goods go to the town's stores. */
+  partOf?: number;
   /** Built on another layer (Phase 12): the Underdark, the canopy or a sky layer; on the surface if unset. */
   layer?: 'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3';
   /** On a sky layer: the island it stands on (it moves with it). */

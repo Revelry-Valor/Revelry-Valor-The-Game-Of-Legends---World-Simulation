@@ -7,7 +7,9 @@ import { defaultSettings } from '../src/core/settings';
 import { canLiveTogether, densityAt, densityMonth, densityOf, seedDensity, totalsOver, type DensityRace } from '../src/sim/density';
 import { buildEnv, type Env } from '../src/sim/env';
 import { packSim, unpackSim } from '../src/sim/pack';
-import { addDawnCity, newSim, stepDays } from '../src/sim/sim';
+import { addDawnCity, DAY_WALK, newSim, settlementTier, stepDays } from '../src/sim/sim';
+import { newEconomy } from '../src/sim/economy';
+import type { Settlement } from '../src/sim/state';
 
 const settings = defaultSettings({ widthKm: 3000, heightKm: 2000, northLatitude: 45, seed: 12 });
 const surface: Surface = { strokes: [], nextId: 1 };
@@ -107,5 +109,49 @@ describe('wilderness density', () => {
     const total = (id: string) => sim.density![id].reduce((a, b) => a + b, 0);
     expect(total('dwarf')).toBeGreaterThan(90);
     expect(total('elf')).toBeLessThan(total('dwarf'));
+  });
+
+  describe('settlements from the wild (step 2)', () => {
+    const humanId = () => lib.species.find((q) => q.name === 'Human')!.races.find((r) => r.name === 'Human')!.id;
+    const farming = ['agriculture', 'husbandry', 'fishing'];
+    const village = (sim: ReturnType<typeof newSim>, x: number, y: number, clan: number, pop = 150): Settlement => {
+      const v: Settlement = { id: sim.nextId++, name: `V${sim.nextId}`, kind: 'village', clan, species: 'human', race: humanId(), culture: '', x, y, pop, fed: 1, warband: 10, holyTo: [], ruined: false, founded: 0, ruinedOn: -1, economy: newEconomy(pop, 1, 3), techs: [...farming] };
+      sim.settlements.push(v);
+      return v;
+    };
+
+    it('gathers families living thick in the wild into a village, on its own in land nobody holds', () => {
+      const sim = newSim(env, 7);
+      const city = addDawnCity(sim, env, lib, humanId(), 1500, 1000, 1200, farming)!;
+      // Families gathered far out in unclaimed land.
+      const k = cellAt(2100, 1000);
+      const D = densityOf(sim, env, humanId());
+      for (const q of [k - env.w - 1, k - env.w, k - env.w + 1, k - 1, k, k + 1, k + env.w - 1, k + env.w, k + env.w + 1]) D[q] += 30;
+      stepDays(sim, env, lib, 360);
+      const v = sim.settlements.find((q) => q !== city && Math.hypot(q.x - 2100, q.y - 1000) < 60);
+      expect(v).toBeTruthy();
+      expect(v!.kind).toBe('village');
+      expect(v!.clan).not.toBe(city.clan);
+      expect(v!.pop).toBeGreaterThan(80);
+      expect(v!.techs).toContain('agriculture');
+      expect(sim.events.some((e) => /settled together/.test(e.text))).toBe(true);
+    }, 120000);
+
+    it('joins villages within a day’s walk to the town of their realm, which feeds them all as one', () => {
+      const sim = newSim(env, 8);
+      const city = addDawnCity(sim, env, lib, humanId(), 1500, 1000, 1500, farming)!;
+      expect(settlementTier(city)).not.toBe('Village');
+      const near = village(sim, 1500 + DAY_WALK * 0.7, 1000, city.clan);
+      const far = village(sim, 1500 + DAY_WALK * 2.5, 1000, city.clan);
+      const other = village(sim, 1500, 1000 + DAY_WALK * 0.7, city.clan + 999);
+      stepDays(sim, env, lib, 360);
+      expect(near.partOf).toBe(city.id);
+      expect(far.partOf).toBeUndefined();
+      expect(other.partOf).toBeUndefined();
+      expect(sim.events.some((e) => e.text.includes(`${near.name} became part of ${city.name}`))).toBe(true);
+      // Fed as the town is, from its stores.
+      stepDays(sim, env, lib, 30);
+      expect(near.fed).toBe(city.fed);
+    }, 120000);
   });
 });

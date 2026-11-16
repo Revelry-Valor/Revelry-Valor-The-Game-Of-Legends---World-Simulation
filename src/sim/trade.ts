@@ -221,7 +221,8 @@ const coastal = (c: TradeContext, st: Settlement) => {
 /** Each month: settlements look for a good trade, and send a caravan if one is worth the road. */
 export function tradeMonth(c: TradeContext): void {
   const { sim, env } = c;
-  const live = sim.settlements.filter((s) => !s.ruined && s.economy);
+  // A village joined to a town trades through the town (its goods are the town's).
+  const live = sim.settlements.filter((s) => !s.ruined && s.economy && s.partOf === undefined);
   // Each settlement takes its turn every third month: it sets its prices and looks for a trade
   // (caravans take months on the road anyway). Partners' markets are read as they were last set,
   // or set now if they never were.

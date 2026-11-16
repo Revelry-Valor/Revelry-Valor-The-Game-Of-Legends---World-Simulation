@@ -585,7 +585,7 @@ describe('culture change', () => {
   it('draws a small settlement into the culture of the big one beside it', () => {
     const sim = newSim(env, 203);
     const big = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 2500, farming)!;
-    const small = addDawnCity(sim, env, lib, elfId(), 6070, yAt(-12), 150, farming)!;
+    const small = addDawnCity(sim, env, lib, elfId(), 6070, yAt(-12), 90, farming)!;
     for (let y = 0; y < 40 && small.culture !== big.culture; y++) stepDays(sim, env, lib, DAYS_PER_YEAR);
     expect(small.ruined || small.culture === big.culture).toBe(true);
     if (!small.ruined) expect(sim.events.some((e) => e.text.includes(`${small.name} has taken on the ways`))).toBe(true);

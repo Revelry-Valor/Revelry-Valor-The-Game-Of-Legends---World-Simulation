@@ -68,13 +68,16 @@ interface Reach {
   /** Warm enough to grow crops, by season (for irrigation), and water by rivers or lakes in reach. */
   warm: [boolean, boolean];
   river: boolean;
+  /** What else it was worked out for (a town's joined villages), so it is worked out again when they change. */
+  key?: string;
 }
 const reaches = new WeakMap<Settlement, Reach>();
-export function reachOf(env: Env, st: Settlement, r: number, cellsNear: (x: number, y: number, r: number) => number[]): Reach {
+export function reachOf(env: Env, st: Settlement, r: number, cellsNear: (x: number, y: number, r: number) => number[], key = ''): Reach {
   const old = reaches.get(st);
-  if (old && old.env === env && old.r === r) return old;
+  if (old && old.env === env && old.r === r && (old.key ?? '') === key) return old;
   const cells = cellsNear(st.x, st.y, r).filter((c) => env.land[c]);
-  const area = Math.PI * r * r;
+  // A town with its joined villages works all the land round them all (key given): the whole of every point.
+  const area = key ? cells.length * env.cellArea : Math.PI * r * r;
   const share = cells.length ? Math.min(1, area / (cells.length * env.cellArea)) : 0;
   const avail: Record<string, number> = {};
   for (const ri of env.resInfo) {
@@ -96,7 +99,7 @@ export function reachOf(env: Env, st: Settlement, r: number, cellsNear: (x: numb
   }
   const warm: [boolean, boolean] = [0, 1].map((s) => cells.length > 0 && cells.reduce((n, c) => n + env.temp[s][c], 0) / cells.length > 8) as [boolean, boolean];
   const river = cells.some((c) => env.fresh[c]);
-  const out = { env, r, cells, share, avail, growth, warm, river };
+  const out = { env, r, cells, share, avail, growth, warm, river, key };
   reaches.set(st, out);
   return out;
 }
@@ -119,6 +122,10 @@ export interface MonthContext {
   sim: SimState;
   env: Env;
   st: Settlement;
+  /** Everyone it feeds and who works for it (a town with its joined villages); its own people if not given. */
+  pop?: number;
+  /** Names the land it works (for a town with joined villages), so its reach is worked out again when they change. */
+  reachKey?: string;
   /** Food each person eats (units a month), and the share of people who work. */
   need: number;
   workShare: number;
@@ -145,8 +152,9 @@ export interface MonthContext {
 export function economyMonth(c: MonthContext): number {
   const { sim, env, st } = c;
   const e = (st.economy ??= newEconomy(st.pop, c.need, 3));
-  const R = reachOf(env, st, c.r, c.cellsNear);
-  const pop = st.pop;
+  const R = reachOf(env, st, c.r, c.cellsNear, c.reachKey);
+  // A town with joined villages works and eats as one: all their people, all their land.
+  const pop = c.pop ?? st.pop;
   const need = pop * c.need;
   // Those away with a caravan don't work at home.
   const W = Math.max(1, Math.round(pop * c.workShare) - (e.away ?? 0));

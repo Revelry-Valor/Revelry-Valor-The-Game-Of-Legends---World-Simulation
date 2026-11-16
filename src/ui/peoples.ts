@@ -897,6 +897,21 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             g.strokeRect(sx - 3.5, sy - 3.5, 7, 7);
           }
         }
+        // Joined villages: a faint line to the town they are part of.
+        g.save();
+        g.setLineDash([3, 3]);
+        g.strokeStyle = 'rgba(255,240,200,0.55)';
+        g.lineWidth = 1;
+        for (const st of s.settlements) {
+          if (st.ruined || st.partOf === undefined) continue;
+          const t = s.settlements.find((q) => q.id === st.partOf);
+          if (!t) continue;
+          g.beginPath();
+          g.moveTo(...at(st.x, st.y, c));
+          g.lineTo(...at(t.x, t.y, c));
+          g.stroke();
+        }
+        g.restore();
         // Settlements: a house (a dawn city bigger, ringed in gold: holy); ruins grey and broken.
         for (const st of s.settlements) {
           const [sx, sy] = at(st.x, st.y, c);
@@ -1715,7 +1730,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     if (st.ruined) return `Ruins of ${st.name} (${what})${st.holyTo.length ? `, holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
     const cn = clanOf(st.clan);
     const occ = st.occupied ? clanOf(st.occupied.by) : undefined;
-    return `${st.name} (${what}${cn?.realm?.capital === st.id ? ', capital' : ''}, ${cn ? realmName(lib(), cn) : '?'}${occ ? `; held by ${realmName(lib(), occ)}` : ''}): ${Math.round(st.pop)} people, ${Math.round(Math.min(1, st.fed) * 100)}% fed${st.holyTo.length ? `; holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
+    return `${st.name} (${what}${cn?.realm?.capital === st.id ? ', capital' : ''}, ${cn ? realmName(lib(), cn) : '?'}${occ ? `; held by ${realmName(lib(), occ)}` : ''}): ${Math.round(st.pop)} people, ${Math.round(Math.min(1, st.fed) * 100)}% fed${st.partOf !== undefined ? `; part of ${sim?.settlements.find((q) => q.id === st.partOf)?.name ?? '?'}` : ''}${st.holyTo.length ? `; holy to the ${st.holyTo.map(raceName).join(', ')}` : ''}`;
   };
   const tribeAt = (x: number, y: number, pk: number): Tribe | null => {
     if (!sim || !env) return null;
@@ -2035,6 +2050,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         h('h3', {}, st.name),
         h('div', { class: 'tribe-card small' },
           h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)}` : `${settlementTier(st)}${st.seat === false ? ': another settlement is its province’s seat, so it stays a village' : ''}`),
+          st.partOf !== undefined ? h('div', {}, `Part of ${s.settlements.find((q) => q.id === st.partOf)?.name ?? '?'}: its people work and eat with the town's, and its goods go to the town's stores.`) : null,
           st.layer ? h('div', {}, `In ${LAYER_NAMES[st.layer]}${st.layer.startsWith('sky') ? ' (on an island; it moves if the island drifts)' : st.layer === 'underdark' ? ' (fed by its fungus farms and the land above)' : ' (up a giant tree)'}.`) : null,
           st.holyTo.length ? h('div', { class: 'holy-tag' }, `Holy to all the ${st.holyTo.map(raceName).join(', ')}, wherever they are${st.ruined ? ', even in ruin' : ''}.`) : null,
           st.tower !== undefined && !st.ruined ? h('div', {}, `A mage tower (raised in year ${yearOf(st.tower)}): a node on the ley lines; mana here is ${env ? manaWord(manaAtPlace(sim!, env, st.x, st.y)) : '?'}.`) : null,

@@ -138,8 +138,13 @@ export function cultureChangeYear(c: ChangeContext): void {
 
   // ---- Big settlement pull.
   const live = sim.settlements.filter((s) => !s.ruined);
+  // A town counts with its joined villages (REDESIGN.md 8.0): they are part of it.
+  const whole = new Map<number, number>();
+  for (const s of live) whole.set(s.id, (whole.get(s.id) ?? 0) + s.pop);
+  for (const s of live) if (s.partOf !== undefined && whole.has(s.partOf)) whole.set(s.partOf, whole.get(s.partOf)! + s.pop);
+  const size = (s: Settlement) => (s.partOf !== undefined ? s.pop : whole.get(s.id) ?? s.pop);
   for (const small of live) {
-    const big = live.filter((b) => b !== small && b.culture !== small.culture && b.pop > small.pop * 3 && c.dist(b.x, b.y, small.x, small.y) < 120).sort((a, b) => b.pop - a.pop)[0];
+    const big = live.filter((b) => b !== small && b.culture !== small.culture && size(b) > size(small) * 3 && c.dist(b.x, b.y, small.x, small.y) < 120).sort((a, b) => size(b) - size(a))[0];
     if (!big) {
       if (small.cultureShift) small.cultureShift.progress = Math.max(0, small.cultureShift.progress - 0.05);
       if (small.cultureShift && small.cultureShift.progress <= 0) delete small.cultureShift;

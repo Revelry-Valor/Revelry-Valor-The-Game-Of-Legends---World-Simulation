@@ -162,7 +162,7 @@ function dist(env: Env, ax: number, ay: number, bx: number, by: number): number 
   return Math.hypot(dx, ay - by);
 }
 /** Share of a settlement's people that go out into the wild each month (when it is fed). */
-const WILD_TRICKLE = 0.0015;
+const WILD_TRICKLE = 0.0005;
 /** How a race lives in the wild (density.ts), with how well it can live at each point (worked out once). */
 const liveCache = new WeakMap<Env, Map<string, Float32Array>>();
 function densityRace(sim: SimState, env: Env, lib: Library, info: Info, race: string): DensityRace | null {
@@ -908,18 +908,37 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
   }
   // Settlements: fed from the land round them, worked harder than a tribe can (gardens and stores).
   const lc = layerContext(sim, env, lib);
-  for (const st of sim.settlements) {
+  // Towns and their joined villages (REDESIGN.md 8.0): the towns first, each working and eating as
+  // one with its villages; then the villages, fed as their town is.
+  const byId = new Map(sim.settlements.map((q) => [q.id, q]));
+  const members = new Map<number, Settlement[]>();
+  for (const q of sim.settlements) {
+    if (q.ruined || q.partOf === undefined) continue;
+    const t = byId.get(q.partOf);
+    if (t && !t.ruined) members.set(t.id, [...(members.get(t.id) ?? []), q]);
+  }
+  const order = [...sim.settlements].sort((a, b) => (a.partOf === undefined ? 0 : 1) - (b.partOf === undefined ? 0 : 1));
+  for (const st of order) {
     if (st.ruined) continue;
     const ri = info(st);
     if (!ri) continue;
     const R = settleRange(ri, st);
     const cells = cellsNear(env, st.x, st.y, R).filter((c) => env.land[c]);
-    // Its economy: jobs, harvests, stores, eating (economy.ts).
-    // Under siege only the fields within the walls are worked, and the besiegers trample the crop.
-    if (st.besieged && st.economy) st.economy.crop *= 0.7;
-    st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: (x, y, r) => cellsNear(env, x, y, r), left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR) });
+    const town = st.partOf !== undefined ? byId.get(st.partOf) : undefined;
+    if (town && !town.ruined) st.fed = town.fed;
+    else {
+      // Its economy: jobs, harvests, stores, eating (economy.ts).
+      // Under siege only the fields within the walls are worked, and the besiegers trample the crop.
+      if (st.besieged && st.economy) st.economy.crop *= 0.7;
+      // A town with joined villages: all their people, and all the land round them all.
+      const mine = st.besieged ? [] : members.get(st.id) ?? [];
+      const near = mine.length
+        ? () => [...new Set([st, ...mine].flatMap((q) => cellsNear(env, q.x, q.y, R)))]
+        : (x: number, y: number, r: number) => cellsNear(env, x, y, r);
+      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
+    }
     // On another layer: less from the land below, and what the layer itself grows (layers.ts).
-    if (st.layer) {
+    if (st.layer && !town) {
       const lf = layerFood(lc, st);
       st.fed = Math.max(st.fed * lf.mul, lf.floor);
     }
@@ -956,7 +975,13 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     st.pop -= out;
     seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, settleRange(ri, st) * 2.5), out);
   }
-  densityMonth({ sim, env, left, race: (id) => densityRace(sim, env, lib, info, id) });
+  // Round a town (its pooled stores and market) life in the wild is easier: the families grow faster.
+  const boost = new Float32Array(env.n);
+  for (const st of sim.settlements) {
+    if (st.ruined || st.layer || st.partOf !== undefined || settlementTier(st) === 'Village') continue;
+    for (const k of cellsNear(env, st.x, st.y, (knows(lib, st, 'riding') ? DAY_RIDE : DAY_WALK) * 2)) boost[k] = 1;
+  }
+  densityMonth({ sim, env, left, race: (id) => densityRace(sim, env, lib, info, id), boost });
   sim.grudges = sim.grudges.filter((g) => g.until > sim.day);
   // Markets and caravans (trade.ts).
   tradeMonth(tradeContext(sim, env, lib, info));
@@ -1061,6 +1086,9 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   settlementsYearly(sim, env, lib, info);
+  // Villages from the wild, and villages joining towns (REDESIGN.md 8.0).
+  villagesFromWild(sim, env, lib, info);
+  joinVillages(sim, env, lib);
   // The other layers: drifting islands carry their towns; tunnelers join their towns underground.
   if (env.layers) {
     const lc = layerContext(sim, env, lib);
@@ -1181,10 +1209,17 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     }
     // A town on another layer is full sooner where there is little room (layers.ts).
     const room = layerRoom(lc, st);
-    const full = st.pop > Math.min(st.kind === 'dawn' ? 900 : st.seat ? 450 : 300, room) && st.fed >= 0.9;
+    // Towns grow while their land feeds them (villages come from the wild now, REDESIGN.md 8.0);
+    const cap = st.kind === 'dawn' ? 900 : st.seat ? 450 : 300;
+    const nomads = ri.lifestyle === 'Nomadic';
+    const full = st.pop > Math.min(cap, room) && st.fed >= 0.9;
     const pressed = (st.pop > 300 && st.fed < 0.85) || st.pop > room * 1.3;
     if (!full && !pressed) continue;
-    const n = Math.round(Math.max(80, Math.min(250, st.pop * (0.15 + 0.1 * rand(sim)))));
+    // A growing town past its first size sends a band out now and then (about one year in four),
+    // keeping most of its growth; the hungry, the crowded and nomads send more, and more often.
+    const settledGrowth = full && !pressed && !nomads && st.pop <= room;
+    if (settledGrowth && rand(sim) >= 0.25) continue;
+    const n = Math.round(settledGrowth ? Math.max(30, Math.min(200, st.pop * (0.04 + 0.04 * rand(sim)))) : Math.max(80, Math.min(250, st.pop * (0.15 + 0.1 * rand(sim)))));
     const village = rand(sim) < (ri.lifestyle === 'Settled' ? 0.7 : ri.lifestyle === 'Nomadic' ? 0.2 : 0.5);
     const R = settleRange(ri, st);
     const a0 = rand(sim) * Math.PI * 2;
@@ -1228,11 +1263,10 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       }
     }
     if (village && spot && spot.s > 0) {
+      // Its overflow goes out into the land round it as families in the wild (density.ts); where
+      // they gather thick enough, villages form of themselves (villagesFromWild).
       st.pop -= n;
-      Object.assign(spot, landPoint(env, spot.x, spot.y));
-      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: spot.x, y: spot.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, spot.x, spot.y, sim.day)), techs: [...(st.techs ?? [])] };
-      sim.settlements.push(v);
-      log(sim, `People of ${st.name} founded the village of ${v.name}.`, v.x, v.y);
+      seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, R * 3), n);
     } else {
       st.pop -= n;
       // A big clan's new tribe may start a clan of its own.
@@ -1266,6 +1300,116 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       log(sim, `${t.name} settled in the ruins of ${st.name} and built it again.`, st.x, st.y);
       break;
     }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Villages from the wild, and villages joining towns (REDESIGN.md 8.0, step 2)
+
+/** Families in the wild gather into a village where at least this many live close together… */
+const FOUND_PEOPLE = 40;
+/** …and at least this thick (people per km² over the points round the spot). */
+const FOUND_DENSITY = 0.04;
+/** At most this many villages of a race a year (so a crowded wild settles over some years). */
+const FOUND_PER_YEAR = 4;
+/** The share of the families round the spot that settle in the new village. */
+const FOUND_TAKE = 0.7;
+/** A day's walk and a day's ride (km): how far a town's joined villages may be. */
+export const DAY_WALK = 30;
+export const DAY_RIDE = 65;
+const xOfCell = (env: Env, k: number) => env.x0 + (k % env.w) * env.step;
+
+/**
+ * Where families in the wild live thick enough, they settle together: a village at the best spot
+ * round them (water, coast, the land's food, their liking for it), if they know how to live
+ * settled (farming, herding, or fishing by water), as the settlement they came from does. It
+ * belongs to whoever holds the land; in land nobody holds it stands on its own.
+ */
+function villagesFromWild(sim: SimState, env: Env, lib: Library, info: Info): void {
+  for (const [race, D] of Object.entries(sim.density ?? {})) {
+    const ri = info({ race, culture: '' });
+    if (!ri) continue;
+    const cand: number[] = [];
+    for (let k = 0; k < env.n; k++) if (D[k] >= 4) cand.push(k);
+    cand.sort((a, b) => D[b] - D[a]);
+    let made = 0;
+    for (const k of cand) {
+      if (made >= FOUND_PER_YEAR) break;
+      if (D[k] < 4) continue;
+      const x = xOfCell(env, k);
+      const y = yOf(env, k);
+      const hood = cellsNear(env, x, y, env.step * 1.5).filter((c) => env.land[c]);
+      const sum = hood.reduce((n, c) => n + D[c], 0);
+      if (sum < Math.max(FOUND_PEOPLE, FOUND_DENSITY * hood.length * env.cellArea)) continue;
+      // Where they came from: the nearest settlement of their race (its ways, knowledge and faith).
+      let kin: Settlement | null = null;
+      for (const s of sim.settlements) if (!s.ruined && s.race === race && !s.layer && (!kin || dist(env, s.x, s.y, x, y) < dist(env, kin.x, kin.y, x, y))) kin = s;
+      const knowsIt = (id: string) => (kin ? knows(lib, kin, id) : false);
+      // The best spot round them, not on top of another settlement.
+      const spacing = ri.range * 1.6;
+      let spot = -1;
+      let best = -Infinity;
+      for (const c of cellsNear(env, x, y, env.step * 2.5)) {
+        if (!env.land[c] || !passable(env, ri, c)) continue;
+        const water = env.fresh[c] === 1 || env.coast[c] === 1;
+        if (!canSettle(knowsIt, water)) continue;
+        const cx = xOfCell(env, c);
+        const cy = yOf(env, c);
+        if (sim.settlements.some((o) => !o.ruined && !o.layer && dist(env, o.x, o.y, cx, cy) < spacing)) continue;
+        const s = liveScore(env, ri, c) + (env.fresh[c] ? 0.4 : env.coast[c] ? 0.3 : 0) + Math.min(1, D[c] / 20) * 0.3;
+        if (s > best) [best, spot] = [s, c];
+      }
+      if (spot < 0) continue;
+      let pop = 0;
+      for (const c of hood) {
+        const t = D[c] * FOUND_TAKE;
+        D[c] -= t;
+        pop += t;
+      }
+      pop = Math.round(pop);
+      const at = landPoint(env, xOfCell(env, spot), yOf(env, spot));
+      const culture = kin?.culture ?? startCulture(lib, ri.species, ri.race);
+      // Whose land it is: theirs. Nobody's: on its own.
+      const owner = sim.owner[spot];
+      const clanId = owner >= 0 && sim.clans.some((q) => q.id === owner) ? owner : newClan(sim, lib, ri.species.id, race, culture).id;
+      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, culture), kind: 'village', clan: clanId, species: ri.species.id, race, culture, x: at.x, y: at.y, pop, fed: 1, warband: Math.round(pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(pop, ri.need, foundingMonths(env, at.x, at.y, sim.day)), techs: [...(kin?.techs ?? [])], ...(kin?.faith ? { faith: kin.faith } : {}) };
+      sim.settlements.push(v);
+      claimAround(sim, env, v.x, v.y, ri.range, clanId);
+      made++;
+      log(sim, `Families living in the wild settled together: the village of ${v.name} was founded${owner >= 0 ? '' : ', on its own'}.`, v.x, v.y);
+    }
+  }
+}
+
+/**
+ * Villages join the nearest town of their own realm within a day's walk (a day's ride if the town
+ * keeps mounts), unless another town has them already: their people work and eat with the town's
+ * and their goods go to its stores. A village that grows into a town, or whose town is lost or
+ * changes hands, or that is taken by another realm, stands on its own again.
+ */
+function joinVillages(sim: SimState, env: Env, lib: Library): void {
+  const byId = new Map(sim.settlements.map((s) => [s.id, s]));
+  const isTown = (s: Settlement) => !s.ruined && !s.partOf && settlementTier(s) !== 'Village';
+  const reach = (t: Settlement) => (knows(lib, t, 'riding') ? DAY_RIDE : DAY_WALK);
+  for (const v of sim.settlements) {
+    if (v.partOf === undefined) continue;
+    const t = byId.get(v.partOf);
+    if (v.ruined || settlementTier(v) !== 'Village' || !t || !isTown(t) || t.clan !== v.clan || (t.layer ?? '') !== (v.layer ?? '') || dist(env, t.x, t.y, v.x, v.y) > reach(t) * 1.2) delete v.partOf;
+  }
+  const towns = sim.settlements.filter(isTown);
+  if (!towns.length) return;
+  for (const v of sim.settlements) {
+    if (v.ruined || v.partOf !== undefined || v.kind === 'dawn' || settlementTier(v) !== 'Village') continue;
+    let best: Settlement | null = null;
+    let bd = Infinity;
+    for (const t of towns) {
+      if (t === v || t.clan !== v.clan || (t.layer ?? '') !== (v.layer ?? '')) continue;
+      const d = dist(env, t.x, t.y, v.x, v.y);
+      if (d <= reach(t) && d < bd) [best, bd] = [t, d];
+    }
+    if (!best) continue;
+    v.partOf = best.id;
+    log(sim, `The village of ${v.name} became part of ${best.name}: its people work and eat with the town's.`, v.x, v.y);
   }
 }
 

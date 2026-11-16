@@ -1035,6 +1035,24 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Map:* View → Map look → Population density: Hidden, Everyone, or one race. It is drawn on a log scale from 0.005 to 20 people per square mile, pale yellow through orange and red to purple.
 - *Hover and province card:* the hover readout gives "Wild folk": people per square mile and the races' shares. A province's card gives its wild folk by race, the game left, and this season's wild plants.
 
+**Built (step 2): settlements from the wild**
+- *Founding:* each year, where families in the wild live close together (40 or more, and at least 0.04 per km² over the points round a spot), they settle together. Up to four villages a race a year.
+  - The village goes at the best spot round them for the race: how well it lives there, fresh water or coast, and where the families are thickest. It is never on top of another settlement.
+  - It needs the know-how of the nearest settlement of their race (agriculture, husbandry, or fishing by water). It takes that settlement's culture, faith and knowledge.
+  - 70% of the families round the spot move in.
+  - It belongs to whoever holds the land. In land nobody holds, it stands on its own (a clan of its own).
+- *Overflow:*
+  - A town past its first size (300, 450 for a province's seat, 900 for a dawn city) now keeps growing while its land feeds it. About one year in four it sends a small band out (4–8% of its people): to another layer if it can reach one, otherwise into the wild round it, or as a new tribe.
+  - Hungry or crowded towns, and nomads, send more out, and more often, as before.
+  - Villages no longer jump straight from towns: they form from the wild.
+  - The monthly trickle from a fed settlement into the wild is 0.05%.
+- *Joining:* each year a village joins the nearest town (1,000 or more, a city or a dawn city) of its own realm within a day's walk (30 km), or a day's ride (65 km) if the town knows riding, unless another town has it already.
+  - A joined village works and eats with its town as one economy: the town's people and all theirs, on all the land round them all, from the town's stores. It does not trade on its own.
+  - It stands alone again if it grows into a town, its town is lost or changes hands, or it is taken.
+  - On the map a faint dotted line joins it to its town. Its card and hover readout say which town it is part of.
+- *Feedback:* within two days' walk (or ride) of a town, families in the wild grow half as fast again (its pooled stores and market).
+- *Culture:* a town counts with its joined villages when the culture rules weigh a big neighbour against a small one.
+
 **Build order (proposed)**
 1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).
 2. *Settlements from density:* founding at the best spot, belonging to the land's holder or standing alone, growth, villages joining towns (a day's walk or ride), and the pooled stores and feedback.
