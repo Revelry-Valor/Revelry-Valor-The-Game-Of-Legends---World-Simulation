@@ -1053,6 +1053,18 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Feedback:* within two days' walk (or ride) of a town, families in the wild grow half as fast again (its pooled stores and market).
 - *Culture:* a town counts with its joined villages when the culture rules weigh a big neighbour against a small one.
 
+**Built (step 3): land and borders** (`sim/holding.ts`)
+- *Once a year every land province goes to the people about it.* Presence is counted for each realm:
+  - each settlement (every village for itself, joined or not), its people at full weight in its own province and fading to a fifth at the edge of its reach (half across a river or high mountains);
+  - each tribe, over the land it ranges over;
+  - the families in the wild, at half weight, for the realm of their race already about them, or holding the land next to them. So a realm creeps out, a province a year, over the land its families spread into. Families out in land nobody holds give nobody a claim.
+- *Who holds it:*
+  - The province a settlement stands in is its realm's whatever lives round it. That changes only with the settlement (taken in a war, ceded in a treaty, which already carry the land round them).
+  - Elsewhere the holder keeps it while its presence there is at least 60% of the strongest. Below that it goes to the strongest, without a war.
+  - Land with fewer than about four people's presence is let go; then gaps ringed by one realm are filled whole and lone specks absorbed (as before).
+- *Contested land:* where another realm's presence is at least 45% of the holder's, the province is contested. It is hatched faintly in the other realm's colour, and the border between them is drawn faded and dotted. The hover and province card say how many the other realm's people are against the holder's.
+- *Gone:* the old rule that a province changed hands after a year of another clan using it while its holders were away. Tribes and settlements still take unheld land they work at once.
+
 **Build order (proposed)**
 1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).
 2. *Settlements from density:* founding at the best spot, belonging to the land's holder or standing alone, growth, villages joining towns (a day's walk or ride), and the pooled stores and feedback.

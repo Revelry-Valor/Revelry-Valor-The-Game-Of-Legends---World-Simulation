@@ -5,6 +5,7 @@ import { densityMonth, seedDensity, type DensityRace } from './density';
 import { digYear, driftYear, layerFood, layerRoom, layerSpot, layerWays, LAYER_NAMES, type LayerContext, type LayerLand, type LayerWays } from './layers';
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
+import { holdYear, type Presence } from './holding';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
 import { PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
@@ -805,18 +806,29 @@ function beyondBarrier(env: Env, x: number, y: number, k: number): boolean {
   return false;
 }
 
-/** Tidy the land once a year (land.ts): holes filled, lone specks given to the land round them. */
-function tidyLand(sim: SimState, env: Env): void {
+/**
+ * The land once a year: each province to the people living on and using it (holding.ts), then
+ * tidied (land.ts): holes filled whole, lone specks given to the land round them.
+ */
+function tidyLand(sim: SimState, env: Env, info: Info): void {
   const seats = new Set<number>();
-  for (const st of sim.settlements) if (!st.ruined) seats.add(provAt(env, st.x, st.y));
+  const sources: Presence[] = [];
+  for (const st of sim.settlements) {
+    if (st.ruined || st.layer) continue;
+    seats.add(provAt(env, st.x, st.y));
+    const ri = info(st);
+    if (ri) sources.push({ clan: st.clan, race: st.race, x: st.x, y: st.y, pop: st.pop, r: settleRange(ri, st), seat: true });
+  }
+  for (const t of sim.tribes) {
+    const ri = info(t);
+    if (ri) sources.push({ clan: t.clan, race: t.race, x: t.x, y: t.y, pop: t.pop, r: ri.range * 1.6 });
+  }
+  holdYear(sim, env, sources, (fx, fy, k) => beyondBarrier(env, fx, fy, k));
   tidyProvinces(sim, env, seats);
 }
 
-function useLand(sim: SimState, env: Env, cells: number[], clan: number, near: number, from?: { x: number; y: number }): void {
-  useProvinces(sim, env, cells, clan, from, (fx, fy, c) => beyondBarrier(env, fx, fy, c), (o, cx, cy) =>
-    // A year of use: it changes hands unless its holders are still about.
-    sim.tribes.some((q) => q.clan === o && dist(env, q.x, q.y, cx, cy) < near) || sim.settlements.some((q) => !q.ruined && q.clan === o && dist(env, q.x, q.y, cx, cy) < near * 1.5),
-  );
+function useLand(sim: SimState, env: Env, cells: number[], clan: number, from?: { x: number; y: number }): void {
+  useProvinces(sim, env, cells, clan, from, (fx, fy, c) => beyondBarrier(env, fx, fy, c));
 }
 
 function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
@@ -864,7 +876,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     t.warband = Math.max(t.away, Math.round(t.pop * ri.warShare));
     // Claims: the land it uses (forages, hunts, ranges over) is its clan's; another clan's land is
     // taken by using it long enough.
-    useLand(sim, env, cellsNear(env, t.x, t.y, ri.range * 1.6), t.clan, ri.range * 2.5, t);
+    useLand(sim, env, cellsNear(env, t.x, t.y, ri.range * 1.6), t.clan, t);
     // Fights over land and food: a warband goes out, and comes back.
     const home = t.warband - t.away;
     if (home >= 8 && !sim.sorties.some((s) => s.tribe === t.id)) {
@@ -952,7 +964,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * scfx.famine) / 12 : 0);
     st.pop = Math.max(0, st.pop + st.pop * (births - deaths));
     st.warband = Math.round(st.pop * ri.warShare * 0.6);
-    useLand(sim, env, cells, st.clan, R * 1.5, st);
+    useLand(sim, env, cells, st.clan, st);
     if (st.pop < 25) {
       st.ruined = true;
       // What only its people knew is gone with them.
@@ -1117,7 +1129,7 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
   cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // Clean claims: holes filled, stray specks absorbed.
-  tidyLand(sim, env);
+  tidyLand(sim, env, info);
   // Realms: capitals, governments, rulers, reach, culture pressed on their places (nations.ts).
   const nc = { ...rulerContext(sim, lib), env, lib, dist: (ax: number, ay: number, bx: number, by: number) => dist(env, ax, ay, bx, by), cellAt: (x: number, y: number) => cellOf(env, x, y), log: (text: string, x?: number, y?: number) => log(sim, text, x, y) };
   const { royalRoads } = nationsYear(nc);

@@ -352,9 +352,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let beastDirty = true;
   let landImg: HTMLCanvasElement | null = null;
   /** Border lines (km): polylines along the natural edges of the realms' lands; and when the land was last drawn. */
-  let borderChains: { pts: number[]; left: number; right: number }[] = [];
+  let borderChains: { pts: number[]; left: number; right: number; soft?: boolean }[] = [];
   let borderRings = new Map<number, number[][]>();
-  /** Provinces being taken by another's use, for hatching. */
+  /** Contested provinces, for hatching. */
   let disputed: { rings: number[][]; rgb: number[] }[] = [];
   let landBuilt = 0;
   let landColours = new Map<number, number[]>();
@@ -393,16 +393,19 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     }
     const held = (l: number) => l >= 0 || l <= -1000;
     // Borders run along the province outlines: every stretch between two different labels.
-    const chains: { pts: number[]; left: number; right: number }[] = [];
+    const chains: { pts: number[]; left: number; right: number; soft?: boolean }[] = [];
+    // Contested land (holding.ts): where two realms' people mix, the border between them is soft.
+    const rivalOf = (p: number) => (p >= 0 && (s.provRivalUse?.[p] ?? 0) > 0 ? s.provRival?.[p] ?? -1 : -1);
     if (pm) for (const b of pm.borders) {
       const l = b.a < 0 ? OUTSIDE : label[b.a];
       const r = b.b < 0 ? OUTSIDE : label[b.b];
       if (l === r || (!held(l) && !held(r))) continue;
-      chains.push({ pts: b.pts, left: l, right: r });
+      const soft = (rivalOf(b.a) >= 0 && rivalOf(b.a) === r) || (rivalOf(b.b) >= 0 && rivalOf(b.b) === l);
+      chains.push({ pts: b.pts, left: l, right: r, soft });
     }
     borderChains = chains;
     borderRings = assembleRings(chains, pm?.wrapKm ?? 0, !!pm?.wrapKm, held);
-    // Disputed provinces (being taken by another's use): hatched in the taker's colour.
+    // Contested provinces (another realm's people nearly as many there): lightly hatched in its colour.
     disputed = [];
     if (pm && s.provRival && s.provRivalUse) for (let p = 0; p < P.count; p++) {
       if (s.provRival[p] < 0 || s.provRivalUse[p] <= 0 || (s.provOwner?.[p] ?? -1) < 0) continue;
@@ -523,7 +526,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             g.stroke();
             g.restore();
           }
-          // Disputed provinces: hatched in the colour of those taking them.
+          // Contested provinces: lightly hatched in the colour of the other realm.
           for (const dp of disputed) {
             g.save();
             g.beginPath();
@@ -548,23 +551,24 @@ export function createPeoples(d: PeoplesDeps): Peoples {
               g.moveTo(t, y1);
               g.lineTo(t + (y1 - y0), y0);
             }
-            g.strokeStyle = `rgba(${dp.rgb[0]},${dp.rgb[1]},${dp.rgb[2]},0.6)`;
-            g.lineWidth = 1.5;
+            g.strokeStyle = `rgba(${dp.rgb[0]},${dp.rgb[1]},${dp.rgb[2]},0.35)`;
+            g.lineWidth = 1.2;
             g.stroke();
             g.restore();
           }
-          // The black lines (not along the map's own edge).
-          for (const dashed of [false, true]) {
+          // The black lines (not along the map's own edge): firm, dashed round land taken in a war,
+          // and faded where the border is contested.
+          for (const style of ['firm', 'taken', 'soft'] as const) {
             g.beginPath();
             for (const ch of borderChains) {
               if (ch.left === OUTSIDE || ch.right === OUTSIDE) continue;
               const taken = holder(ch.left) >= 0 && holder(ch.left) === holder(ch.right);
-              if (taken !== dashed) continue;
+              if ((taken ? 'taken' : ch.soft ? 'soft' : 'firm') !== style) continue;
               trace(ch.pts, c);
             }
-            g.setLineDash(dashed ? [6, 4] : []);
-            g.strokeStyle = 'rgba(10,8,6,0.95)';
-            g.lineWidth = 1.6;
+            g.setLineDash(style === 'taken' ? [6, 4] : style === 'soft' ? [3, 4] : []);
+            g.strokeStyle = style === 'soft' ? 'rgba(10,8,6,0.35)' : 'rgba(10,8,6,0.95)';
+            g.lineWidth = style === 'soft' ? 1.2 : 1.6;
             g.stroke();
           }
         }
@@ -1227,7 +1231,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       }
       if (k >= 0 && env!.land[k]) {
         const o = s.owner[k];
-        if (o >= 0) push('Realm', `Land of ${clanOf(o) ? realmName(lib(), clanOf(o)!) : 'a clan now gone'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 && clanOf(s.rival[k]) ? `, being taken by ${realmName(lib(), clanOf(s.rival[k])!)}` : ''}`);
+        if (o >= 0) push('Realm', `Land of ${clanOf(o) ? realmName(lib(), clanOf(o)!) : 'a clan now gone'}${s.rival[k] >= 0 && s.rivalUse[k] > 0 && clanOf(s.rival[k]) ? `, contested by ${realmName(lib(), clanOf(s.rival[k])!)}` : ''}`);
         if (s.way[k]) {
           const keeper = s.settlements.find((q) => q.id === s.wayKeeper[k]);
           push('Way', `${WAYS[s.way[k]].name}${keeper ? ` (kept by ${keeper.name})` : s.way[k] === 1 ? ' (worn by use)' : ''}`);
@@ -2241,7 +2245,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       out.push({ label: 'Held by', value: oc ? realmName(lib(), oc) : P.kind[index] === PK.land ? 'Nobody yet' : 'Nobody can hold it' });
       if ((s.provRival?.[index] ?? -1) >= 0 && (s.provRivalUse?.[index] ?? 0) > 0) {
         const rc = clanOf(s.provRival![index]);
-        out.push({ label: 'Disputed', value: `${rc ? realmName(lib(), rc) : 'Another'} has used it for ${Math.round(s.provRivalUse![index])} of the 12 months that would take it` });
+        const pct = Math.round(s.provRivalUse![index]);
+        out.push({ label: 'Contested', value: `${rc ? realmName(lib(), rc) : 'Another realm'}'s people are ${pct >= 100 ? 'now as many as its holder’s' : `${pct}% as many as its holder’s`} here; the land goes to whichever comes to outnumber the other` });
       }
       const inHere = (x: number, y: number) => env!.prov.of[cellOf(x, y)] === index;
       const towns = s.settlements.filter((q) => !q.ruined && inHere(q.x, q.y));

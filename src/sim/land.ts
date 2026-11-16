@@ -60,7 +60,7 @@ const cellOf = (env: Env, x: number, y: number) => {
   }
   return j * env.w + i;
 };
-const distOn = (env: Env, ax: number, ay: number, bx: number, by: number) => {
+export const distOn = (env: Env, ax: number, ay: number, bx: number, by: number) => {
   let dx = Math.abs(ax - bx);
   if (env.wrapKm) dx = Math.min(dx, env.wrapKm - dx);
   return Math.hypot(dx, ay - by);
@@ -330,44 +330,20 @@ export function claimNear(sim: SimState, env: Env, x: number, y: number, r: numb
 }
 
 /**
- * A people working land: the unheld provinces among the points they work become theirs; others'
- * provinces build up their use, and after a year of it one changes hands unless its holders are
- * still about (`ownerHere`).
+ * A people working land: the unheld provinces among the points they work become theirs at once.
+ * Others' land changes hands only by who lives about it, once a year (holding.ts), or with its
+ * settlements (war and treaties).
  */
-export function useProvinces(sim: SimState, env: Env, cells: number[], clan: number, from: { x: number; y: number } | undefined, blocked: (x: number, y: number, k: number) => boolean, ownerHere: (owner: number, x: number, y: number) => boolean): void {
+export function useProvinces(sim: SimState, env: Env, cells: number[], clan: number, from: { x: number; y: number } | undefined, blocked: (x: number, y: number, k: number) => boolean): void {
   const P = env.prov;
-  // Each province once, and whether any of its worked points is within reach.
-  const reach = new Map<number, boolean>();
+  const seen = new Set<number>();
   for (const c of cells) {
     if (!env.land[c]) continue;
     const p = P.of[c];
-    if (p < 0 || P.kind[p] !== PK.land) continue;
-    const ok = !from || !blocked(from.x, from.y, c);
-    reach.set(p, (reach.get(p) ?? false) || ok);
-  }
-  for (const [p, ok] of reach) {
-    const o = sim.provOwner![p];
-    if (o < 0) {
-      if (ok) setHolder(sim, env, p, clan);
-      continue;
-    }
-    if (o === clan) {
-      if (sim.provRivalUse![p] > 0) {
-        sim.provRivalUse![p] = Math.max(0, sim.provRivalUse![p] - 1);
-        if (!sim.provRivalUse![p]) sim.provRival![p] = -1;
-        mirror(sim, env, p);
-      }
-      continue;
-    }
-    if (!ok) continue;
-    if (sim.provRival![p] === clan) sim.provRivalUse![p] += 1;
-    else {
-      sim.provRival![p] = clan;
-      sim.provRivalUse![p] = 1;
-    }
-    mirror(sim, env, p);
-    if (sim.provRivalUse![p] < 12) continue;
-    if (!ownerHere(o, P.x[p], P.y[p])) setHolder(sim, env, p, clan);
+    if (p < 0 || P.kind[p] !== PK.land || seen.has(p)) continue;
+    if (from && blocked(from.x, from.y, c)) continue;
+    seen.add(p);
+    if (sim.provOwner![p] < 0) setHolder(sim, env, p, clan);
   }
 }
 
