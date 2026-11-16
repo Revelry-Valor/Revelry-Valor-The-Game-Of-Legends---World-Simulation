@@ -585,6 +585,8 @@ export interface SimState {
   provRivalUse?: Float32Array;
   /** Beast densities, 0–1 of what the land can carry, per beast (library id). */
   beasts: Record<string, Float32Array>;
+  /** Wilderness density (REDESIGN.md 8.0): families living out in the wild, people per point, by race. */
+  density?: Record<string, Float32Array>;
   events: SimEvent[];
   /** The races taking part and how many starting tribes each (for placing again). */
   setup: SetupRow[];

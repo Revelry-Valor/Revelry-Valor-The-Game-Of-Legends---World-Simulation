@@ -29,6 +29,7 @@ import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
 import { manaAtPlace, manaLinesNow, manaNow } from '../sim/mana';
 import { CORRUPTION_RIFT, HOLD_NAMES, type Rift } from '../sim/rifts';
 import { buildLayerLand, LAYER_NAMES } from '../sim/layers';
+import { densityAt, totalsOver } from '../sim/density';
 import type { LayerProvs } from '../sim/layerprovs';
 import { tideAt, type Horde } from '../sim/monsters';
 import { manaWord } from '../core/mana';
@@ -57,6 +58,8 @@ export interface PeoplesDeps {
   selectionChanged?(): void;
   /** Open the Peoples tab (to show what the hand tool picked). */
   openPeoples?(): void;
+  /** The wilderness density to show: 'off', 'total', or a race id. */
+  density?(): string;
   /** The other layers' provinces, as far as they have been made (the peoples hold them too). */
   layerProvinces?(): LayerProvs;
   /** The provinces (the peoples hold land by province), and opening the Provinces tab to make them. */
@@ -81,6 +84,8 @@ export interface Peoples {
   pack(): PackedSim | null;
   /** The live simulation, for the other layers' views (their towns, tunnels and drifting islands); null when none. */
   live(): SimState | null;
+  /** The races living in the wild (for the density map's choice). */
+  densityRaces(): { id: string; name: string }[];
   /** The selected settlement's or realm's resources (for the resource panel), or null. */
   resources(): ResourceView | null;
   dispose(): void;
@@ -93,6 +98,37 @@ const SPEEDS = [
   { value: '360', label: 'Year', days: 360 },
 ];
 const SQ_MI = 0.386102;
+const SQ_KM_PER_SQ_MI = 2.589988;
+const perSqMi = (v: number) => (v >= 10 ? Math.round(v).toLocaleString() : v >= 1 ? v.toFixed(1) : v.toFixed(2));
+/** People per square mile at which the density map is fullest (it grades on a log scale below). */
+const DENSITY_TOP = 20;
+/** And below which it shows nothing. */
+const DENSITY_FLOOR = 0.005;
+/** The wilderness density as a picture over the climate grid: pale yellow through orange and red to deep purple. */
+function drawDensity(s: SimState, e: Env, which: string): HTMLCanvasElement {
+  const cv = document.createElement('canvas');
+  cv.width = e.w;
+  cv.height = e.h;
+  const g = cv.getContext('2d')!;
+  const img = g.createImageData(e.w, e.h);
+  const maps = which === 'total' ? Object.values(s.density ?? {}) : s.density?.[which] ? [s.density[which]] : [];
+  const ramp = [[255, 238, 150], [250, 160, 60], [220, 60, 50], [110, 20, 90]];
+  for (let k = 0; k < e.n; k++) {
+    let v = 0;
+    for (const D of maps) v += D[k];
+    const per = (v / e.cellArea) * SQ_KM_PER_SQ_MI;
+    if (per < DENSITY_FLOOR) continue;
+    // Log scale from DENSITY_FLOOR to DENSITY_TOP people per sq mi.
+    const t = Math.max(0, Math.min(0.999, Math.log(per / DENSITY_FLOOR) / Math.log(DENSITY_TOP / DENSITY_FLOOR)));
+    const sc = t * (ramp.length - 1);
+    const i = Math.floor(sc);
+    const f = sc - i;
+    const c = ramp[i].map((x, q) => x + (ramp[i + 1][q] - x) * f);
+    img.data.set([c[0], c[1], c[2], Math.round(110 + 130 * t)], k * 4);
+  }
+  g.putImageData(img, 0, 0);
+  return cv;
+}
 
 export function createPeoples(d: PeoplesDeps): Peoples {
   let env: Env | null = null;
@@ -115,6 +151,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let showWays = true;
   let landsBy: 'clan' | 'culture' | 'faith' = 'clan';
   let resDirty = true;
+  let densityImg: HTMLCanvasElement | null = null;
+  let densityKey = "";
   let resImg: HTMLCanvasElement | null = null;
   let follow = true;
   let playing = false;
@@ -419,6 +457,16 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         }
         g.restore();
       };
+      // The wilderness density (density.ts): everyone, or one race.
+      const dShow = d.density?.() ?? 'off';
+      if (dShow !== 'off' && s.density) {
+        const key = `${dShow}|${s.day}`;
+        if (key !== densityKey || !densityImg) {
+          densityImg = drawDensity(s, e, dShow);
+          densityKey = key;
+        }
+        blit(densityImg);
+      }
       if (showRes) {
         if (resDirty || !resImg) resImg = drawRes(showRes);
         resDirty = false;
@@ -1106,6 +1154,17 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const s = sim!;
       const out: InfoItem[] = [];
       const push = (label: string, value: string) => out.push({ label, value });
+      // Families in the wild here.
+      {
+        const k = cellOf(x, y);
+        if (k >= 0 && s.density) {
+          const dz = densityAt(s, k);
+          if (dz.total >= 0.5) {
+            const per = (v: number) => (v / env!.cellArea) * SQ_KM_PER_SQ_MI;
+            push('Wild folk', `about ${perSqMi(per(dz.total))} per sq mi (${Math.round(dz.total).toLocaleString()} here)${dz.byRace.length > 1 || dz.byRace[0]?.[0] ? ': ' + dz.byRace.map(([id, v]) => `${raceName(id)} ${Math.round((v / dz.total) * 100)}%`).join(', ') : ''}`);
+          }
+        }
+      }
       const t = tribeAt(x, y, pxKm);
       if (t) push('Tribe', `${t.name} (${clanOf(t.clan) ? realmName(lib(), clanOf(t.clan)!) : '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
       const st = t ? null : settlementAt(x, y, pxKm);
@@ -2130,6 +2189,13 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const n = P.start[index + 1] - P.start[index];
         if (n && sum / n > 0.1) res.push([r.name, sum / n]);
       }
+      // The wilderness: its families by race, and the game and wild food left in it.
+      if (sim) {
+        const tot = totalsOver(sim, env, P.cells.subarray(P.start[index], P.start[index + 1]), northernSummer(sim.day) ? 0 : 1);
+        const folk = Object.entries(tot.people).filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]);
+        if (folk.length) out.push({ label: 'Wild folk', value: folk.map(([id, v]) => `${Math.round(v).toLocaleString()} ${raceName(id)}`).join(', ') });
+        out.push({ label: 'Wild food', value: `game for about ${Math.round(tot.game / 30).toLocaleString()} people a month at a light hunt; wild plants for ${Math.round(tot.plants).toLocaleString()} this month` });
+      }
       if (res.length) out.push({ label: 'Resources', value: res.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, v]) => `${n} (${Math.round(Math.min(1, v) * 100)}%)`).join(', ') });
       // How dense its mana is (the average over its points).
       {
@@ -2188,6 +2254,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       return { lines, nodes, anchor: env.manaLand.anchor, grid: { x0: env.x0, y0: env.y0, step: env.step, w: env.w, h: env.h, wrapKm: env.wrapKm }, field: manaNow(sim, env) };
     },
     provincesChanged,
+    densityRaces: () => Object.keys(sim?.density ?? {}).filter((id) => sim!.density![id].some((v) => v > 0)).map((id) => ({ id, name: raceName(id) })),
     live: () => (sim && env && !gridProblem ? sim : null),
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),
     resources: resourceView,

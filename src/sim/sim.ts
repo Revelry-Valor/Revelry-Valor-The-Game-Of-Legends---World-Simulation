@@ -1,6 +1,7 @@
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { hordesDay, monstersMonth } from './monsters';
 import { holdLayersYear } from './layerprovs';
+import { densityMonth, seedDensity, type DensityRace } from './density';
 import { digYear, driftYear, layerFood, layerRoom, layerSpot, layerWays, LAYER_NAMES, type LayerContext, type LayerLand, type LayerWays } from './layers';
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
@@ -159,6 +160,24 @@ function dist(env: Env, ax: number, ay: number, bx: number, by: number): number 
   let dx = Math.abs(ax - bx);
   if (env.wrapKm) dx = Math.min(dx, env.wrapKm - dx);
   return Math.hypot(dx, ay - by);
+}
+/** Share of a settlement's people that go out into the wild each month (when it is fed). */
+const WILD_TRICKLE = 0.0015;
+/** How a race lives in the wild (density.ts), with how well it can live at each point (worked out once). */
+const liveCache = new WeakMap<Env, Map<string, Float32Array>>();
+function densityRace(sim: SimState, env: Env, lib: Library, info: Info, race: string): DensityRace | null {
+  const ri = info({ race, culture: '' });
+  if (!ri) return null;
+  let m = liveCache.get(env);
+  if (!m) liveCache.set(env, (m = new Map()));
+  let L = m.get(race);
+  if (!L) {
+    L = new Float32Array(env.n);
+    for (let k = 0; k < env.n; k++) L[k] = liveScore(env, ri, k);
+    m.set(race, L);
+  }
+  const live = L;
+  return { need: ri.need, births: ri.births, deaths: ri.deaths, attitude: ri.attitude, species: ri.species.id, live: (k) => live[k] };
 }
 const NO_LAYERS: LayerLand = { under: [], underStep: 20, ways: [], islands: [], trees: [], cities: [], vines: [] };
 /** What the layer rules (layers.ts) need. */
@@ -927,6 +946,17 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
       log(sim, `${st.kind === 'dawn' ? 'The dawn city ' : ''}${st.name} has fallen to ruin${st.holyTo.length ? '; it is holy still' : ''}.`, st.x, st.y);
     }
   }
+  // The wilderness (density.ts): settlements send a trickle of families out into the land round
+  // them; then the families in the wild eat what the land still has, grow or die back, and move on.
+  for (const st of sim.settlements) {
+    if (st.ruined || st.fed < 0.9 || st.pop < 60) continue;
+    const ri = info(st);
+    if (!ri) continue;
+    const out = st.pop * WILD_TRICKLE;
+    st.pop -= out;
+    seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, settleRange(ri, st) * 2.5), out);
+  }
+  densityMonth({ sim, env, left, race: (id) => densityRace(sim, env, lib, info, id) });
   sim.grudges = sim.grudges.filter((g) => g.until > sim.day);
   // Markets and caravans (trade.ts).
   tradeMonth(tradeContext(sim, env, lib, info));
@@ -1120,6 +1150,10 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
   sim.settlements.push(v);
   sim.tribes = sim.tribes.filter((q) => q !== t);
   sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
+  // Some of its families stay out on the land round the new village: the wilderness starts here.
+  const families = Math.round(t.pop * 0.15);
+  v.pop -= families;
+  seedDensity(sim, env, t.race, cellsNear(env, v.x, v.y, ri.range * 2.5), families);
   log(sim, `${t.name} settled down at its winter grounds (clan ${sim.clans.find((c) => c.id === t.clan)?.name ?? '?'}).`, v.x, v.y);
   return true;
 }

@@ -59,6 +59,8 @@ export interface PackedSim {
   provRival?: number[];
   provRivalUse?: number[];
   beasts: Record<string, number[]>;
+  /** Wilderness density by race: tenths of a person per point, as runs. */
+  density?: Record<string, number[]>;
 }
 
 function runs(values: ArrayLike<number>): number[] {
@@ -99,8 +101,11 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     }
     beasts[id] = runs(q);
   }
+  const density: Record<string, number[]> = {};
+  for (const [id, D] of Object.entries(sim.density ?? {})) if (D.some((v) => v > 0)) density[id] = runs(Int32Array.from(D, (v) => Math.round(v * 10)));
   return {
     v: 1,
+    density,
     day: sim.day,
     seed: sim.seed,
     started: sim.started,
@@ -174,6 +179,11 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     const ok = unruns(p.beasts?.[b.id], n, q);
     beasts[b.id] = ok ? Float32Array.from(q, (v, k) => (v / 255) * K[k]) : Float32Array.from(K, (v) => v * 0.9);
   }
+  const density: Record<string, Float32Array> = {};
+  for (const [id, r] of Object.entries(p.density ?? {})) {
+    const q = new Int32Array(n);
+    if (unruns(r, n, q)) density[id] = Float32Array.from(q, (v) => v / 10);
+  }
   // Land by province, when it was saved by province.
   let prov: Pick<SimState, 'provIds' | 'provOwner' | 'provRival' | 'provRivalUse'> = {};
   if (Array.isArray(p.provIds) && p.provIds.length % 2 === 0) {
@@ -234,6 +244,7 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     rival,
     rivalUse,
     beasts,
+    density,
     events: Array.isArray(p.events) ? p.events : [],
     setup: Array.isArray(p.setup) ? p.setup : [],
     ...prov,

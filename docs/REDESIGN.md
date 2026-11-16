@@ -1018,6 +1018,23 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Building:* realms only build up and keep up roads that are already in use. No roads to every town, and none hundreds of miles long in a straight line.
 - *Other users:* armies, migrants and messengers use the same roads.
 
+**Built (step 1): wilderness density** (`sim/density.ts`)
+- *Where it is kept:* `sim.density`, by race, as people per climate point. It is saved with the peoples.
+- *Where it starts:*
+  - Each month a fed settlement of 60 or more sends 0.15% of its people out into the land within about two and a half times its reach.
+  - A tribe settling down leaves 15% of its people out round its new village.
+  - The families go onto the best of those points (the most wild food), at least a couple to each, so a trickle takes hold.
+- *Each month, for each race:*
+  - The families eat what the land still has after the tribes and towns: wild plants first, then game (thinning the beasts, which breed back as before), then more plants if game is short.
+  - Fed, they grow (births a fifth faster when well fed); hungry, they die back, and a hungry last few are gone.
+  - Two per cent move on each month, up to twelve when hungry. They go to the neighbouring points the race can live on, weighted by how well it lives there and by the food left per head. Points with fewer than a couple of people send no one on, so the spreading stops at the edge.
+  - Land the race can't live on (water, or too high for it) keeps no one.
+- *Races sharing land:* two races can live side by side if each accepts the other.
+  - "Welcoming" accepts everyone; "Indifferent" accepts its own species; "Wary" accepts only its own race.
+  - Where they can't, each loses some of its families each month, the weaker share far more, so the stronger presence pushes the other out.
+- *Map:* View → Map look → Population density: Hidden, Everyone, or one race. It is drawn on a log scale from 0.005 to 20 people per square mile, pale yellow through orange and red to purple.
+- *Hover and province card:* the hover readout gives "Wild folk": people per square mile and the races' shares. A province's card gives its wild folk by race, the game left, and this season's wild plants.
+
 **Build order (proposed)**
 1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).
 2. *Settlements from density:* founding at the best spot, belonging to the land's holder or standing alone, growth, villages joining towns (a day's walk or ride), and the pooled stores and feedback.

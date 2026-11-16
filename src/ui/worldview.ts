@@ -36,7 +36,7 @@ import type { MapOverlay } from './mapview';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay, layer: 'surface' as 'surface' | 'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3' };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay, density: 'off', layer: 'surface' as 'surface' | 'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3' };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -547,12 +547,35 @@ export function showWorld(app: App, start: World): () => void {
     climateLegend.hidden = look.view === 'land';
   };
   renderClimateLegend();
+  /** The wilderness density map: hidden, everyone, or one race (the races living in the wild now). */
+  function densityField(): HTMLElement {
+    const sel = h('select', { 'aria-label': 'Population density' }) as HTMLSelectElement;
+    const fill = () => {
+      const races = peoples?.densityRaces() ?? [];
+      sel.replaceChildren(
+        h('option', { value: 'off' }, 'Hidden'),
+        h('option', { value: 'total' }, 'Everyone'),
+        ...races.map((r) => h('option', { value: r.id }, r.name)),
+      );
+      if (look.density !== 'off' && look.density !== 'total' && !races.some((r) => r.id === look.density)) look.density = 'off';
+      sel.value = look.density;
+    };
+    fill();
+    sel.addEventListener('focus', fill);
+    sel.addEventListener('mousedown', fill);
+    sel.addEventListener('change', () => {
+      look.density = sel.value;
+      map.redraw();
+    });
+    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Population density'), sel, h('span', { class: 'muted small hint' }, 'Families living out in the wild, per square mile: everyone, or one race.'));
+  }
   const lookPanel = h(
     'section',
     { class: 'view-panel' },
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
     choice<'all' | 'main' | 'off'>('Labels', [{ value: 'all', label: 'All' }, { value: 'main', label: 'Land & sea only' }, { value: 'off', label: 'Hidden' }], look.labels, (v) => { look.labels = v; map.redraw(); }),
+    densityField(),
     choice<ManaDisplay>('Mana', [{ value: 'off', label: 'Hidden' }, { value: 'lines', label: 'Lines' }, { value: 'heat', label: 'Heat map' }], look.mana, (v) => { look.mana = v; map.redraw(); }),
     choice<ProvinceDisplay>('Provinces', [{ value: 'off', label: 'Hidden' }, { value: 'lines', label: 'Outlines' }, { value: 'colour', label: 'Coloured' }], look.provinces, (v) => { look.provinces = v; map.redraw(); }),
   );
@@ -900,6 +923,7 @@ export function showWorld(app: App, start: World): () => void {
     selectionChanged: () => resources.show(peoples?.resources() ?? null),
     openPeoples: () => showTab('peoples'),
     provinces: () => provinces?.map() ?? null,
+    density: () => look.density,
     layerProvinces: () => {
       const air = airProv?.maps();
       return { underdark: underProv?.map() ?? undefined, canopy: air?.get(0), sky1: air?.get(1), sky2: air?.get(2), sky3: air?.get(3) };
