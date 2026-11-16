@@ -12,19 +12,23 @@ import { covers, shapeOf } from './underdark';
 /** Whether islands may drift (on hold for now: all are fixed). */
 export const DRIFT = false;
 
-export type SkyLayer = 1 | 2 | 3;
-export const SKY_LAYERS: SkyLayer[] = [1, 2, 3];
+/** 0 is the canopy (the ground's own airspace, where islands can float too); 1–3 the sky layers. */
+export type SkyLayer = 0 | 1 | 2 | 3;
+export const SKY_LAYERS: SkyLayer[] = [0, 1, 2, 3];
 /** How high each layer floats above sea level (km). */
-export const SKY_ALT_KM: Record<SkyLayer, number> = { 1: 1.5, 2: 3, 3: 5 };
+export const SKY_ALT_KM: Record<SkyLayer, number> = { 0: 0.4, 1: 1.5, 2: 3, 3: 5 };
 /** How much stronger the winds blow up there than at the ground. */
-export const SKY_WIND: Record<SkyLayer, number> = { 1: 1.4, 2: 1.9, 3: 2.5 };
+export const SKY_WIND: Record<SkyLayer, number> = { 0: 1.1, 1: 1.4, 2: 1.9, 3: 2.5 };
 /** How much of the rain below falls up there (the air holds less water the higher it is). */
-export const SKY_RAIN: Record<SkyLayer, number> = { 1: 1, 2: 0.7, 3: 0.45 };
+export const SKY_RAIN: Record<SkyLayer, number> = { 0: 1, 1: 1, 2: 0.7, 3: 0.45 };
 
 export type SkyCover = 'meadow' | 'forest' | 'rock' | 'tundra' | 'snow';
 export const SKY_COVER_NAMES: Record<SkyCover, string> = { meadow: 'Sky meadow', forest: 'Sky forest', rock: 'Bare rock', tundra: 'Windswept tundra', snow: 'Snow and ice' };
 
 const layerOf = (st: Stroke): SkyLayer => st.sky ?? 1;
+/** A sky layer's id among the world's layers: the canopy for 0. */
+export const skyLayerId = (l: SkyLayer): 'canopy' | 'sky1' | 'sky2' | 'sky3' => (l === 0 ? 'canopy' : (`sky${l}` as 'sky1'));
+export const skyLayerName = (l: SkyLayer): string => (l === 0 ? 'the canopy' : `sky layer ${l}`);
 
 export interface SkyIsland {
   /** Its first stroke's id (stays the same as the island grows). */

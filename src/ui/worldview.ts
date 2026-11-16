@@ -22,10 +22,11 @@ import { createProvinces, type ProvinceDisplay, type Provinces } from './provinc
 import { createMana, type Mana, type ManaDisplay } from './mana';
 import { createUnderdark, type Underdark } from './underdark';
 import { createUnderProvinces, type UnderProvinces } from './underprovinces';
+import { createAirProvinces, type AirProvinces } from './airprovinces';
 import { isCanopy, isSky, offSurface } from '../core/paint';
 import { createCanopy, type Canopy, type ShownLayer } from './canopy';
 import { createSky, type Sky } from './sky';
-import type { SkyLayer } from '../core/sky';
+import { skyLayerId, type SkyLayer } from '../core/sky';
 import type { MapOverlay } from './mapview';
 
 /**
@@ -54,6 +55,9 @@ export function showWorld(app: App, start: World): () => void {
   let mana: Mana | null = null;
   let under: Underdark | null = null;
   let underProv: UnderProvinces | null = null;
+  let airProv: AirProvinces | null = null;
+  /** The canopy (0) or sky layer the map shows now, or null for the surface or the Underdark. */
+  const airShown = (): SkyLayer | null => (canopy?.showing() ? 0 : sky?.showing() ?? null);
   let sky: Sky | null = null;
   let canopy: Canopy | null = null;
   let layerTabsTimer = 0;
@@ -167,8 +171,9 @@ export function showWorld(app: App, start: World): () => void {
       // giant trees and the vines that reach the layer shown.
       sky?.overlay.draw(g, at, scale, copies);
       canopy?.overlay.draw(g, at, scale, copies);
+      airProv?.overlay.draw(g, at, scale, copies);
     },
-    down: (x, y, pxKm) => (under?.showing() ? !!underProv?.overlay.down?.(x, y, pxKm) : !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false)),
+    down: (x, y, pxKm) => (airShown() !== null ? !!airProv?.overlay.down?.(x, y, pxKm) : under?.showing() ? !!underProv?.overlay.down?.(x, y, pxKm) : !!provinces?.overlay.down?.(x, y, pxKm) || (peoples?.overlay.down?.(x, y, pxKm) ?? false)),
     drag(x, y) {
       provinces?.overlay.drag?.(x, y);
       peoples?.overlay.drag?.(x, y);
@@ -183,10 +188,11 @@ export function showWorld(app: App, start: World): () => void {
       const m = mana?.overlay.describe?.(x, y) ?? [];
       const u = under?.overlay.describe?.(x, y) ?? [];
       const t = canopy?.overlay.describe?.(x, y) ?? [];
-      if (canopy?.showing()) return [...t, ...m];
-      if (sky?.showing()) {
-        const k = sky.overlay.describe?.(x, y) ?? [];
-        return [...k, ...t, ...m];
+      const ap = airProv?.overlay.describe?.(x, y) ?? [];
+      if (canopy?.showing()) return [...t, ...ap, ...m];
+      if ((sky?.showing() ?? null) !== null) {
+        const k = sky!.overlay.describe?.(x, y) ?? [];
+        return [...k, ...ap, ...t, ...m];
       }
       if (under?.showing()) {
         const up = underProv?.overlay.describe?.(x, y) ?? [];
@@ -199,7 +205,7 @@ export function showWorld(app: App, start: World): () => void {
       return !!(peoples?.overlay.noPaint || provinces?.overlay.noPaint);
     },
     get hidesSurface() {
-      return !!under?.showing() || !!sky?.showing() || !!canopy?.showing();
+      return !!under?.showing() || (sky?.showing() ?? null) !== null || !!canopy?.showing();
     },
   };
   // The right-hand readers: what is under the cursor, and the selection's resources.
@@ -230,7 +236,7 @@ export function showWorld(app: App, start: World): () => void {
         live.vineFrom = e.from;
         live.vineTo = e.to;
       }
-      const lids: string[] = isSky(live.brush) ? [`sky${live.sky ?? 1}`] : live.brush === 'vine' ? [live.vineFrom ?? 'surface', live.vineTo ?? 'surface'] : isCanopy(live.brush) ? ['canopy'] : offSurface(live.brush) ? ['underdark'] : [];
+      const lids: string[] = isSky(live.brush) ? [skyLayerId(live.sky ?? 1)] : live.brush === 'vine' ? [live.vineFrom ?? 'surface', live.vineTo ?? 'surface'] : isCanopy(live.brush) ? ['canopy'] : offSurface(live.brush) ? ['underdark'] : [];
       const off = lids.filter((l) => l !== 'surface' && !world.layers[l as keyof typeof world.layers]);
       if (!live.erase && off.length) {
         world = { ...world, layers: { ...world.layers, ...Object.fromEntries(off.map((l) => [l, true])) } };
@@ -468,6 +474,7 @@ export function showWorld(app: App, start: World): () => void {
       peoples?.climateChanged();
       provinces?.climateChanged();
       underProv?.climateChanged();
+      airProv?.climateChanged();
     },
     (st) => {
       climateBusy = st !== 'idle';
@@ -931,6 +938,29 @@ export function showWorld(app: App, start: World): () => void {
     },
   });
   if (climate.climate) underProv.climateChanged();
+  // The canopy's and sky layers' provinces, in the same tab.
+  airProv = createAirProvinces({
+    world: () => world,
+    setSaved(saved) {
+      world = { ...world, airProvinces: saved };
+      changed();
+    },
+    ready: () => !!climate.climate,
+    redraw: () => map.redraw(),
+    display: () => look.provinces,
+    tabOpen: () => tabNow === 'provinces',
+    shown: airShown,
+    show(l) {
+      look.layer = l === null ? 'surface' : skyLayerId(l);
+      if (l !== null && !world.layers[skyLayerId(l)]) {
+        world = { ...world, layers: { ...world.layers, [skyLayerId(l)]: true } };
+        changed();
+        renderLayers();
+      }
+      map.redraw();
+    },
+  });
+  if (climate.climate) airProv.climateChanged();
   // The Mana tab: the world tree and the mana heat map (Phase 11).
   mana = createMana({
     world: () => world,
@@ -994,10 +1024,11 @@ export function showWorld(app: App, start: World): () => void {
     live: () => peoples?.live() ?? null,
     colourOf: (clan) => peoples?.live()?.clans.find((q) => q.id === clan)?.colour ?? '#f3d27a',
     shownElsewhere: () => look.layer === 'canopy' && tabNow !== 'sky' && tabNow !== 'under',
+    drawIslands: (g, at, scale, copies) => sky?.drawIslands(g, 0, at, scale, copies),
     shownLayer: (): ShownLayer => {
       if (under?.showing()) return 'underdark';
-      const l = sky?.showing();
-      return l ? (`sky${l}` as ShownLayer) : 'surface';
+      const l = sky?.showing() ?? null;
+      return l === null ? 'surface' : (skyLayerId(l) as ShownLayer);
     },
     setUsed(on) {
       world = { ...world, layers: { ...world.layers, canopy: on } };
@@ -1013,7 +1044,7 @@ export function showWorld(app: App, start: World): () => void {
     { id: 'climate', name: 'Climate', groups: ['Climate'], extra: [climatePanel] },
     { id: 'geo', name: 'Geography', groups: ['Geography'], extra: [geoPanel] },
     { id: 'world', name: 'World', groups: [], extra: [worldPanel] },
-    { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel, underProv.panel] },
+    { id: 'provinces', name: 'Provinces', groups: [], extra: [provinces.panel, underProv.panel, airProv.panel] },
     { id: 'mana', name: 'Mana', groups: ['World tree'], extra: [mana.panel] },
     { id: 'sky', name: 'Sky', groups: ['Sky islands', 'Island cover', 'Island water'], extra: [sky.panel] },
     { id: 'canopy', name: 'Trees & vines', groups: ['Giant trees', 'Giant vines'], extra: [canopy.panel] },
@@ -1127,6 +1158,7 @@ export function showWorld(app: App, start: World): () => void {
     peoples?.dispose();
     provinces?.dispose();
     underProv?.dispose();
+    airProv?.dispose();
     map.dispose();
     window.removeEventListener('beforeunload', beforeUnload);
     window.removeEventListener('keydown', keydown);

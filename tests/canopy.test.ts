@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeClimate } from '../src/core/climate';
-import { canopyGround, crownAt, giantTrees, giantVines, limbLength, treeCities } from '../src/core/canopy';
+import { canopyGround, trunkAt, giantTrees, giantVines, limbLength, treeCities } from '../src/core/canopy';
 import { brushDefaults, offSurface, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { defaultSettings } from '../src/core/settings';
 
@@ -16,35 +16,38 @@ const mk = () => {
 const everywhereLand = () => true;
 
 describe('giant trees, the canopy and giant vines', () => {
-  it('plants trees whose crowns make canopy ground, and fells them by erasing at the trunk', () => {
+  it('plants trees whose trunks stand in the canopy, and fells them by erasing at the trunk', () => {
     const { surface, add } = mk();
-    add('gianttree', [100, 100], { size: 32 });
-    add('gianttree', [300, 100], { size: 32 });
+    add('gianttree', [100, 100], { size: 4 });
+    add('gianttree', [300, 100], { size: 4 });
     expect(giantTrees(surface).length).toBe(2);
-    expect(crownAt(surface, 108, 100)?.id).toBe(1);
-    expect(canopyGround(surface, 200, 100)).toBe(false);
+    expect(trunkAt(surface, 101, 100)?.id).toBe(1);
+    // No crown: away from the trunk is open air.
+    expect(canopyGround(surface, 110, 100)).toBe(false);
     add('gianttree', [301, 101], { size: 2, erase: true });
     expect(giantTrees(surface).map((t) => t.id)).toEqual([1]);
     expect(canopyGround(surface, 300, 100)).toBe(false);
   });
 
-  it('bridges crowns with limbs, which can be cut', () => {
+  it('bridges trees with limbs, which can be cut, and counts canopy islands as ground', () => {
     const { surface, add } = mk();
-    add('gianttree', [100, 100], { size: 32 });
-    add('gianttree', [200, 100], { size: 32 });
-    add('limb', [110, 100, 190, 100], { size: 2 });
+    add('gianttree', [100, 100], { size: 4 });
+    add('gianttree', [200, 100], { size: 4 });
+    add('limb', [100, 100, 200, 100], { size: 2 });
     expect(canopyGround(surface, 150, 100)).toBe(true);
     expect(canopyGround(surface, 150, 104)).toBe(false);
-    expect(limbLength(surface)).toBeCloseTo(80, 0);
+    expect(limbLength(surface)).toBeCloseTo(100, 0);
     add('limb', [150, 95, 150, 105], { size: 4, erase: true });
     expect(canopyGround(surface, 150, 100)).toBe(false);
     expect(canopyGround(surface, 130, 100)).toBe(true);
+    add('skyisland', [500, 500], { size: 40, sky: 0, roughness: 0 });
+    expect(canopyGround(surface, 500, 500)).toBe(true);
   });
 
   it('marks tree city sites, telling which stand on nothing', () => {
     const { surface, add } = mk();
-    add('gianttree', [100, 100], { size: 32 });
-    add('limb', [110, 100, 190, 100], { size: 2 });
+    add('gianttree', [100, 100], { size: 4 });
+    add('limb', [100, 100, 190, 100], { size: 2 });
     add('treecity', [100, 100]);
     add('treecity', [170, 100]);
     add('treecity', [500, 500]);
@@ -55,7 +58,7 @@ describe('giant trees, the canopy and giant vines', () => {
   it('runs vines between layers, checking that both ends hold', () => {
     const { surface, add } = mk();
     add('skyisland', [400, 100], { size: 40, sky: 1, roughness: 0 });
-    add('gianttree', [100, 100], { size: 32 });
+    add('gianttree', [100, 100], { size: 4 });
     add('vine', [100, 100, 250, 100, 400, 100], { vineFrom: 'canopy', vineTo: 'sky1' });
     add('vine', [100, 300, 400, 300], { vineFrom: 'surface', vineTo: 'sky2' });
     const v = giantVines(surface, everywhereLand);

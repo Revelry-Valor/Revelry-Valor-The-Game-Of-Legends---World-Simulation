@@ -225,7 +225,7 @@ The world can have up to five layers. The extra layers are optional and shown wh
 - **Sizes:** each layer has its own province-size sliders.
 - **Between layers:** cave entrances, shafts, trunks and vine ends link provinces of one layer to another.
 - **Drifting islands:** on hold until it is worked out how they should work. Every island is fixed for now and the Drift path brush is hidden; the code stays behind a switch, `DRIFT` in core/sky.ts.
-- **Order:** (1) Underdark provinces; (2) canopy and sky provinces (with the canopy changes); (3) the peoples on them (holding them, roads and tunnels, travel between layers, airships).
+- **Order:** (1) Underdark provinces; (2) canopy and sky provinces (with the canopy changes); (3) the peoples on them (holding them, roads and tunnels, travel between layers, airships). The canopy is also the ground's own airspace for islands: the Sky tab can paint islands there.
 
 **Built (layers' provinces, step 1): Underdark provinces** (`core/underprov.ts`, `ui/underprovinces.ts`)
 
@@ -243,6 +243,28 @@ The world can have up to five layers. The extra layers are optional and shown wh
   - In the Underdark view, the provinces are coloured while the Provinces tab is open (rock brown, caverns tan, tunnels ochre, seas blue). Elsewhere they are outlined, as View → Map look sets for provinces.
   - A click in the tab shows a province's card. The hover readout gives the province.
 - *Saving:* saved with the world (`underProvinces`), grown again from their seeds when it opens, and moved with the land when the map grows.
+
+**Built (layers' provinces, step 2): canopy and sky provinces** (`core/airprov.ts`, `ui/airprovinces.ts`; the growing shared with the Underdark's in `core/layerprov.ts`)
+
+- *The canopy changed:*
+  - A giant tree's width is now its trunk's (3 miles by default); its limbs can reach about five times that.
+  - The canopy view shows each trunk, where its limbs reach out, with its limbs, tree cities, vines and the islands floating in the canopy. There are no crowns or leaves.
+  - On the surface, only the trunk shows.
+  - Canopy ground is a trunk, a limb or a canopy island. Tree cities and canopy vine ends must be on one of those.
+- *Islands in the canopy:* the Sky tab's layer choice now begins with "Canopy" (about a quarter of a mile up). Its islands have their own climate and count as canopy towns' ground in the simulation.
+- *Air provinces:* the canopy (always: it is the ground's airspace) and each sky layer in use are split all over, land and sea alike, into open-air provinces, where airships fly.
+- *On each layer:*
+  - its islands get land provinces of their own;
+  - in the canopy, the limbs (with the trunks they reach out from) run as strings of provinces;
+  - its vines run as strings of provinces too.
+  - A vine belongs to the layer of its lower end, the surface's counting as the canopy's (the ground's airspace it climbs through).
+- *Sizes:* three sliders, in miles: open air (120), islands (40), and limbs and vines (30 along).
+- *Seeds:* each layer's provinces grow from its own seeds kept with the world, so "Update to the map" keeps each province and its id.
+- *In the Provinces tab:* a "Canopy and sky provinces" section, with Generate (all the layers in use at once), Update, Remove, and Show (Surface, Canopy, Sky layer N).
+- *On the map:* each layer's view draws its provinces:
+  - coloured while the tab is open (air pale blue, islands green, limbs brown, vines green), outlined elsewhere;
+  - a click shows a province's card, and the hover readout names the province.
+- *Saving:* saved with the world (`airProvinces`), grown again when it opens, and moved with the land when the map grows.
 
 ---
 

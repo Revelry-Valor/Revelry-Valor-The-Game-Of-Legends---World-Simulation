@@ -178,9 +178,9 @@ export const BRUSHES: BrushInfo[] = [
   { id: 'skyrock', name: 'Bare rock', group: 'Island cover', kind: 'area', hint: 'Bare stone crags on an island.', sizeMi: 15, strength: 0.9, softness: 0.4, roughness: 0.6, detailMi: 2 },
   { id: 'skyfall', name: 'Island waterfall', group: 'Island water', kind: 'point', hint: 'Click at an island’s edge: water pours off it, lands as a pool and greens the land below.', sizeMi: 1, strength: 0.8, softness: 0.3, roughness: 0, detailMi: 1 },
   { id: 'skypath', name: 'Drift path', group: 'Island water', kind: 'line', hint: 'Drag a path starting on an island: it drifts along it (set how it drifts in the island list below). Islands can also drift with the wind, or stay fixed.', sizeMi: 2, strength: 1, softness: 0, roughness: 0, detailMi: 1, hidden: true },
-  { id: 'gianttree', name: 'Giant tree', group: 'Giant trees', kind: 'point', hint: 'Click to plant a giant tree. Its width is the crown’s; the trunk is about a tenth of it. Crowns show in the Canopy view, with their limbs and tree cities.', sizeMi: 20, strength: 1, softness: 0, roughness: 0.5, detailMi: 1 },
-  { id: 'limb', name: 'Limb', group: 'Giant trees', kind: 'line', hint: 'Drag a great limb out from a crown: a road through the canopy, and a bridge where it reaches another tree’s crown.', sizeMi: 1.5, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
-  { id: 'treecity', name: 'Tree city', group: 'Giant trees', kind: 'point', hint: 'Click on a crown or limb to mark a site for a city in the canopy. The peoples build there in a later step.', sizeMi: 3, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'gianttree', name: 'Giant tree', group: 'Giant trees', kind: 'point', hint: 'Click to plant a giant tree. Its width is the trunk’s. In the canopy it shows as its trunk, where its limbs reach out (draw them with Limb), with its tree cities.', sizeMi: 3, strength: 1, softness: 0, roughness: 0.5, detailMi: 1 },
+  { id: 'limb', name: 'Limb', group: 'Giant trees', kind: 'line', hint: 'Drag a great limb out from a trunk: a road through the canopy, and a bridge where it reaches another tree.', sizeMi: 1.5, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
+  { id: 'treecity', name: 'Tree city', group: 'Giant trees', kind: 'point', hint: 'Click on a trunk or limb to mark a site for a city in the canopy.', sizeMi: 3, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'vine', name: 'Giant vine', group: 'Giant vines', kind: 'line', hint: 'Drag a huge vine from where it starts to where it ends: a land bridge to climb and cross, on one layer (between islands or crowns) or from one layer to another (set its ends below). It can’t be cut.', sizeMi: 1, strength: 1, softness: 0, roughness: 0, detailMi: 1 },
   { id: 'zone', name: 'Zone brush', group: 'Mountain zones', kind: 'area', hint: 'Repaint mountain zones by hand, or paint “Automatic” to undo that.', sizeMi: 25, strength: 1, softness: 0.1, roughness: 0.2, detailMi: 5 },
 ];
@@ -269,7 +269,7 @@ export interface Stroke {
   /** Rain Shadow Pen: high ground (the default) or a gap (pass) that lets moist air through. */
   penMode?: 'raise' | 'gap';
   /** Sky layer brushes: which sky layer (1 lowest to 3 highest). */
-  sky?: 1 | 2 | 3;
+  sky?: 0 | 1 | 2 | 3;
   /** Giant vines: the layer each end is on (where it starts, where it ends). */
   vineFrom?: VineEnd;
   vineTo?: VineEnd;

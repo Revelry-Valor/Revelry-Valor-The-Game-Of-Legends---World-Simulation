@@ -4,8 +4,8 @@ import { covers, shapeOf } from './underdark';
 
 /**
  * Giant trees, the canopy and giant vines (REDESIGN.md, section 5). A giant tree is planted at a
- * point: its trunk stands on the land and its crown spreads in the canopy layer, between the
- * surface and the lowest sky layer. Limbs reach out from the crowns (roads through the canopy, and
+ * point: its trunk stands on the land and rises into the canopy layer (the ground's airspace),
+ * where the canopy view shows only the trunk, where its limbs reach out (no leaves). Limbs reach out from the trunks (roads through the canopy, and
  * bridges where they meet another crown); tree cities are sites marked on them. Giant vines run
  * from one place to another, on one layer or between layers, and can be climbed and crossed.
  * None of it changes the surface, its climate or its provinces.
@@ -18,9 +18,9 @@ export interface GiantTree {
   stroke: Stroke;
   x: number;
   y: number;
-  /** Crown radius (km). */
+  /** How far its limbs can reach (km): about five times its trunk's width. */
   crown: number;
-  /** Trunk radius (km). */
+  /** Trunk radius (km): in the canopy view only the trunk shows, where its limbs reach out. */
   trunk: number;
 }
 
@@ -38,15 +38,15 @@ export function giantTrees(surface: Surface): GiantTree[] {
   for (const st of surface.strokes) {
     if (st.brush !== 'gianttree' || st.pts.length < 2) continue;
     if (st.erase) erased(out, st, 3);
-    else out.push({ id: st.id, stroke: st, x: st.pts[0], y: st.pts[1], crown: st.size / 2, trunk: Math.max(0.1, st.size / 20) });
+    else out.push({ id: st.id, stroke: st, x: st.pts[0], y: st.pts[1], crown: st.size * 5, trunk: Math.max(0.2, st.size / 2) });
   }
   treeCache.set(surface.strokes, out);
   return out;
 }
 
-/** The tree whose crown covers a place, if any. */
-export function crownAt(surface: Surface, x: number, y: number): GiantTree | null {
-  for (const t of giantTrees(surface)) if (covers(shapeOf(t.stroke), x, y)) return t;
+/** The tree whose trunk is at a place (a couple of miles' leeway: it is where its limbs reach out), if any. */
+export function trunkAt(surface: Surface, x: number, y: number): GiantTree | null {
+  for (const t of giantTrees(surface)) if (Math.hypot(t.x - x, t.y - y) <= Math.max(t.trunk * 1.2, 3)) return t;
   return null;
 }
 
@@ -57,9 +57,9 @@ export function limbAt(surface: Surface, x: number, y: number): boolean {
   return on;
 }
 
-/** Whether the canopy has something to stand on here: a crown or a limb. */
+/** Whether the canopy has something to stand on here: a trunk, a limb, or an island floating in the canopy. */
 export function canopyGround(surface: Surface, x: number, y: number): boolean {
-  return !!crownAt(surface, x, y) || limbAt(surface, x, y);
+  return !!trunkAt(surface, x, y) || limbAt(surface, x, y) || skyGround(surface, 0, x, y);
 }
 
 export interface TreeCity {
@@ -81,14 +81,14 @@ export function treeCities(surface: Surface): TreeCity[] {
       continue;
     }
     const [x, y] = st.pts;
-    const tree = crownAt(surface, x, y);
+    const tree = trunkAt(surface, x, y);
     const onLimb = !tree && limbAt(surface, x, y);
     // A city on a limb belongs to the nearest tree.
     let owner = tree;
     if (onLimb) {
       let best = Infinity;
       for (const t of giantTrees(surface)) {
-        const d = Math.hypot(t.x - x, t.y - y) - t.crown;
+        const d = Math.hypot(t.x - x, t.y - y);
         if (d < best) {
           best = d;
           owner = t;
@@ -122,7 +122,7 @@ function holds(surface: Surface, end: VineEnd, x: number, y: number, land: (x: n
   return false;
 }
 
-/** The giant vines and whether their ends hold (a surface end on land, a canopy end on a crown or limb, a sky end on an island). Erasing over a vine takes it away. */
+/** The giant vines and whether their ends hold (a surface end on land, a canopy end on a trunk, limb or canopy island, a sky end on an island). Erasing over a vine takes it away. */
 export function giantVines(surface: Surface, land: (x: number, y: number) => boolean): Vine[] {
   const out: Vine[] = [];
   for (const st of surface.strokes) {
@@ -143,8 +143,8 @@ export function giantVines(surface: Surface, land: (x: number, y: number) => boo
     const to = st.vineTo ?? from;
     const n = st.pts.length;
     const issues: string[] = [];
-    if (!holds(surface, from, st.pts[0], st.pts[1], land)) issues.push(`its start isn’t on ${from === 'surface' ? 'land' : from === 'canopy' ? 'a crown or limb' : `an island on ${VINE_END_NAMES[from]}`}`);
-    if (!holds(surface, to, st.pts[n - 2], st.pts[n - 1], land)) issues.push(`its end isn’t on ${to === 'surface' ? 'land' : to === 'canopy' ? 'a crown or limb' : `an island on ${VINE_END_NAMES[to]}`}`);
+    if (!holds(surface, from, st.pts[0], st.pts[1], land)) issues.push(`its start isn’t on ${from === 'surface' ? 'land' : from === 'canopy' ? 'a trunk, limb or canopy island' : `an island on ${VINE_END_NAMES[from]}`}`);
+    if (!holds(surface, to, st.pts[n - 2], st.pts[n - 1], land)) issues.push(`its end isn’t on ${to === 'surface' ? 'land' : to === 'canopy' ? 'a trunk, limb or canopy island' : `an island on ${VINE_END_NAMES[to]}`}`);
     out.push({ id: st.id, stroke: st, from, to, problem: issues.join(' and '), length: pathLength(st.pts) });
   }
   return out;

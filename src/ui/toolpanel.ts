@@ -99,7 +99,7 @@ export function createToolPanel(changed: () => void, sketch: () => SketchOps | n
       // Underdark and sky shapes have a size and (for areas) a ragged edge; nothing else.
       const under: HTMLElement[] = [h('p', { class: 'muted small hint' }, state.erase ? (b.kind === 'point' ? `Click ${b.group === 'Ways down' ? 'a cave entrance or shaft' : b.id === 'skyfall' ? 'a waterfall' : b.id === 'gianttree' ? 'a trunk to fell its tree' : 'a tree city'} to take it away.` : `Erasing ${b.name.toLowerCase()}. ${b.group === 'Underdark cover' || b.group === 'Island cover' ? 'Erasing clears any cover there.' : 'Other layers are left alone.'}`) : b.hint)];
       if (b.kind !== 'point' || state.erase || b.id === 'gianttree') {
-        under.push(numberField({ label: b.kind === 'line' ? 'Width' : b.id === 'gianttree' ? 'Crown width' : 'Brush size', value: Math.round(kmToMiles(s.size) * 10) / 10, min: 0.2, max: 800, step: 0.1, unit: 'miles', hint: 'Keys [ and ] make it smaller or larger.', change: (v) => { if (v > 0) s.size = milesToKm(v); changed(); } }));
+        under.push(numberField({ label: b.kind === 'line' ? 'Width' : b.id === 'gianttree' ? 'Trunk width' : 'Brush size', value: Math.round(kmToMiles(s.size) * 10) / 10, min: 0.2, max: 800, step: 0.1, unit: 'miles', hint: 'Keys [ and ] make it smaller or larger.', change: (v) => { if (v > 0) s.size = milesToKm(v); changed(); } }));
       }
       if (b.kind === 'area' && !state.erase) {
         under.push(numberField({ label: 'Roughness', value: Math.round(s.roughness * 100), min: 0, max: 100, step: 1, unit: '%', slider: true, hint: 'How lumpy and ragged the walls are.', change: (v) => { s.roughness = Math.max(0, Math.min(100, v)) / 100; changed(); } }));

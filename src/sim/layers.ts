@@ -2,7 +2,7 @@ import { giantTrees, giantVines, treeCities } from '../core/canopy';
 import type { Climate } from '../core/climate';
 import type { Library, Species, Race } from '../core/library';
 import type { Surface, VineEnd } from '../core/paint';
-import { islandArea, skyIslands, skyPaintedCover, type SkyLayer } from '../core/sky';
+import { islandArea, skyIslands, skyLayerId, skyPaintedCover, type SkyLayer } from '../core/sky';
 import { autoSkyCover, driftPerYear, skyClimate } from '../core/skyclimate';
 import { shapeOf, underdarkAt, underStrokes, waysDown } from '../core/underdark';
 import type { Settlement, SimState } from './state';
@@ -233,7 +233,8 @@ export function layerSpot(c: LayerContext, st: Settlement, ri: { flies: boolean;
   if (L.islands.length && from !== 'underdark') {
     const ships = c.has(st, 'airships') || c.has(st, 'mana-airships');
     for (const isl of L.islands) {
-      const tag = `sky${isl.layer}` as LayerTag;
+      // An island in the canopy is a canopy town's; one higher up, its sky layer's.
+      const tag = skyLayerId(isl.layer) as LayerTag;
       const { dx, dy } = islandShift(sim, isl.id);
       let reach = 0;
       if (ri.flies) reach = 400;
@@ -280,7 +281,7 @@ export function layerFood(c: LayerContext, st: Settlement): { mul: number; floor
     }
     return { mul: 0.7, floor: 0.55 + 0.5 * (n ? Math.min(1, (fungus / n) * 2) : 0) + (sea ? 0.1 : 0) };
   }
-  if (st.layer === 'canopy') return { mul: 0.9, floor: 0.9 };
+  if (st.layer === 'canopy' && st.island === undefined) return { mul: 0.9, floor: 0.9 };
   const isl = L.islands.find((i) => i.id === st.island);
   if (!isl) return { mul: 0.6, floor: 0.6 };
   const cold = isl.summerT < 5 ? 0.3 : isl.summerT < 10 ? 0.12 : 0;
@@ -296,7 +297,7 @@ export function layerRoom(c: LayerContext, st: Settlement): number {
     const open = L.under.filter((u) => !u.sea && Math.hypot(u.x - st.x, u.y - st.y) < 60).length * L.underStep * L.underStep;
     return Math.max(150, open * 4);
   }
-  if (st.layer === 'canopy') {
+  if (st.layer === 'canopy' && st.island === undefined) {
     const t = L.trees.find((q) => Math.hypot(q.x - st.x, q.y - st.y) <= q.crown + 20);
     const sharing = Math.max(1, live.filter((o) => t && Math.hypot(o.x - t.x, o.y - t.y) <= t.crown + 20).length);
     return t ? Math.max(150, (Math.PI * t.crown * t.crown * 8) / sharing) : 300;

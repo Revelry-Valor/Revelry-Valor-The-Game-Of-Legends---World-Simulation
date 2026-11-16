@@ -4,6 +4,7 @@ import { emptySurface, shiftSurface, type Surface } from './paint';
 import type { Library } from './library';
 import type { SavedProvinces } from './provinces';
 import type { SavedUnderProvinces } from './underprov';
+import type { SavedAirProvinces } from './airprov';
 
 /** The world's layers, bottom to top (REDESIGN.md, section 5). Only the surface is always on. */
 export const LAYERS = [
@@ -63,6 +64,8 @@ export interface World {
   provinces?: SavedProvinces | null;
   /** Its Underdark provinces (Phase 12): their sizes and seeds, grown again when the world opens. */
   underProvinces?: SavedUnderProvinces | null;
+  /** Its canopy and sky provinces (open air, islands, limbs and vines): sizes and each layer's seeds. */
+  airProvinces?: SavedAirProvinces | null;
   /** The simulation of its peoples (Phase 6), packed for saving. */
   sim?: PackedSim | null;
   createdAt: number;
@@ -118,6 +121,10 @@ onMapShift((w, dx, dy) => {
 onMapShift((w, dx, dy) => {
   if (w.provinces) w.provinces = { ...w.provinces, seeds: w.provinces.seeds.map((v, i) => v + (i % 2 ? dy : dx)) };
   if (w.underProvinces) w.underProvinces = { ...w.underProvinces, seeds: w.underProvinces.seeds.map((v, i) => v + (i % 2 ? dy : dx)) };
+  if (w.airProvinces) {
+    const layers = Object.fromEntries(Object.entries(w.airProvinces.layers).map(([k, l]) => [k, l && { ...l, seeds: l.seeds.map((v, i) => v + (i % 2 ? dy : dx)) }]));
+    w.airProvinces = { ...w.airProvinces, layers };
+  }
 });
 
 /**

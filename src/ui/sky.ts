@@ -43,10 +43,14 @@ export interface Sky {
   showing(): SkyLayer | null;
   /** The layer new sky strokes go on (the tab's choice). */
   paintLayer(): SkyLayer;
+  /** Draw one layer's islands (the canopy view draws the canopy's). */
+  drawIslands(g: CanvasRenderingContext2D, l: SkyLayer, at: (x: number, y: number, c: number) => [number, number], scale: number, copies: number[]): void;
   invalidate(): void;
 }
 
-const LAYER_ID = { 1: 'sky1', 2: 'sky2', 3: 'sky3' } as const;
+const LAYER_ID = { 0: 'canopy', 1: 'sky1', 2: 'sky2', 3: 'sky3' } as const;
+/** A layer's towns: the canopy's (on its islands) for 0. */
+const onLayer = (st: { layer?: string; island?: number }, l: SkyLayer) => (l === 0 ? st.layer === 'canopy' && st.island !== undefined : st.layer === `sky${l}`);
 const COVER_COLOUR = { meadow: '#86b25a', forest: '#3f7a3a', rock: '#9a9088', tundra: '#a9b59a', snow: '#eef3f7' } as const;
 const PAINTED = { skymeadow: COVER_COLOUR.meadow, skyforest: COVER_COLOUR.forest, skyrock: COVER_COLOUR.rock } as Record<string, string>;
 const UNDERSIDE = '#4d4036';
@@ -61,7 +65,7 @@ export function createSky(d: SkyDeps): Sky {
   const showing = (): SkyLayer | null => {
     if (active) return layer;
     const l = d.shownElsewhere();
-    return l && d.world().layers[LAYER_ID[l]] ? l : null;
+    return l !== null && d.world().layers[LAYER_ID[l]] ? l : null;
   };
   const climateOf = (isl: SkyIsland): SkyClimate | null => {
     const cl = d.climate();
@@ -206,7 +210,7 @@ export function createSky(d: SkyDeps): Sky {
       }
     }
     g.restore();
-    if (sim) drawLayerTowns(g, sim.settlements.filter((st) => st.layer === `sky${l}`), at, copies, (st) => d.colourOf?.(st.clan) ?? '#f3d27a');
+    if (sim) drawLayerTowns(g, sim.settlements.filter((st) => onLayer(st, l)), at, copies, (st) => d.colourOf?.(st.clan) ?? '#f3d27a');
   };
 
   // ---- The tab ----
@@ -239,16 +243,16 @@ export function createSky(d: SkyDeps): Sky {
       );
     });
     body.replaceChildren(
-      choice<string>('Sky layer', SKY_LAYERS.map((l) => ({ value: String(l), label: `${l}: about ${Math.round(kmToMiles(SKY_ALT_KM[l]) * 10) / 10} miles up` })), String(layer), (v) => {
+      choice<string>('Sky layer', SKY_LAYERS.map((l) => ({ value: String(l), label: l === 0 ? `Canopy: the ground's airspace, about ${Math.round(kmToMiles(SKY_ALT_KM[l]) * 10) / 10} miles up` : `${l}: about ${Math.round(kmToMiles(SKY_ALT_KM[l]) * 10) / 10} miles up` })), String(layer), (v) => {
         layer = Number(v) as SkyLayer;
         d.layerPicked(layer);
         render();
       }),
       h('label', { class: 'field-row small' },
         h('input', { type: 'checkbox', checked: used, onchange: (e: Event) => { d.setUsed(layer, (e.target as HTMLInputElement).checked); render(); } }),
-        `This world uses sky layer ${layer}`),
+        layer === 0 ? 'This world has a canopy layer' : `This world uses sky layer ${layer}`),
       h('p', { class: 'muted small' }, 'Islands float over the land and sea without blocking its sun, rain or wind. Each layer is colder and windier than the one below; islands with no painted cover take meadow, tundra or snow from their climate. Strokes that touch make one island. The brushes paint on the layer chosen here.'),
-      h('h3', {}, `Islands on layer ${layer}`),
+      h('h3', {}, layer === 0 ? 'Islands in the canopy' : `Islands on layer ${layer}`),
       ...(rows.length ? rows : [h('p', { class: 'small' }, 'None yet: paint one with the Sky island brush.')]),
       h('p', { class: 'muted small' }, 'While this tab is open the map shows this layer over a hazy copy of the land (the layers below faint beneath it). To see a sky layer from other tabs, choose it under View → Layers.'),
     );
@@ -258,7 +262,7 @@ export function createSky(d: SkyDeps): Sky {
   const overlay: MapOverlay = {
     draw(g, at, scale, copies) {
       const l = showing();
-      if (!l) return;
+      if (l === null) return;
       const cv = g.canvas as HTMLCanvasElement;
       const tf = g.getTransform();
       const haze = (a: number) => {
@@ -280,7 +284,7 @@ export function createSky(d: SkyDeps): Sky {
     },
     describe(x, y) {
       const l = showing();
-      if (!l) return null;
+      if (l === null) return null;
       const w = d.world();
       // The island here, wherever it has drifted to.
       const sim = d.live?.() ?? null;
@@ -292,7 +296,7 @@ export function createSky(d: SkyDeps): Sky {
       }
       const items: InfoItem[] = [];
       if (!isl) {
-        items.push({ label: `Sky layer ${l}`, value: 'Open sky' });
+        items.push({ label: l === 0 ? 'Canopy' : `Sky layer ${l}`, value: 'Open sky' });
         return items;
       }
       const n = skyIslands(w.surface).filter((i) => i.layer === l).indexOf(isl) + 1;
@@ -300,9 +304,9 @@ export function createSky(d: SkyDeps): Sky {
       const cl = d.climate();
       const here = cl ? skyClimate(cl, w.settings, l, x, y) : null;
       const cov = skyPaintedCover(w.surface, l, x, y) ?? (k ? autoSkyCover(k) : null);
-      const town = sim?.settlements.find((st) => st.layer === `sky${l}` && !st.ruined && Math.hypot(st.x - x, st.y - y) < 12);
+      const town = sim?.settlements.find((st) => onLayer(st, l) && !st.ruined && Math.hypot(st.x - x, st.y - y) < 12);
       if (town) items.push({ label: 'Town', value: `${town.name}, ${Math.round(town.pop).toLocaleString('en-US')} people` });
-      items.push({ label: `Sky layer ${l}`, value: `Island ${n}${cov ? ` · ${SKY_COVER_NAMES[cov].toLowerCase()}` : ''} · ${isl.drift === 'fixed' ? 'fixed' : isl.drift === 'wind' ? 'drifts with the wind' : 'drifts along its path'}` });
+      items.push({ label: l === 0 ? 'Canopy' : `Sky layer ${l}`, value: `Island ${n}${cov ? ` · ${SKY_COVER_NAMES[cov].toLowerCase()}` : ''} · ${isl.drift === 'fixed' ? 'fixed' : isl.drift === 'wind' ? 'drifts with the wind' : 'drifts along its path'}` });
       if (here) {
         items.push({ label: 'Up here, summer', value: `${fmtT(here.summerT)}, ${RAIN_NAMES[rainClass(here.summerRain)]}` });
         items.push({ label: 'Up here, winter', value: `${fmtT(here.winterT)}, ${RAIN_NAMES[rainClass(here.winterRain)]}` });
@@ -325,6 +329,7 @@ export function createSky(d: SkyDeps): Sky {
     },
     showing,
     paintLayer: () => layer,
+    drawIslands: (g, l, at, scale, copies) => drawLayer(g, l, false, at, scale, copies),
     invalidate() {
       if (active) render();
     },
