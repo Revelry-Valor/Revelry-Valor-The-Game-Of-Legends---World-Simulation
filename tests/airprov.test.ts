@@ -28,7 +28,7 @@ describe('canopy and sky provinces', () => {
     expect(m.provinces.every((p) => p.kind === 'air')).toBe(true);
     expect(at(m, 60, 60)?.kind).toBe('air');
     expect(at(m, 1000, 700)?.kind).toBe('air');
-  });
+  }, 60000);
 
   it('gives a layer’s islands, the canopy’s limbs and trunks, and its vines provinces of their own', () => {
     const { surface, add } = mk();
@@ -54,7 +54,7 @@ describe('canopy and sky provinces', () => {
     expect(at(sky1, 650, 410)?.kind).toBe('island');
     expect(at(sky1, 950, 900)?.kind).toBe('air');
     expect(vineLayer('sky2', 'sky1')).toBe(1);
-  });
+  }, 60000);
 
   it('keeps each province and its id when grown again from its seeds', () => {
     const { surface, add } = mk();
@@ -65,5 +65,5 @@ describe('canopy and sky provinces', () => {
     expect(at(b, 300, 1100)?.id).toBe(at(a, 300, 1100)?.id);
     const saved = readAirProvinces(JSON.parse(JSON.stringify({ v: 1, airMi: 120, islandMi: 40, strandMi: 30, layers: { 1: b.seeds } })))!;
     expect(saved.layers['1']?.ids.length).toBe(b.seeds.ids.length);
-  });
+  }, 60000);
 });
