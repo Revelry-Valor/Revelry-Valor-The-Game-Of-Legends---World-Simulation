@@ -966,7 +966,65 @@ Warm western boundary currents push reefs poleward along east coasts; cold upwel
 
 ## 8. Simulation
 
-### 8.1 Foundations
+### 8.0 Population density, settlements, borders and roads (rework, agreed with the designer)
+
+This reworks a large part of the simulation. Where it disagrees with the older sections below
+(8.4 clans and tribes, 8.6 territory, 8.6a provinces, 8.7 settlements, 8.10 travel, and the roads in
+8.4h), this section wins.
+
+**Four forms of people**
+- *Tribes and clans* are physical bands, as now: a marker on the map that moves (summer and winter grounds), hunts, gathers, raids and settles down.
+- *Wilderness density:* the small family groups living out in the wild, simulated as a population density over the land, one map for each race.
+  - It spreads slowly into land the race can survive on (climate, food, water, the terrain it likes) and dies out where it can't. It never turns back into tribes.
+  - It starts only from something: a dawn city, a pre-placed settlement, or where a tribe settles down. Nothing is scattered over the world at the start.
+  - Hunting thins the game and gathering thins the wild plants, so the density falls back or spreads outward to where there is still food. A big hunting people ends up spread wide.
+  - Races share land if they can live together (attitude and culture). If they can't, the stronger-growing density pushes the other out.
+- *Settlements* grow out of the density: villages, then towns, cities and dawn cities.
+- *Realms* (clans that have organised a government) hold land and rule settlements, as now.
+
+**The density map (View)**
+- Total population: everyone living in an area.
+- One race at a time: where that race lives.
+
+**Settlements**
+- *Founding:* where wilderness density passes a threshold, a village forms at the best spot nearby (water, coast, soil, game, resources, defence, the people's own preferences). Some of the density is used up to found it.
+- *Who it belongs to:* the clan or realm whose land it is in. In land nobody holds, it stands on its own.
+- *Growing:* villages grow into towns and cities, as now.
+- *Joining:* when a town forms, every village within a day's walk joins it (a day's ride if the town has mounts), unless another town already claimed it.
+  - Joined villages still show on the map, but their farming, gathering and goods go into the town's stores, and the town's economy runs as one.
+  - The simulation then tracks one economy, not many.
+- *Feedback:* a bigger settlement pools and trades more, so life is easier around it. Density rises faster there and more villages form, joining it straight away.
+- Later, villages also form along busy roads.
+
+**Provinces: information, names and clean borders**
+- *What they keep:* terrain, names, a climate summary, and totals worked out from the map inside them: population by race, game, wild food, wood, resources.
+- *Regrowth:* game, wild plants, fish and wood are used up and grow back, each at its own pace (a season for wild plants, a few years for fish, decades for wood). Mines and quarries never run out for now.
+- *Claiming:* a tribe, clan or realm can claim a whole unclaimed province, so borders have no gaps or slivers. Province lines are not front lines: armies don't push or take land province by province.
+
+**Land and borders**
+- *What a realm holds:* the land its people actually live on and use. That is its settlements and their reach (with their joined villages), plus wherever its people are the strongest presence in the wilderness density.
+- *Filling gaps:* an unclaimed province bordering a realm's land, and mostly enclosed by it, is taken whole. Edges in empty country settle on province lines.
+- *Where realms meet:* the border sits where each side's presence is stronger (settlements count most, then density), drawn faded where contested. It moves without war as populations grow, shrink, mix or push each other out.
+- *War* moves borders by taking settlements, which carry the land around them (with their joined villages). Defeated people then fade, flee, or stay, depending on whether they can live under the victors.
+- *Peace:* treaties hand over settlements, and their land goes with them.
+
+**Roads**
+- *Village paths:* short, straight paths from a town to its villages and farmsteads, within a day's walk or ride. They count as part of the town; no trader makes them.
+- *Traders find the routes:*
+  - On early trips a trader takes the easiest way across the land (slope, rivers, forest, marsh, passes), so routes follow the terrain, never a straight line.
+  - Each trip wears the route, which becomes a trail, then a track, then a road as it is used and built up.
+- *Reusing and branching:* worn ways are cheaper to travel, so a trader going somewhere new follows existing roads as far as they help, then breaks off on a new path. Over time the branches make a network.
+- *Better routes win:* when a much better way is found (a new bridge, a pass road, a shorter branch), traffic moves to it and the old road fades.
+- *Building:* realms only build up and keep up roads that are already in use. No roads to every town, and none hundreds of miles long in a straight line.
+- *Other users:* armies, migrants and messengers use the same roads.
+
+**Build order (proposed)**
+1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).
+2. *Settlements from density:* founding at the best spot, belonging to the land's holder or standing alone, growth, villages joining towns (a day's walk or ride), and the pooled stores and feedback.
+3. *Land and borders:* holding by settlements and presence, whole-province claims to fill gaps, soft contested borders, war and peace moving land with settlements, the border drawing.
+4. *Roads:* village paths, traders finding terrain-following routes, wear and tiers, reuse and branching, better routes replacing old ones, building only where used.
+
+
 - **No tiles.** Everything has a real position; areas are shapes.
 - **Time:** an active day-by-day mode, plus faster steps (week, month, year) and time skips (a month, a year, many years). The climate switches between its summer and winter versions.
 - **Groups, not individuals:** the simulation tracks groups (clans, tribes, settlements, armies, parties, caravans, guilds).
