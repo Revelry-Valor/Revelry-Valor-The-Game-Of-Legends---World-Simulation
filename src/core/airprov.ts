@@ -1,8 +1,8 @@
 import { giantTrees, giantVines } from './canopy';
 import { fineGrid } from './finegeo';
-import { provincesFromMedium } from './layerprov';
+import { layerGridKm, provincesFromMedium } from './layerprov';
 import type { Surface, VineEnd } from './paint';
-import { PROVINCE_SIZE_MI, provinceGridKm } from './provinces';
+import { PROVINCE_SIZE_MI } from './provinces';
 import type { WorldSettings } from './settings';
 import type { SkyLayer } from './sky';
 import type { Grid } from './terrain';
@@ -150,14 +150,21 @@ export function rasterAir(surface: Surface, grid: Grid, wrapKm: number, layer: S
 /** Split one layer (0 the canopy, 1–3 the sky layers) into provinces. With `saved`, they grow from its seeds (keeping their ids). */
 export function generateAirProvinces(surface: Surface, s: WorldSettings, layer: SkyLayer, opts: Partial<AirSizes> & { saved?: LayerSeeds | null }): AirProvinceMap {
   const sz = airSizesOf(opts);
-  const grid = fineGrid(s, provinceGridKm(s, Math.min(sz.airMi, sz.islandMi, sz.strandMi)));
+  // Fine enough for the narrowest limb, vine, trunk or island painted (their edges are hard lines).
+  const widths: number[] = [];
+  for (const st of surface.strokes) {
+    if (st.erase) continue;
+    if (st.brush === 'limb' && layer === 0) widths.push(st.size);
+    else if (st.brush === 'gianttree' && layer === 0) widths.push(st.size);
+    else if (st.brush === 'vine' && vineLayer(st.vineFrom ?? 'surface', st.vineTo ?? st.vineFrom ?? 'surface') === layer) widths.push(st.size);
+    else if (st.brush === 'skyisland' && (st.sky ?? 1) === layer) widths.push(st.size);
+  }
+  const grid = fineGrid(s, layerGridKm(s, [sz.airMi, sz.islandMi, sz.strandMi], widths.length ? Math.min(...widths) : Infinity));
   const wrapKm = s.edges === 'wrap' ? s.widthKm : 0;
   const medium = rasterAir(surface, grid, wrapKm, layer);
   const grown = provincesFromMedium(grid, wrapKm, medium, null, {
     size: (m) => milesToKm(m === ISLAND ? sz.islandMi : m === LIMB || m === VINE ? sz.strandMi : sz.airMi),
     strip: (m) => m === LIMB || m === VINE,
-    // Open air with open air (as seas join seas), islands with islands, strands with strands.
-    mergeClass: (m) => (m === AIR ? 2 : m === ISLAND ? 0 : 3),
     kind: (m) => KIND[m] ?? 'air',
     terrain: (m) => TERRAIN[m] ?? 'Open air',
     coverOk: () => false,

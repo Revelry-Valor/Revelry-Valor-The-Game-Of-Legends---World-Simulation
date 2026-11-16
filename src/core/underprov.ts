@@ -1,5 +1,5 @@
-import { fineGrid, sampleGround } from './finegeo';
-import { provincesFromMedium } from './layerprov';
+import { fineGrid, fineIndex, sampleGround } from './finegeo';
+import { layerGridKm, provincesFromMedium } from './layerprov';
 import type { Surface } from './paint';
 import { PROVINCE_SIZE_MI, provinceGridKm } from './provinces';
 import type { WorldSettings } from './settings';
@@ -152,15 +152,23 @@ export function rasterUnderdark(surface: Surface, grid: Grid, wrapKm: number, la
 export function generateUnderProvinces(surface: Surface, s: WorldSettings, opts: Partial<UnderSizes> & { saved?: SavedUnderProvinces | null }): UnderProvinceMap {
   const sz = underSizesOf(opts);
   const saved = opts.saved && sameSizes(underSizesOf(opts.saved), sz) ? opts.saved : null;
-  const grid = fineGrid(s, provinceGridKm(s, Math.min(sz.rockMi, sz.cavernMi, sz.tunnelMi, sz.seaMi)));
-  const g = sampleGround(surface, s, grid);
-  const { medium, cover } = rasterUnderdark(surface, grid, g.wrapKm, g.land);
+  // Fine enough for the narrowest tunnel or cave painted (its walls are hard lines).
+  const painted = underStrokes(surface).filter((st) => !st.erase && (st.brush === 'cavern' || st.brush === 'tunnel' || st.brush === 'undersea'));
+  const finest = painted.length ? Math.min(...painted.map((st) => st.size)) : Infinity;
+  const grid = fineGrid(s, layerGridKm(s, [sz.rockMi, sz.cavernMi, sz.tunnelMi, sz.seaMi], finest));
+  // The land (where there is anything below), from a coarser grid: the coast needs no finer.
+  const coarse = fineGrid(s, provinceGridKm(s, sz.rockMi));
+  const g = sampleGround(surface, s, coarse);
+  const land = new Uint8Array(grid.w * grid.h);
+  for (let k = 0; k < land.length; k++) {
+    const c = fineIndex(coarse, g.wrapKm, grid.x0 + (k % grid.w) * grid.px, grid.y0 + Math.floor(k / grid.w) * grid.px);
+    land[k] = c >= 0 ? g.land[c] : 0;
+  }
+  const { medium, cover } = rasterUnderdark(surface, grid, g.wrapKm, land);
 
   const grown = provincesFromMedium(grid, g.wrapKm, medium, cover, {
     size: (m) => milesToKm(m === SEA ? sz.seaMi : m === CAVERN ? sz.cavernMi : m === TUNNEL ? sz.tunnelMi : sz.rockMi),
     strip: (m) => m === TUNNEL,
-    // Rock and caverns together (a cave pocket too small for a province is part of the rock's), seas with seas, tunnels with tunnels.
-    mergeClass: (m) => (m === SEA ? 2 : m === TUNNEL ? 3 : 0),
     kind: (m) => KIND[m] ?? 'rock',
     terrain: (m) => (m === SEA ? UNDER_NAMES.sea : m === TUNNEL ? UNDER_NAMES.tunnel : m === CAVERN ? UNDER_NAMES.cavern : UNDER_NAMES.rock),
     coverOk: (m) => m === CAVERN || m === TUNNEL,

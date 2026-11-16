@@ -1,6 +1,8 @@
 import { fineIndex, neighbours4 } from './finegeo';
 import { fbm } from './noise';
-import { grow, mergeSmallZones, OFF_MAP, wholeProvinces } from './provinces';
+import { grow, MAX_FINE_POINTS, OFF_MAP, wholeProvinces } from './provinces';
+import type { WorldSettings } from './settings';
+import { milesToKm } from './units';
 import type { Grid } from './terrain';
 import { assembleRings, traceChains } from './trace';
 
@@ -8,8 +10,8 @@ import { assembleRings, traceChains } from './trace';
  * Provinces grown on a layer's own ground (the Underdark, the canopy and the sky layers): the
  * same way as the surface's, from a grid of what each point is (its "medium": 0 for nothing, then
  * the layer's own kinds of ground). Each connected stretch of one medium is a zone no province
- * crosses; strips (tunnels, limbs, vines) get a province every so far along; slivers join what
- * they border most (by merge class); provinces grow from seeds kept with the world, so growing them
+ * crosses (never merged across kinds: painted edges are hard lines); strips (tunnels, limbs, vines)
+ * get a province every so far along; provinces grow from seeds kept with the world, so growing them
  * again after repainting keeps each where it was, with its id.
  */
 
@@ -17,8 +19,6 @@ export interface MediumSpec {
   /** How far across a province of this medium is (km), or how long a stretch of a strip. */
   size(m: number): number;
   strip(m: number): boolean;
-  /** Slivers join zones of the same class (0, 1, 2, 3 as mergeSmallZones reads them). */
-  mergeClass(m: number): number;
   kind(m: number): string;
   terrain(m: number): string;
   /** Whether a cover (1–3 in the cover grid) can be noted for it. */
@@ -50,6 +50,16 @@ export interface GrownProvinces {
 
 const sq = (v: number) => v * v;
 
+/**
+ * How far apart a layer's fine points are: fine enough for its provinces (about six to a province
+ * across) and for its narrowest painted feature (a tunnel's, limb's or vine's width, two and a half
+ * points across), so the provinces keep to the painted edges; never finer than the map can hold.
+ */
+export function layerGridKm(s: WorldSettings, sizesMi: number[], finestKm: number): number {
+  const floor = Math.sqrt((s.widthKm * s.heightKm) / MAX_FINE_POINTS);
+  return Math.max(floor, Math.min(milesToKm(Math.min(...sizesMi)) / 6, finestKm / 2.5));
+}
+
 export function provincesFromMedium(grid: Grid, wrapKm: number, medium: Uint8Array, cover: Uint8Array | null, spec: MediumSpec, saved: { seeds: number[]; ids: number[]; nextId: number } | null, seed: number, noiseKm: number): GrownProvinces {
   const { w, h, px, x0, y0 } = grid;
   const n = w * h;
@@ -78,13 +88,8 @@ export function provincesFromMedium(grid: Grid, wrapKm: number, medium: Uint8Arr
   const pxArea = px * px;
   const sizeFor = (m: number) => sq(spec.size(m)) / pxArea;
   const strip = (m: number) => spec.strip(m);
-  // Slivers join the zone they border most: rock and caverns together (a cave pocket too small for
-  // a province is part of the rock's), seas with seas, tunnels with tunnels.
-  const mergeClass = Uint8Array.from(zMed, (m) => spec.mergeClass(m));
-  // (mergeSmallZones skips the points outside every zone.)
-  const zoneForMerge = Int32Array.from(zone, (z) => (z < 0 ? zones : z));
-  mergeSmallZones(zoneForMerge, zones + 1, (k, out) => nb(k, out).filter((m) => zone[m] >= 0), (z) => (z === zones ? 0 : strip(zMed[z]) ? 15 : sizeFor(zMed[z])), Uint8Array.from([...mergeClass, 9]));
-  for (let k = 0; k < n; k++) if (zone[k] >= 0) zone[k] = zoneForMerge[k];
+  // No merging across kinds of ground: every painted edge (a cave's, a tunnel's, a limb's, a vine's,
+  // an island's) is a hard line provinces form round, however small the piece it leaves.
 
   // Renumber, and list each zone's points.
   const ids = new Map<number, number>();

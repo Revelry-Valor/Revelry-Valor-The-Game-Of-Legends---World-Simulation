@@ -234,7 +234,6 @@ The world can have up to five layers. The extra layers are optional and shown wh
   - Rock and caverns get provinces across their area.
   - Tunnels are strips, a province every so far along (like rivers).
   - Seas get bigger provinces.
-  - A cave pocket too small for a province is part of the rock's; slivers join what they border most.
 - *Sizes:* four sliders, in miles: rock (60), caverns (40), tunnels (40 along), and underground seas (80).
 - *Seeds:* as on the surface, provinces grow from seeds kept with the world. "Update to the map" keeps each province, and its id, where it was. New sizes start afresh.
 - *Each province* records its kind, its terrain name, its main cover (fungus, glowing caves or crystal caverns, when they cover a quarter or more of its floor), its area and its neighbours.
@@ -265,6 +264,11 @@ The world can have up to five layers. The extra layers are optional and shown wh
   - coloured while the tab is open (air pale blue, islands green, limbs brown, vines green), outlined elsewhere;
   - a click shows a province's card, and the hover readout names the province.
 - *Saving:* saved with the world (`airProvinces`), grown again when it opens, and moved with the land when the map grows.
+
+**Hard edges (after testing, both steps):** the provinces on the other layers keep exactly to what is painted. A cave's, tunnel's, sea's, limb's, trunk's, vine's or island's edge is a hard line that provinces form around.
+- *No merging across kinds:* nothing is ever merged across kinds of ground. A small cave pocket keeps its own province, and the open air between two limbs or vines stays open air.
+- *Grid fine enough for the narrowest feature:* each layer's grid is fine enough for its narrowest painted feature (two and a half points across a tunnel's, limb's or vine's width), down to the map's limit of points. A strip's provinces are as wide as the strip itself.
+- *The coastline:* the Underdark takes its coastline from a coarser grid, which needs no finer.
 
 ---
 

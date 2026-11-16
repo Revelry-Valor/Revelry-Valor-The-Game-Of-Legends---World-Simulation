@@ -43,12 +43,21 @@ describe('Underdark provinces', () => {
     expect(cave.kind).toBe('cavern');
     expect(cave.cover).toBe('fungus');
     expect(at(m, 1100, 700)?.kind).toBe('tunnel');
+    // The tunnel is exactly its width: a few miles beside it is rock.
+    expect(at(m, 1100, 706)?.kind).toBe('rock');
     expect(at(m, 1350, 700)?.kind).toBe('sea');
     // The tunnel runs as a string of provinces, each joined to the next.
     const tunnel = m.provinces.filter((p) => p.kind === 'tunnel');
     expect(tunnel.length).toBeGreaterThanOrEqual(3);
-    // Caverns hold together: never one province across rock and cave.
+    // Caves are hard lines: even a small pocket keeps provinces of its own.
     expect(m.provinces.every((p) => p.area > 0)).toBe(true);
+  }, 60000);
+
+  it('keeps a small cave pocket its own, never folded into the rock', () => {
+    const { surface, add } = mk();
+    add('cavern', [600, 900], { size: 12, roughness: 0 });
+    const m = generateUnderProvinces(surface, settings, {});
+    expect(at(m, 600, 900)?.kind).toBe('cavern');
   }, 60000);
 
   it('keeps each province and its id when grown again from its seeds after repainting', () => {

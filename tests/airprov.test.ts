@@ -38,14 +38,17 @@ describe('canopy and sky provinces', () => {
     add('gianttree', [1100, 900], { size: 4 });
     add('limb', [800, 900, 1100, 900], { size: 2 });
     add('vine', [1100, 900, 1450, 900], { vineFrom: 'canopy', vineTo: 'canopy' });
-    add('vine', [700, 600, 650, 420], { vineFrom: 'surface', vineTo: 'sky1' });
+    add('vine', [700, 600, 650, 420], { vineFrom: 'surface', vineTo: 'sky1', size: 4 });
     const canopy = generateAirProvinces(surface, settings, 0, {});
     expect(at(canopy, 1500, 900)?.kind).toBe('island');
     expect(at(canopy, 950, 900)?.kind).toBe('limb');
     expect(at(canopy, 1300, 900)?.kind).toBe('vine');
     expect(canopy.provinces.filter((p) => p.kind === 'limb').length).toBeGreaterThanOrEqual(3);
     // The vine from the ground to sky layer 1 climbs through the canopy: its provinces are there.
-    expect(at(canopy, 690, 560)?.kind).toBe('vine');
+    expect(at(canopy, 688.9, 560)?.kind).toBe('vine');
+    // Right beside a vine or limb is open air: provinces keep to their edges.
+    expect(at(canopy, 695, 560)?.kind).toBe('air');
+    expect(at(canopy, 950, 905)?.kind).toBe('air');
     expect(at(canopy, 650, 410)?.kind).toBe('air');
     const sky1 = generateAirProvinces(surface, settings, 1, {});
     expect(at(sky1, 650, 410)?.kind).toBe('island');
