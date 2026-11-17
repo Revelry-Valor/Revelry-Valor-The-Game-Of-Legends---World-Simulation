@@ -3,7 +3,7 @@ import { BAND, BANDS, BIG_RIVER_KM, fineGeography, fineGrid, fineIndex, keepWhol
 import { fbm } from './noise';
 import type { Surface } from './paint';
 import type { WorldSettings } from './settings';
-import type { Grid } from './terrain';
+import { evaluate, type Grid } from './terrain';
 import { assembleRings, traceChains } from './trace';
 import { kmToMiles, milesToKm } from './units';
 
@@ -179,7 +179,7 @@ export function generateProvinces(surface: Surface, s: WorldSettings, cl: Climat
   const fresh = !opts.saved || opts.saved.sizeMi !== sizeMi || opts.saved.seaFactor !== seaFactor || !sameSizes(sizesOf(opts.saved.sizeMi, opts.saved), sz);
   const keyBase = `${s.seed}|${s.widthKm}|${s.heightKm}|${s.edges}|${surface.nextId}|${surface.strokes.length}|${sizeMi}|${seaFactor}|${JSON.stringify(sz)}|`;
   const stage = !fresh && cache?.stage && cache.key === keyBase + seedSig(opts.saved!) ? cache.stage : growStage(surface, s, cl, sizeMi, seaFactor, sz, fresh, opts.saved ?? null);
-  const map = finish(stage, cl, sizeMi, seaFactor, opts.saved?.edits ?? []);
+  const map = finish(stage, cl, sizeMi, seaFactor, opts.saved?.edits ?? [], coastRefiner(surface, s, stage.grid));
   Object.assign(map.saved, sz);
   if (cache) {
     cache.key = keyBase + seedSig(map.saved);
@@ -473,7 +473,7 @@ function growStage(surface: Surface, s: WorldSettings, cl: Climate, sizeMi: numb
 }
 
 /** Hand edits, then each province's record, borders and outline. */
-function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits: ProvinceEdit[]): ProvinceMap {
+function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits: ProvinceEdit[], refiner?: CoastRefiner): ProvinceMap {
   const { grid, g, fg, zone, zm, zg, seedPix, seedId, nextId } = st;
   const label = st.label.slice();
   const { w, h, px, x0, y0 } = grid;
@@ -571,7 +571,38 @@ function finish(st: Stage, cl: Climate, sizeMi: number, seaFactor: number, edits
   const held = (l: number) => l >= 0;
   // Less straightening beside a narrow strip (a river province is a point or two wide), so its two banks never cross.
   const narrow = (l: number) => l >= 0 && (provinces[l].kind === 'river' || provinces[l].terrain === 'Ravine');
-  const chains = traceChains(label, w, h, wrap, held, OFF_MAP, (a, b) => (narrow(a) || narrow(b) ? 0.35 : 0.9));
+  // The coast is never straightened: it is laid on the painted coastline itself (below).
+  const wet = (l: number) => l >= 0 && provinces[l].kind === 'sea';
+  const chains = traceChains(label, w, h, wrap, held, OFF_MAP, (a, b) => (wet(a) !== wet(b) && a >= 0 && b >= 0 ? -1 : narrow(a) || narrow(b) ? 0.35 : 0.9));
+  onCoast(chains, g.ground, g.land, w, h, wrap);
+  // Then finer still: points added along the coast between the grid's, each on the coastline as
+  // the map draws it at its closest (the painted ground sampled finely across the border).
+  if (refiner) {
+    // Each end where a coast meets another border is moved once, the same in every border that
+    // has it (and never past half a fine step from its corner, so the borders still meet).
+    const ends = new Map<string, [number, number]>();
+    const keyOf = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
+    for (const c of chains) {
+      if (!(c.left >= 0 && c.right >= 0 && wet(c.left) !== wet(c.right))) continue;
+      const before = c.pts;
+      c.pts = refiner.chain(c.pts);
+      for (const e of [0, before.length - 2]) {
+        const k = keyOf(before[e], before[e + 1]);
+        if (ends.has(k)) continue;
+        // Across the coast at the end: the next point in along it gives the way the coast runs.
+        const nx = e ? before[e - 2] : before[2];
+        const ny = e ? before[e - 1] : before[3];
+        const moved = refiner.point(before[e], before[e + 1], before[e] - nx, before[e + 1] - ny);
+        const X = Math.round(before[e]);
+        const Y = Math.round(before[e + 1]);
+        ends.set(k, [Math.max(X - 0.49, Math.min(X + 0.49, moved[0])), Math.max(Y - 0.49, Math.min(Y + 0.49, moved[1]))]);
+      }
+    }
+    for (const c of chains) for (const e of [0, c.pts.length - 2]) {
+      const m = ends.get(keyOf(c.pts[e], c.pts[e + 1]));
+      if (m) [c.pts[e], c.pts[e + 1]] = m;
+    }
+  }
   const ringMap = assembleRings(chains, w, wrap, held);
   const borders = chains.map((c) => ({ pts: toKm(c.pts), a: c.left, b: c.right }));
   const rings = provinces.map((_, l) => (ringMap.get(l) ?? []).map(toKm));
@@ -653,9 +684,11 @@ export function mergeSmallZones(zone: Int32Array, zones: number, nb: (k: number,
         if (rb === a || landish(rb) !== landish(a)) continue;
         if (c > bc) [best, bc] = [rb, c];
       }
-      if (best < 0 && (size[a] < 3 || !landish(a))) for (const [b, c] of row) {
+      // Never across the coast: an island too small to stand alone, or an inlet, keeps a
+      // province of its own. (A canyon or ravine still goes in with the ground beside it.)
+      if (best < 0 && landish(a) === 2) for (const [b, c] of row) {
         const rb = find(b);
-        if (rb !== a && c > bc) [best, bc] = [rb, c];
+        if (rb !== a && landish(rb) === 1 && c > bc) [best, bc] = [rb, c];
       }
       if (best < 0) continue;
       parent[a] = best;
@@ -911,4 +944,133 @@ function applyEdits(label: Int32Array, edits: ProvinceEdit[], seedId: number[], 
     }
   }
   keepWhole(label, () => true, neighbours4(w, h, wrap), (k, m) => wet(k) === wet(m));
+}
+
+/**
+ * Lay the coast exactly: every border point where land and sea meet (a lattice corner with both
+ * round it) is moved onto the painted coastline, the line where the ground crosses 1.5, found
+ * between the four fine points round it. The point is moved the same in every chain that has it,
+ * so provinces on either side, and the borders along it, share the very coast the map draws.
+ */
+function onCoast(chains: { pts: number[] }[], ground: Float32Array, land: Uint8Array, w: number, h: number, wrap: boolean): void {
+  const cell = (i: number, j: number) => {
+    j = Math.max(0, Math.min(h - 1, j));
+    if (i < 0 || i >= w) i = wrap ? ((i % w) + w) % w : Math.max(0, Math.min(w - 1, i));
+    return j * w + i;
+  };
+  const done = new Map<number, [number, number]>();
+  for (const c of chains) {
+    const p = c.pts;
+    for (let q = 0; q < p.length; q += 2) {
+      const X = Math.round(p[q]);
+      const Y = Math.round(p[q + 1]);
+      // Lattice corners only (points already moved, or off the lattice, are left).
+      if (Math.abs(p[q] - X) > 1e-6 || Math.abs(p[q + 1] - Y) > 1e-6) continue;
+      const key = (Y + 1) * (w + 3) + (wrap ? ((X % w) + w) % w : X) + 1;
+      let moved = done.get(key);
+      if (!moved) {
+        // The four fine points round the corner (centres at corner ± ½).
+        const a = cell(X - 1, Y - 1);
+        const b = cell(X, Y - 1);
+        const cc = cell(X - 1, Y);
+        const d = cell(X, Y);
+        const lands = land[a] + land[b] + land[cc] + land[d];
+        moved = [0, 0];
+        if (lands > 0 && lands < 4) {
+          const v00 = ground[a] - 1.5;
+          const v10 = ground[b] - 1.5;
+          const v01 = ground[cc] - 1.5;
+          const v11 = ground[d] - 1.5;
+          // Bilinear over the square of the four centres: u, v in [0, 1] (the corner at ½, ½).
+          let u = 0.5;
+          let v = 0.5;
+          for (let it = 0; it < 6; it++) {
+            const f = v00 * (1 - u) * (1 - v) + v10 * u * (1 - v) + v01 * (1 - u) * v + v11 * u * v;
+            const fu = (v10 - v00) * (1 - v) + (v11 - v01) * v;
+            const fv = (v01 - v00) * (1 - u) + (v11 - v10) * u;
+            const g2 = fu * fu + fv * fv;
+            if (g2 < 1e-12 || Math.abs(f) < 1e-6) break;
+            u = Math.max(0.02, Math.min(0.98, u - (f * fu) / g2));
+            v = Math.max(0.02, Math.min(0.98, v - (f * fv) / g2));
+          }
+          moved = [u - 0.5, v - 0.5];
+        }
+        done.set(key, moved);
+      }
+      p[q] += moved[0];
+      p[q + 1] += moved[1];
+    }
+  }
+}
+
+/** Spacing (km) of the points laid along the coast, and of the samples across it. */
+const COAST_STEP_KM = 1.5;
+const COAST_SAMPLE_KM = 0.3;
+
+interface CoastRefiner {
+  /** A coastal border (fine-grid lattice units) with points added along it, each laid on the coastline (its two ends kept). */
+  chain(pts: number[]): number[];
+  /** One point moved straight across the coast (the coast running along tx, ty) onto the coastline. */
+  point(x: number, y: number, tx: number, ty: number): [number, number];
+}
+
+/**
+ * Lays coastal borders (fine-grid lattice units) on the painted coastline: points are added
+ * between their own about every 1.5 km, and each is moved, straight across the coast, to where
+ * the painted ground crosses into the sea, sampled every 0.3 km (the finest detail the map ever
+ * draws).
+ */
+function coastRefiner(surface: Surface, s: WorldSettings, grid: Grid): CoastRefiner {
+  const { px, x0, y0 } = grid;
+  const wrapKm = s.edges === 'wrap' ? s.widthKm : 0;
+  const reach = 0.75 * px;
+  const S = Math.ceil(reach / COAST_SAMPLE_KM);
+  const o = { seed: s.seed, wrapKm, noRelief: true };
+  const point = (x: number, y: number, tx: number, ty: number): [number, number] => {
+    const alongX = Math.abs(ty) >= Math.abs(tx);
+    let cx = x0 + (x - 0.5) * px;
+    const cy = y0 + (y - 0.5) * px;
+    if (wrapKm) cx -= Math.floor(cx / wrapKm) * wrapKm;
+    const f = alongX
+      ? evaluate(surface, { x0: cx - S * COAST_SAMPLE_KM, y0: cy, px: COAST_SAMPLE_KM, w: 2 * S + 1, h: 1 }, o)
+      : evaluate(surface, { x0: cx, y0: cy - S * COAST_SAMPLE_KM, px: COAST_SAMPLE_KM, w: 1, h: 2 * S + 1 }, o);
+    // The crossing nearest the middle.
+    let best = Infinity;
+    for (let q = 0; q < 2 * S; q++) {
+      const a = f.ground[q] - 1.5;
+      const b = f.ground[q + 1] - 1.5;
+      if ((a >= 0) === (b >= 0)) continue;
+      const t = q + a / (a - b);
+      if (Math.abs(t - S) < Math.abs(best - S)) best = t;
+    }
+    if (!Number.isFinite(best)) return [x, y];
+    const d = ((best - S) * COAST_SAMPLE_KM) / px;
+    return alongX ? [x + d, y] : [x, y + d];
+  };
+  const chain = (pts: number[]): number[] => {
+    const n = pts.length / 2;
+    if (n < 2) return pts;
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let i = 0; i < n - 1; i++) {
+      const ax = pts[i * 2];
+      const ay = pts[i * 2 + 1];
+      const bx = pts[i * 2 + 2];
+      const by = pts[i * 2 + 3];
+      const m = Math.max(1, Math.ceil((Math.hypot(bx - ax, by - ay) * px) / COAST_STEP_KM));
+      for (let q = 0; q < m; q++) {
+        xs.push(ax + ((bx - ax) * q) / m);
+        ys.push(ay + ((by - ay) * q) / m);
+      }
+    }
+    xs.push(pts[(n - 1) * 2]);
+    ys.push(pts[(n - 1) * 2 + 1]);
+    const N = xs.length;
+    const out = new Array<number>(N * 2);
+    for (let i = 0; i < N; i++) {
+      [out[i * 2], out[i * 2 + 1]] = i === 0 || i === N - 1 ? [xs[i], ys[i]] : point(xs[i], ys[i], xs[i + 1] - xs[i - 1], ys[i + 1] - ys[i - 1]);
+    }
+    return out;
+  };
+  return { chain, point };
 }

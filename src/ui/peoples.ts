@@ -36,6 +36,9 @@ import { manaWord } from '../core/mana';
 import type { ManaState } from './mana';
 import type { InfoItem, ResourceView } from './info';
 
+/** Trade routes running along one way that make it a great trade artery (drawn gold edged in blue). */
+const ARTERY = 3;
+
 /**
  * The Peoples tab (Phase 6): choosing which races take part and placing their first tribes
  * (automatically, then moved, added or removed by hand), the time bar to run the world on, and
@@ -640,10 +643,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           for (const tier of [1, 2, 3, 4]) {
             const mine = segs.filter((q) => q[2] === tier);
             if (!mine.length) continue;
-            const line = (width: number, colour: string, dash: number[] = []) => {
+            const line = (width: number, colour: string, dash: number[] = [], round = false) => {
               g.strokeStyle = colour;
               g.lineWidth = width;
               g.setLineDash(dash);
+              g.lineCap = round ? 'round' : 'butt';
               g.beginPath();
               for (const [a, b] of mine) {
                 const [ax, ay] = P(a);
@@ -655,17 +659,21 @@ export function createPeoples(d: PeoplesDeps): Peoples {
               }
               g.stroke();
             };
-            if (tier === 1) line(1.5, 'rgba(176,138,90,0.9)', [3, 3]);
-            else if (tier === 2) line(2.5, '#8c5a2b');
+            // Each kind its own look: dirt ways in dots (a trail fine and sparse, a cart track
+            // bigger and closer), paved roads in dashes, railways with their sleepers. Gold is
+            // kept for trade routes.
+            if (tier === 1) line(2.2, 'rgba(150,112,74,0.95)', [0.01, 6], true);
+            else if (tier === 2) line(3.6, '#6e4320', [0.01, 4.5], true);
             else if (tier === 3) {
-              line(4.5, 'rgba(40,36,30,0.85)');
-              line(2.5, '#e2ddd2');
+              line(5, 'rgba(40,36,30,0.85)', [9, 5]);
+              line(3, '#e2ddd2', [9, 5]);
             } else {
               line(4, '#1c1c1c');
               line(4, '#f2f2f2', [1.5, 5]);
             }
           }
           g.setLineDash([]);
+          g.lineCap = 'butt';
           // Bridges: a stone-coloured span with dark parapets.
           if (s.bridge) for (let k = 0; k < e.n; k++) {
             if (!s.bridge[k]) continue;
@@ -880,36 +888,58 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             g.fill();
           }
         }
-        // Trade routes: faint lines between trading settlements, bolder the more they are used; caravans on them.
+        // Trade routes in gold, while they are in use (a trip within the year), along the way their
+        // traders take; where several routes run together (a great trade artery, a silk road),
+        // gold edged in blue. Caravans on them.
         if (showTrade) {
+          const load = new Map<number, number>();
+          const segKey = (a: number, b: number) => (a < b ? a * e.n + b : b * e.n + a);
+          const active = s.routes.filter((r) => s.day - r.last < 360);
+          for (const r of active) if (r.path) for (let i = 1; i < r.path.length; i++) {
+            const k = segKey(r.path[i - 1], r.path[i]);
+            load.set(k, (load.get(k) ?? 0) + 1);
+          }
+          const XY = (k: number) => at(e.x0 + (k % e.w) * e.step, e.y0 + Math.floor(k / e.w) * e.step, c);
+          const seg = (a: number, b: number) => {
+            const [ax, ay] = XY(a);
+            let [bx, by] = XY(b);
+            if (Math.abs(bx - ax) > e.step * scale * 2) bx = ax + Math.sign(ax - bx) * e.step * scale;
+            g.moveTo(ax, ay);
+            g.lineTo(bx, by);
+          };
+          g.setLineDash([]);
+          g.lineCap = 'round';
+          g.lineJoin = 'round';
+          // The arteries' blue edges first, then all the gold over them.
+          g.beginPath();
+          for (const [k, n] of load) if (n >= ARTERY) seg(Math.floor(k / e.n), k % e.n);
+          g.strokeStyle = 'rgba(47,111,179,0.95)';
+          g.lineWidth = 7;
+          g.stroke();
+          for (const major of [false, true]) {
+            g.beginPath();
+            for (const [k, n] of load) if ((n >= ARTERY) === major) seg(Math.floor(k / e.n), k % e.n);
+            g.strokeStyle = major ? '#f0c040' : 'rgba(232,184,48,0.9)';
+            g.lineWidth = major ? 3.5 : 2;
+            g.stroke();
+          }
+          // Routes whose way is not known yet (by sea, or older ones): straight, thin, dashed gold.
           g.setLineDash([5, 4]);
-          for (const r of s.routes) {
+          g.lineWidth = 1.5;
+          g.strokeStyle = 'rgba(232,184,48,0.75)';
+          g.beginPath();
+          for (const r of active) {
+            if (r.path && r.path.length > 1) continue;
             const a = s.settlements.find((q) => q.id === r.a);
             const b = s.settlements.find((q) => q.id === r.b);
             if (!a || !b) continue;
             const [ax, ay] = at(a.x, a.y, c);
             const [bx, by] = at(b.x, b.y, c);
-            g.strokeStyle = `rgba(255,214,110,${Math.min(0.95, 0.5 + r.trips / 30)})`;
-            g.lineWidth = 2 + Math.min(3, r.trips / 10);
-            g.beginPath();
-            if (r.path && r.path.length > 1) {
-              // Along the way its traders take (roads.ts).
-              let [px, py] = [0, 0];
-              r.path.forEach((k, i) => {
-                let [x, y] = at(e.x0 + (k % e.w) * e.step, e.y0 + Math.floor(k / e.w) * e.step, c);
-                // Across the wrap: keep to the near copy.
-                if (i && Math.abs(x - px) > e.step * scale * 2) x = px + Math.sign(px - x) * e.step * scale;
-                if (i) g.lineTo(x, y);
-                else g.moveTo(x, y);
-                [px, py] = [x, y];
-              });
-              void py;
-            } else {
-              g.moveTo(ax, ay);
-              g.lineTo(bx, by);
-            }
-            g.stroke();
+            g.moveTo(ax, ay);
+            g.lineTo(bx, by);
           }
+          g.stroke();
+          g.lineCap = 'butt';
           g.setLineDash([]);
           for (const cv of s.caravans) {
             const [sx, sy] = at(cv.x, cv.y, c);
@@ -1829,7 +1859,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       choice<'on' | 'off'>('Clan lands', [{ value: 'on', label: 'Clan lands shown' }, { value: 'off', label: 'Hidden' }], showLand ? 'on' : 'off', (v) => { showLand = v === 'on'; d.redraw(); }),
       choice<'clan' | 'culture' | 'faith'>('Colour lands by', [{ value: 'clan', label: 'Realm' }, { value: 'culture', label: 'Culture' }, { value: 'faith', label: 'Faith' }], landsBy, (v) => { landsBy = v; landDirty = true; d.redraw(); render(); }),
       choice<'on' | 'off'>('Ways', [{ value: 'on', label: 'Trails, roads and railways shown' }, { value: 'off', label: 'Hidden' }], showWays ? 'on' : 'off', (v) => { showWays = v === 'on'; d.redraw(); }),
-      h('div', { class: 'way-key small' }, ...WAYS.slice(1).map((w) => h('span', {}, h('span', { class: `way-swatch way-${w.id}` }), `${w.name} (×${w.speed} speed)`))),
+      h('div', { class: 'way-key small' }, ...WAYS.slice(1).map((w) => h('span', {}, h('span', { class: `way-swatch way-${w.id}` }), `${w.name} (×${w.speed} speed)`)), h('span', {}, h('span', { class: 'way-swatch way-trade' }), 'Trade route in use'), h('span', {}, h('span', { class: 'way-swatch way-artery' }), `Great trade artery (${ARTERY} or more routes on one way)`)),
       choice<'on' | 'off'>('Trade', [{ value: 'on', label: 'Trade routes and caravans shown' }, { value: 'off', label: 'Hidden' }], showTrade ? 'on' : 'off', (v) => { showTrade = v === 'on'; d.redraw(); }),
       h('div', { class: 'field' }, h('label', {}, 'Where beasts live'), beastSelect, h('small', {}, 'Yellow is few, red is many: as many as the land can carry, thinned where they are hunted.')),
       h('div', { class: 'field' }, h('label', {}, 'Where resources are'),

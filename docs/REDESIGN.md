@@ -1090,6 +1090,24 @@ This reworks a large part of the simulation. Where it disagrees with the older s
   - While held, no new rift opens, none breaks, and monster tides neither spread nor send out hordes. Hordes already out halt where they are, neither moving nor attacking, and go on once the rifts are let go.
   - Rifts already open stay, and are still worked.
   - It is meant for letting peoples grow and arm before the rifts come into play.
+  - Hordes already out halt where they are while the rifts are held off.
+
+**Designer's notes after step 4: coasts, road looks, the heat map, spreading by race**
+- *Coasts are a hard line for provinces:*
+  - Province slivers are never merged across the coast: an island too small to stand alone, or a tiny inlet, keeps a province of its own. No land point is ever in a sea province, nor sea in a land one.
+  - Where land and sea provinces meet, their border is laid on the painted coastline itself, never a smoothed staircase:
+    - first each grid corner on the coast is moved to where the painted ground crosses into the sea between the fine points round it;
+    - then points are added along the coast about every 1.5 km, and every point (and each end where a coast meets another border, moved the same in every border that has it) is moved straight across the coast to the crossing, sampled every 0.3 km. That is the finest detail the map draws, even zoomed right in.
+    - Realm borders along the coast use the same line.
+  - Measured on the test world (fine grid 10.7 km), sampled as finely as the map draws: coastal border points are 0.08 km from the painted coast on average, 0.3 km for 95 in 100, and 0.67 km at the worst. Before: 2.75 km on average and up to 7.6 km.
+- *Road looks* (each kind its own; gold kept for trade):
+  - trail: fine, sparse brown dots;
+  - cart track: bigger, closer dark-brown dots;
+  - paved road: stone dashes with a dark edge;
+  - railway: black with white sleepers.
+  - Trade routes are drawn in gold only while in use (a trip within the year), along the way their traders take. Where three or more routes run along the same way (a great trade artery, a silk road), it is drawn gold edged in blue.
+- *The population heat map* is in the View panel ("Population heat map"), not Map look.
+- *Spreading by what suits the race:* families spread into a point as easily as it suits them, by the species' (or race's) preferred climates, ground covers and heights; along coasts and rivers half as fast again. In country that doesn't suit them most of those setting out turn back, so the spread there is several times slower (for example, men into jungle if Humans don't list it). Peoples with no preferences set spread evenly. Setting these preferences per race is for the race options.
 
 **Build order (proposed)**
 1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).

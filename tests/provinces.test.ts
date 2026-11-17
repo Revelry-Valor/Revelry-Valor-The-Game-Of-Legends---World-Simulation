@@ -6,6 +6,7 @@ import { KM_PER_DEGREE } from '../src/core/units';
 import { fineGeography, sampleGround } from '../src/core/finegeo';
 import { generateProvinces, type ProvinceCache, type ProvinceMap } from '../src/core/provinces';
 import { createWorld } from '../src/core/world';
+import * as terrain from '../src/core/terrain';
 import { parseWorld } from '../src/core/storage';
 
 /** A continent with a mountain range, a forest, a big river and a lake. */
@@ -125,10 +126,65 @@ describe('provinces', () => {
         else if (p.kind === 'land' && !['Mountains', 'Highlands', 'Foothills', 'Plateau', 'Canyon'].includes(p.terrain) && fg.region[k] !== p.region) crossed++;
       } else if (!g.land[k] && p.kind !== 'sea') mixed++;
     }
-    // Only slivers too small to stand alone are folded in.
-    expect(mixed / pm.label.length).toBeLessThan(0.002);
+    // The coast is a hard line: not one point of land in a sea province, nor of sea in a land one.
+    expect(mixed).toBe(0);
     expect(crossed / landPts).toBeLessThan(0.01);
   });
+  it('lays the coast between land and sea provinces on the painted coastline itself', () => {
+    // How far each point of a border between land and sea is from the painted coastline: the ground
+    // sampled finely round it (a tenth of a fine step), the nearest place where land meets sea.
+    const { evaluate } = terrain;
+    const r = pm.grid.px;
+    // Sampled as finely as the map draws the coast at its closest.
+    const q = 0.3;
+    const W = 2 * Math.round(3 / q) + 1;
+    const c0 = (W - 1) / 2;
+    const ds: number[] = [];
+    for (const b of pm.borders) {
+      if (b.a < 0 || b.b < 0 || (pm.provinces[b.a].kind === 'sea') === (pm.provinces[b.b].kind === 'sea')) continue;
+      for (let i = 0; i < b.pts.length; i += 6) {
+        const x = b.pts[i];
+        const y = b.pts[i + 1];
+        const f = evaluate(surface, { x0: x - c0 * q, y0: y - c0 * q, px: q, w: W, h: W }, { seed: settings.seed, wrapKm: settings.widthKm, noRelief: true });
+        let best = Infinity;
+        for (let j = 0; j < W; j++) for (let k = 0; k < W - 1; k++) {
+          const a = f.ground[j * W + k] >= 1.5;
+          const c = f.ground[j * W + k + 1] >= 1.5;
+          const e = f.ground[Math.min(W - 1, j + 1) * W + k] >= 1.5;
+          if (a !== c || a !== e) best = Math.min(best, Math.hypot(k - c0, j - c0) * q);
+        }
+        ds.push(best);
+      }
+    }
+    expect(ds.length).toBeGreaterThan(100);
+    ds.sort((a, b) => a - b);
+    const mean = ds.reduce((a, b) => a + (Number.isFinite(b) ? b : 3), 0) / ds.length;
+    const p95 = ds[Math.floor(ds.length * 0.95)];
+    // On the coastline: within a sample or so of it (before: a few km off, and up to a grid step).
+    expect(mean).toBeLessThan(0.3);
+    expect(p95).toBeLessThan(0.6);
+    expect(ds[ds.length - 1]).toBeLessThan(1.5);
+  }, 120000);
+  it('gives an island too small to stand alone a province of its own, never folding it into the sea', () => {
+    const s2 = defaultSettings({ widthKm: 2000, heightKm: 1500, northLatitude: 30, seed: 5 });
+    const sf: Surface = { strokes: [], nextId: 1 };
+    const put = (brush: BrushId, pts: number[], o: Partial<Stroke> = {}) => sf.strokes.push({ ...brushDefaults(brush), id: sf.nextId++, pts, roughness: 0, ...o } as Stroke);
+    put('land', [700, 750], { size: 900 });
+    // A speck of an island, far smaller than a province (a couple of fine points).
+    put('land', [1600, 750], { size: 34 });
+    const c2 = computeClimate(sf, s2);
+    const m = generateProvinces(sf, s2, c2, { sizeMi: 50, seaFactor: 3 });
+    const g = sampleGround(sf, s2, m.grid);
+    let isle = 0;
+    for (let k = 0; k < m.label.length; k++) {
+      const p = m.provinces[m.label[k]];
+      if (g.land[k] && !g.lake[k]) expect(p.kind).not.toBe('sea');
+      else if (!g.land[k]) expect(p.kind).toBe('sea');
+      const x = m.grid.x0 + (k % m.grid.w) * m.grid.px;
+      if (g.land[k] && x > 1400) isle++;
+    }
+    expect(isle).toBeGreaterThan(0);
+  }, 120000);
   it('gives mountains, lakes and big rivers their due', () => {
     // A range is split into mountain provinces (only the heart of a wide one is impassable).
     const mountains = pm.provinces.filter((p) => p.kind === 'land' && (p.terrain === 'Mountains' || p.terrain === 'Highlands'));

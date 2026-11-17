@@ -1,3 +1,4 @@
+import { COVER_BRUSHES } from '../core/paint';
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { hordesDay, monstersMonth } from './monsters';
 import { holdLayersYear } from './layerprovs';
@@ -167,6 +168,24 @@ function dist(env: Env, ax: number, ay: number, bx: number, by: number): number 
 const WILD_TRICKLE = 0.0005;
 /** The same, from a town past its first size (its growth goes partly into the land round it). */
 const WILD_TRICKLE_FULL = 0.001;
+const easeCache = new WeakMap<Env, Map<string, Float32Array>>();
+/**
+ * How easily a race's families spread into a point (density.ts): by its preferred climates,
+ * ground covers and heights (the species' and the race's own), far quicker along coasts and
+ * rivers. Peoples with no preferences set spread evenly.
+ */
+function wildEase(env: Env, ri: RaceInfo, k: number): number {
+  if (!env.land[k]) return 0.1;
+  const p = ri.species.profile;
+  const climates = ri.race.climates.length ? ri.race.climates : p.climates;
+  const zone = env.zone?.[k] ?? -1;
+  const cm = climates.length && zone >= 0 ? (climates.includes(zone) ? 1 : 0.35) : 1;
+  const cover = env.cover[k] >= 0 ? COVER_BRUSHES[env.cover[k]] : '';
+  const vm = p.covers.length && cover ? (p.covers.includes(cover) ? 1 : 0.5) : 1;
+  const zm = p.mountainZones.length ? (p.mountainZones.includes(env.mzone[k]) ? 1 : 0.4) : env.mzone[k] >= 3 ? 0.4 : 1;
+  const water = env.coast[k] || env.fresh[k] ? 1.5 : 1;
+  return Math.max(0.1, Math.min(1.5, cm * vm * zm * water));
+}
 /** How a race lives in the wild (density.ts), with how well it can live at each point (worked out once). */
 const liveCache = new WeakMap<Env, Map<string, Float32Array>>();
 function densityRace(sim: SimState, env: Env, lib: Library, info: Info, race: string): DensityRace | null {
@@ -181,7 +200,15 @@ function densityRace(sim: SimState, env: Env, lib: Library, info: Info, race: st
     m.set(race, L);
   }
   const live = L;
-  return { need: ri.need, births: ri.births, deaths: ri.deaths, attitude: ri.attitude, species: ri.species.id, live: (k) => live[k] };
+  let E = easeCache.get(env)?.get(race);
+  if (!E) {
+    E = new Float32Array(env.n);
+    for (let k = 0; k < env.n; k++) E[k] = wildEase(env, ri, k);
+    if (!easeCache.has(env)) easeCache.set(env, new Map());
+    easeCache.get(env)!.set(race, E);
+  }
+  const ease = E;
+  return { need: ri.need, births: ri.births, deaths: ri.deaths, attitude: ri.attitude, species: ri.species.id, live: (k) => live[k], ease: (k) => ease[k] };
 }
 const NO_LAYERS: LayerLand = { under: [], underStep: 20, ways: [], islands: [], trees: [], cities: [], vines: [] };
 /** What the layer rules (layers.ts) need. */

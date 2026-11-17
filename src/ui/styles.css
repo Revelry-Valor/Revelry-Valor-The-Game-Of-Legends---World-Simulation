@@ -355,9 +355,11 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .econ-list .num { font-variant-numeric: tabular-nums; }
 .way-key { display: flex; flex-direction: column; gap: 0.2rem; }
 .way-swatch { display: inline-block; width: 1.6em; height: 0.5em; margin-right: 0.4em; vertical-align: middle; border-radius: 2px; }
-.way-trail { border-top: 2px dashed #b08a5a; height: 0; }
-.way-track { background: #8c5a2b; }
-.way-road { background: #e2ddd2; border: 1px solid #28241e; }
+.way-trail { background: radial-gradient(circle, #96704a 0 1.2px, transparent 1.6px) 0 50% / 6px 100% repeat-x; }
+.way-track { background: radial-gradient(circle, #6e4320 0 2px, transparent 2.4px) 0 50% / 5px 100% repeat-x; }
+.way-road { background: repeating-linear-gradient(90deg, #e2ddd2 0 7px, transparent 7px 11px); border-top: 1px solid #28241e; border-bottom: 1px solid #28241e; }
+.way-trade { background: #e8b830; height: 0.25em; }
+.way-artery { background: #f0c040; height: 0.3em; border-top: 2px solid #2f6fb3; border-bottom: 2px solid #2f6fb3; }
 .way-rail { background: repeating-linear-gradient(90deg, #1c1c1c 0 4px, #f2f2f2 4px 6px); }
 .teach-row { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
 .teach-row select { max-width: 12rem; }

@@ -30,6 +30,11 @@ export interface DensityRace {
   species: string;
   /** How well it can live at a climate point (below 0: not at all), and whether it can go there. */
   live(k: number): number;
+  /**
+   * How easily its families spread into a point (0.1 to 1.5; 1 if not given): low in land that
+   * doesn't suit the race (its climates, ground covers and heights), high along coasts and rivers.
+   */
+  ease?(k: number): number;
 }
 
 export interface DensityContext {
@@ -144,22 +149,30 @@ export function densityMonth(c: DensityContext): void {
     for (let k = 0; k < n; k++) {
       const P = D[k];
       if (P <= 0) continue;
-      const movers = P * (DRIFT + HUNGRY_DRIFT * Math.max(0, 1 - fed[k]));
-      if (movers < 0.05) continue;
       const nb = nbrs(k);
+      // Easy country round it (a coast, a river) speeds them on; country that doesn't suit
+      // the race slows them: of those setting out for it, most turn back.
+      const ease = nb.map((m) => (r.ease ? r.ease(m) : 1));
+      const movers = P * (DRIFT * Math.max(0.5, ...ease) + HUNGRY_DRIFT * Math.max(0, 1 - fed[k]));
+      if (movers < 0.05) continue;
       let sum = 0;
-      const wt = nb.map((m) => {
+      const wt = nb.map((m, q) => {
         const live = r.live(m);
         if (live < 0) return 0;
         // Food per head there (what is left, over the people already there).
         const room = left[m] / Math.max(1, D[m] * r.need);
-        const v = Math.max(0.01, live) * (0.3 + Math.min(2, room));
+        const v = Math.max(0.01, live) * (0.3 + Math.min(2, room)) * ease[q];
         sum += v;
         return v;
       });
       if (sum <= 0) continue;
-      D[k] -= movers;
-      nb.forEach((m, q) => (move[m] += (movers * wt[q]) / sum));
+      let gone = 0;
+      nb.forEach((m, q) => {
+        const go = ((movers * wt[q]) / sum) * Math.min(1, ease[q]);
+        move[m] += go;
+        gone += go;
+      });
+      D[k] -= gone;
     }
     for (let k = 0; k < n; k++) if (move[k]) D[k] += move[k];
   }

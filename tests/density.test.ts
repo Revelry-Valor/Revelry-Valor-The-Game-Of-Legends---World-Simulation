@@ -75,6 +75,29 @@ describe('wilderness density', () => {
     expect(D.reduce((a, b) => a + b, 0)).toBeLessThan(before * 0.6);
   });
 
+  it('spreads quickly through country that suits the race, and slowly where it does not', () => {
+    const sim = newSim(env, 6);
+    const k = cellAt(1500, 1000);
+    seedDensity(sim, env, 'r', [k], 300);
+    const east = (q: number) => (q % env.w) * env.step + env.x0 > 1500;
+    // East of the start, easy country (a coast, say); west, country that doesn't suit them (a jungle for men).
+    const r = race({ ease: (q) => (east(q) ? 1.5 : 0.25) });
+    const left = new Float32Array(env.n);
+    for (let m = 0; m < 36; m++) densityMonth({ sim, env, left: left.fill(1000), race: () => r });
+    const D = sim.density!.r;
+    let e = 0;
+    let wv = 0;
+    let far = { e: 0, w: 0 };
+    for (let q = 0; q < env.n; q++) {
+      if (D[q] <= 0 || q === k) continue;
+      const d = Math.abs((q % env.w) - (k % env.w));
+      if (east(q)) [e, far.e] = [e + D[q], Math.max(far.e, d)];
+      else [wv, far.w] = [wv + D[q], Math.max(far.w, d)];
+    }
+    expect(e).toBeGreaterThan(wv * 2);
+    expect(far.e).toBeGreaterThan(far.w);
+  });
+
   it('hunts the game down where the families live', () => {
     const sim = newSim(env, 3);
     const k = cellAt(1500, 1000);

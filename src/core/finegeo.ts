@@ -52,6 +52,8 @@ export interface FineGround {
   wrapKm: number;
   /** 1 land, 0 sea. */
   land: Uint8Array;
+  /** The painted ground's value (land where it is 1.5 or more): the coast runs where it crosses 1.5. */
+  ground: Float32Array;
   /** Relief band (see BAND). */
   band: Uint8Array;
   /** Height the climate sees (km). */
@@ -72,7 +74,7 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid, big
   const { w, h } = grid;
   const n = w * h;
   const wrapKm = s.edges === 'wrap' ? s.widthKm : 0;
-  const out: FineGround = { grid, wrapKm, land: new Uint8Array(n), band: new Uint8Array(n), height: new Float32Array(n), lake: new Uint8Array(n), river: new Uint8Array(n), cliff: new Uint8Array(n), gorge: new Uint8Array(n) };
+  const out: FineGround = { grid, wrapKm, land: new Uint8Array(n), ground: new Float32Array(n), band: new Uint8Array(n), height: new Float32Array(n), lake: new Uint8Array(n), river: new Uint8Array(n), cliff: new Uint8Array(n), gorge: new Uint8Array(n) };
   const rows = Math.max(1, Math.floor(250_000 / Math.max(1, w)));
   for (let j0 = 0; j0 < h; j0 += rows) {
     const hh = Math.min(rows, h - j0);
@@ -82,6 +84,7 @@ export function sampleGround(surface: Surface, s: WorldSettings, grid: Grid, big
       const k = base + q;
       const land = f.ground[q] >= 1.5;
       out.land[k] = land ? 1 : 0;
+      out.ground[k] = f.ground[q];
       out.height[k] = f.climateH[q];
       if (!land) continue;
       const z = f.zone[q];

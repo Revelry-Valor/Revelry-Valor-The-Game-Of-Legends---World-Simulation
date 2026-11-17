@@ -567,7 +567,7 @@ export function showWorld(app: App, start: World): () => void {
       look.density = sel.value;
       map.redraw();
     });
-    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Population density'), sel, h('span', { class: 'muted small hint' }, 'Families living out in the wild, per square mile: everyone, or one race.'));
+    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Population heat map'), sel, h('span', { class: 'muted small hint' }, 'Families living out in the wild, per square mile: everyone, or one race (the peoples’ simulation must be running).'));
   }
   const lookPanel = h(
     'section',
@@ -575,7 +575,6 @@ export function showWorld(app: App, start: World): () => void {
     choice<MapStyle>('Look', [{ value: 'satellite', label: 'Satellite' }, { value: 'paper', label: 'Paper' }], look.style, (v) => { look.style = v; map.redraw(); }),
     choice<'on' | 'off'>('Latitude lines', [{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }], 'on', (v) => { look.grid = v === 'on'; map.redraw(); }),
     choice<'all' | 'main' | 'off'>('Labels', [{ value: 'all', label: 'All' }, { value: 'main', label: 'Land & sea only' }, { value: 'off', label: 'Hidden' }], look.labels, (v) => { look.labels = v; map.redraw(); }),
-    densityField(),
     choice<ManaDisplay>('Mana', [{ value: 'off', label: 'Hidden' }, { value: 'lines', label: 'Lines' }, { value: 'heat', label: 'Heat map' }], look.mana, (v) => { look.mana = v; map.redraw(); }),
     choice<ProvinceDisplay>('Provinces', [{ value: 'off', label: 'Hidden' }, { value: 'lines', label: 'Outlines' }, { value: 'colour', label: 'Coloured' }], look.provinces, (v) => { look.provinces = v; map.redraw(); }),
   );
@@ -620,6 +619,8 @@ export function showWorld(app: App, start: World): () => void {
     mapChoice,
     seasonChoice,
     climateLegend,
+    // The population heat map: where the peoples live out in the wild.
+    densityField(),
   );
 
   // ---- Layers ----
@@ -1129,7 +1130,7 @@ export function showWorld(app: App, start: World): () => void {
     return { el, refresh: () => (value.textContent = now()) };
   };
   const drops = [
-    drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}`, false, mapPanel),
+    drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}${look.density !== 'off' ? ' · population' : ''}`, false, mapPanel),
     drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}${look.provinces === 'lines' ? ' · province outlines' : look.provinces === 'colour' ? ' · provinces coloured' : ''}${look.mana === 'lines' ? ' · mana lines' : look.mana === 'heat' ? ' · mana heat map' : ''}`, false, lookPanel, zonesPanel),
     drop('Layers', () => `${look.layer === 'underdark' ? 'Showing the Underdark · ' : look.layer.startsWith('sky') ? `Showing sky layer ${look.layer.slice(3)} · ` : look.layer === 'canopy' ? 'Showing the canopy · ' : ''}${LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface'}`, false, layersPanel),
     drop('Reference image', () => (world.reference ? 'One laid over the map' : 'None'), false, refPanel),
