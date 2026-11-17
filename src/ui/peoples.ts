@@ -339,7 +339,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   const riftBtn = h('button', {
     type: 'button',
     class: 'ghost small',
-    title: 'Hold off the rifts: while held, no new rift opens, none breaks, and monster tides neither spread nor send out hordes (hordes already out go on). Rifts already open stay, and are still worked.',
+    title: 'Hold off the rifts: while held, no new rift opens, none breaks, and monster tides neither spread nor send out hordes and hordes already out halt where they are. Rifts already open stay, and are still worked.',
     onclick: () => {
       if (!sim) return;
       sim.riftsHeld = !sim.riftsHeld;

@@ -1087,7 +1087,7 @@ This reworks a large part of the simulation. Where it disagrees with the older s
   - Fixed: a village forms from the wild where the families within about 20 km of a spot are thick enough. This used to be measured over 1.5 grid points, so on a coarse grid it needed hundreds of families.
   - Result (a 60-year world run on 40 years with the rifts held off): seats pass 1,000 within about 25 years, and by 40 years 14 towns had 55 villages joined to them. Before, only the dawn cities ever did.
 - *Holding off the rifts:* a button on the time bar ("Rifts: on" / "Rifts: held off"), saved with the world.
-  - While held, no new rift opens, none breaks, and monster tides neither spread nor send out hordes. Hordes already out go on until they are done.
+  - While held, no new rift opens, none breaks, and monster tides neither spread nor send out hordes. Hordes already out halt where they are, neither moving nor attacking, and go on once the rifts are let go.
   - Rifts already open stay, and are still worked.
   - It is meant for letting peoples grow and arm before the rifts come into play.
 

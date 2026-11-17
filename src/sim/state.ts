@@ -562,8 +562,9 @@ export interface SimState {
   tides?: Tide[];
   hordes?: Horde[];
   /**
-   * Rifts held off (the World's switch): no new rift opens, none breaks, and the monster tides
-   * neither spread nor send out hordes (hordes already out go on). Rifts open stay, and are worked.
+   * Rifts held off (the World's switch): no new rift opens, none breaks, the monster tides
+   * neither spread nor send out hordes, and hordes already out halt where they are (going on
+   * when let go). Rifts open stay, and are worked.
    */
   riftsHeld?: boolean;
   /** Tunnels dug between towns (Phase 12): underground roads. */

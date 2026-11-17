@@ -1720,6 +1720,27 @@ describe('rift breaks, monster tides and hordes', () => {
     stepDays(sim, env, lib, 30);
     expect(sim.tides?.length).toBe(1);
   }, 120000);
+  it('halts the hordes already out while the rifts are held off, and lets them go on after', () => {
+    const sim = newSim(env, 964);
+    const at = spot((q) => (q % env.w) > 20 && (q % env.w) < env.w - 20);
+    sim.rifts = [rift(at.x, at.y)];
+    monstersMonth(mctx(sim));
+    for (let m = 0; m < 24 && !sim.hordes?.length; m++) {
+      sim.day += 30;
+      monstersMonth(mctx(sim));
+    }
+    const hd = sim.hordes![0];
+    expect(hd).toBeDefined();
+    addDawnCity(sim, env, lib, humanId(), hd.x + 150, hd.y, 300, []);
+    sim.riftsHeld = true;
+    const was = { x: hd.x, y: hd.y };
+    stepDays(sim, env, lib, 20);
+    expect(sim.hordes![0]).toBe(hd);
+    expect([hd.x, hd.y]).toEqual([was.x, was.y]);
+    sim.riftsHeld = false;
+    stepDays(sim, env, lib, 5);
+    expect(!sim.hordes!.includes(hd) || hd.x !== was.x || hd.y !== was.y).toBe(true);
+  }, 120000);
   it('lets a strong encampment hold a breaking rift, pushing it back', () => {
     const sim = newSim(env, 962);
     const at = spot(() => true);

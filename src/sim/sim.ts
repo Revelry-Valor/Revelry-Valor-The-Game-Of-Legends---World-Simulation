@@ -558,7 +558,8 @@ export function stepDays(sim: SimState, env: Env, lib: Library, days: number): v
     spiesDay({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
     if (sim.armies?.length) armiesDay(warContext(sim, env, lib, info));
     // Monster hordes on the march (monsters.ts).
-    if (sim.hordes?.length) hordesDay(warContext(sim, env, lib, info));
+    // Held off (riftsHeld): hordes halt where they are, neither moving nor attacking.
+    if (sim.hordes?.length && !sim.riftsHeld) hordesDay(warContext(sim, env, lib, info));
     sim.day++;
     if (sim.day % DAYS_PER_MONTH === 0) monthly(sim, env, lib, info);
     if (sim.day % DAYS_PER_YEAR === 0) yearly(sim, env, lib, info);
