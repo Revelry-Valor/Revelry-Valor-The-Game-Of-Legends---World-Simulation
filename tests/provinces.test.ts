@@ -132,9 +132,8 @@ describe('provinces', () => {
   });
   it('lays the coast between land and sea provinces on the painted coastline itself', () => {
     // How far each point of a border between land and sea is from the painted coastline: the ground
-    // sampled finely round it (a tenth of a fine step), the nearest place where land meets sea.
+    // sampled finely round it, the nearest place where land meets sea.
     const { evaluate } = terrain;
-    const r = pm.grid.px;
     // Sampled as finely as the map draws the coast at its closest.
     const q = 0.3;
     const W = 2 * Math.round(3 / q) + 1;

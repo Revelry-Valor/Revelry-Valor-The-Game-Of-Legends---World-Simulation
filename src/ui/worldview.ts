@@ -471,7 +471,7 @@ export function showWorld(app: App, start: World): () => void {
   };
   renderRef();
 
-  // ---- Climate: worked out again a moment after painting pauses, or at once with the button. ----
+  // ---- Climate: worked out with the button, or (auto update on) a moment after painting pauses. ----
   const climateStatus = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Working out the climate…');
   const climateBtn = h('button', { type: 'button', class: 'ghost small', title: 'Work the climate out again now.' }, 'Update climate');
   const climate = createClimateRunner(
@@ -485,11 +485,33 @@ export function showWorld(app: App, start: World): () => void {
     },
     (st) => {
       climateBusy = st !== 'idle';
-      climateStatus.textContent = st === 'working' ? 'Working out the climate…' : st === 'waiting' ? 'Climate will update when you pause.' : 'Climate is up to date.';
+      climateStatus.textContent = st === 'working' ? 'Working out the climate…' : st === 'waiting' ? 'Climate will update when you pause.' : st === 'stale' ? 'Climate is out of date: press Update climate.' : 'Climate is up to date.';
       climateBtn.disabled = st === 'working';
+      climateBtn.classList.toggle('primary', st === 'stale');
+      climateBtn.classList.toggle('ghost', st !== 'stale');
     },
   );
   climateBtn.addEventListener('click', () => climate.now());
+  // Auto update: off unless chosen (remembered on this device).
+  const AUTO_KEY = 'rv.climateAuto';
+  try {
+    climate.auto = localStorage.getItem(AUTO_KEY) === '1';
+  } catch {
+    climate.auto = false;
+  }
+  const autoBox = h('input', {
+    type: 'checkbox',
+    checked: climate.auto,
+    onchange: (e: Event) => {
+      climate.auto = (e.target as HTMLInputElement).checked;
+      try {
+        localStorage.setItem(AUTO_KEY, climate.auto ? '1' : '0');
+      } catch {
+        // Not remembered (storage blocked); it still works for now.
+      }
+    },
+  });
+  const climateAuto = h('label', { class: 'field-row small', title: 'Work the climate out again by itself a moment after you stop painting. Off: only when you press Update climate.' }, autoBox, 'Auto update');
   climate.now();
 
   // ---- View options ----
@@ -607,7 +629,7 @@ export function showWorld(app: App, start: World): () => void {
     'section',
     { class: 'view-panel' },
     h('h2', {}, 'Climate'),
-    h('div', { class: 'climate-run' }, climateBtn, climateStatus),
+    h('div', { class: 'climate-run' }, climateBtn, climateAuto, climateStatus),
     h('button', { type: 'button', class: 'ghost small', title: 'Text describing the continents, the ITCZ and the currents, plus a compact copy of this world, to paste into a conversation.', onclick: () => void showReport() }, 'Climate report…'),
     h('p', { class: 'muted small' }, 'Choose which climate map to look at in the View panel on the right.'),
   );

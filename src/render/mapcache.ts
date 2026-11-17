@@ -5,13 +5,18 @@ import RenderWorker from './worker?worker&inline';
 
 /**
  * Keeps drawn pieces of the map at several zoom levels, so the view can pan and zoom smoothly
- * while new detail is drawn in the background. When paint changes, only the changed part of each
+ * while new detail is drawn in the background. Besides what is on screen, it draws a ring round
+ * the view ahead of time (so panning finds it ready), and keeps a coarse picture of the whole map
+ * as a backdrop (so nothing is ever blank while the detail comes). When paint changes, only the changed part of each
  * piece is redrawn, so strokes appear as they are painted. These pieces are only pictures for
  * the screen; the world itself is the painted strokes.
  */
 
 const PIECE = 256;
-const MAX_PIECES = 420;
+const MAX_PIECES = 480;
+/** How far round the view to draw ahead (times the view's size): at the zoom shown, and coarser. */
+const AHEAD = 1.8;
+const AHEAD_COARSE = 3;
 
 type Rect = [number, number, number, number];
 
@@ -204,6 +209,12 @@ export class MapCache {
     return out;
   }
 
+  /** The coarse level at which the whole map is a few pieces across (the backdrop). */
+  private overviewLevel(): number {
+    const { widthKm: W, heightKm: H } = this.info;
+    return Math.max(-7, Math.min(10, Math.ceil(Math.log2(Math.max(W / 4, H / 3) / PIECE))));
+  }
+
   /** Draw what is ready, and ask for what is missing or changed (nearest the middle first). */
   draw(ctx: CanvasRenderingContext2D, view: View, w: number, h: number): void {
     const level = this.levelFor(view.scale);
@@ -211,8 +222,11 @@ export class MapCache {
     const W = this.info.widthKm;
     const offsets = this.info.wrap ? [-W, 0, W] : [0];
     ctx.imageSmoothingEnabled = true;
-    // Coarser pictures first, as a stand-in until the detail arrives.
-    for (let lv = level + 3; lv >= level; lv--) {
+    // Coarser pictures first, as a stand-in until the detail arrives: the whole-map backdrop,
+    // then each level down to the one shown.
+    const top = Math.max(level + 3, this.overviewLevel());
+    for (let lv = top; lv >= level; lv--) {
+      if (lv > level + 3 && lv !== top) continue;
       for (const [cx, cy] of this.visible(lv, view, w, h)) {
         const p = this.pieces.get(this.keyOf(lv, cx, cy));
         if (!p?.canvas) continue;
@@ -233,9 +247,11 @@ export class MapCache {
     const patches: { piece: Piece; patch: boolean }[] = [];
     const fills: { piece: Piece; patch: boolean }[] = [];
     const centre = ((view.cx % W) + W) % W;
-    for (const lv of [level, level + 2]) {
+    const ahead: { piece: Piece; patch: boolean }[] = [];
+    const seen = new Set<string>();
+    const want = (lv: number, ww: number, hh: number, into: { piece: Piece; patch: boolean }[], patchInto: { piece: Piece; patch: boolean }[]) => {
       const size = PIECE * kmPerPixel(lv);
-      const list = this.visible(lv, view, w, h)
+      const list = this.visible(lv, view, ww, hh)
         .map(([cx, cy]) => ({ cx, cy, d: Math.hypot((cx + 0.5) * size - centre, (cy + 0.5) * size - view.cy) }))
         .sort((a, b) => a.d - b.d);
       for (const { cx, cy } of list) {
@@ -246,14 +262,22 @@ export class MapCache {
           this.pieces.set(key, p);
         }
         p.used = now;
-        if (p.pending) continue;
-        if (!p.canvas || p.full) fills.push({ piece: p, patch: false });
-        else if (p.dirty) patches.push({ piece: p, patch: true });
+        if (p.pending || seen.has(key)) continue;
+        seen.add(key);
+        if (!p.canvas || p.full) into.push({ piece: p, patch: false });
+        else if (p.dirty) patchInto.push({ piece: p, patch: true });
       }
-    }
+    };
+    // On screen: the whole-map backdrop, the detail shown, and a coarser stand-in.
+    const ov = this.overviewLevel();
+    if (ov > level) want(ov, Infinity, Infinity, fills, patches);
+    for (const lv of [level, level + 2]) want(lv, w, h, fills, patches);
+    // Ahead of time, round the view: coarse first (wide), then the detail (nearer).
+    want(level + 2, w * AHEAD_COARSE, h * AHEAD_COARSE, ahead, ahead);
+    want(level, w * AHEAD, h * AHEAD, ahead, ahead);
     // Coarse fills before fine ones.
     fills.sort((a, b) => b.piece.level - a.piece.level);
-    this.queue = [...patches, ...fills];
+    this.queue = [...patches, ...fills, ...ahead];
     this.evict();
     this.pump();
   }

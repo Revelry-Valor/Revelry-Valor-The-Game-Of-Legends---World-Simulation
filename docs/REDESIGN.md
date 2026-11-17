@@ -1109,6 +1109,10 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *The population heat map* is in the View panel ("Population heat map"), not Map look.
 - *Spreading by what suits the race:* families spread into a point as easily as it suits them, by the species' (or race's) preferred climates, ground covers and heights; along coasts and rivers half as fast again. In country that doesn't suit them most of those setting out turn back, so the spread there is several times slower (for example, men into jungle if Humans don't list it). Peoples with no preferences set spread evenly. Setting these preferences per race is for the race options.
 
+**Designer's notes: climate updates and map drawing**
+- *The climate updates only when asked:* painting marks it out of date ("Climate is out of date: press Update climate", the button highlighted) instead of working it out again after every pause. An *Auto update* box beside the button turns the old behaviour back on (remembered on this device; off to begin with).
+- *Panning draws ahead:* besides what is on screen, the map's pictures are drawn ahead of time in a ring round the view (nearly twice its size at the zoom shown, three times its size a little coarser), and a coarse picture of the whole map is always kept as a backdrop, so moving across the map finds the pictures ready, or at worst a coarse stand-in, never blank.
+
 **Build order (proposed)**
 1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).
 2. *Settlements from density:* founding at the best spot, belonging to the land's holder or standing alone, growth, villages joining towns (a day's walk or ride), and the pooled stores and feedback.
