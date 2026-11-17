@@ -6,6 +6,7 @@ import type { RaceInfo } from './sim';
 import type { Caravan, Settlement, SimState } from './state';
 import { allRail, knows, pathCells, pathSpeed, TRAIN_COAL_PER_100KM, WAYS } from './ways';
 import { AIR_PACE, nextWaypoint, routePlan, SHIP_PACE, type RoutePlan } from './routes';
+import { stepCost, traderWay } from './roads';
 import { cultureFx, note } from './culture';
 import { acceptance, noteBetween } from './cultureChange';
 
@@ -332,6 +333,16 @@ export function tradeMonth(c: TradeContext): void {
     if (best.train) a.economy!.stores.coal -= best.coal;
     a.economy!.away = (a.economy!.away ?? 0) + people;
     const cv: Caravan = { id: sim.nextId++, from: a.id, to: best.b.id, clan: a.clan, x: a.x, y: a.y, leg: 'out', cargo: best.cargo, people, animals, speed, worth: best.worth, started: sim.day, ...(best.train ? { train: true } : {}), ...(best.ship ? { ship: true } : {}), ...(best.air ? { air: true } : {}) };
+    // Over land, the way it walks: the route's, or (while the route is young) one of its own (roads.ts).
+    if (!cv.ship && !cv.air) {
+      const [x, y] = a.id < best.b.id ? [a.id, best.b.id] : [best.b.id, a.id];
+      // A train keeps to the railway.
+      const way = best.train ? pathBetween(c, a, best.b) : traderWay(sim, env, sim.routes.find((r) => r.a === x && r.b === y), c.cellAt(a.x, a.y), c.cellAt(best.b.x, best.b.y));
+      if (way && way.length > 1) {
+        cv.path = way;
+        cv.at = 0;
+      }
+    }
     sim.caravans.push(cv);
     traded(a, sim.day).out += best.worth;
     traded(a, sim.day).caravans++;
@@ -342,6 +353,54 @@ function traded(st: Settlement, day: number) {
   const e = st.economy!;
   if (!e.traded || day - e.traded.since >= 360) e.traded = { out: 0, in: 0, caravans: 0, since: day };
   return e.traded;
+}
+
+/**
+ * A day's walk along a caravan's way (out toward the far end, home toward the start): each point
+ * it comes onto is worn. Returns whether it has reached the end of its leg.
+ */
+function walkPath(c: TradeContext, cv: Caravan): boolean {
+  const { sim, env } = c;
+  const P = cv.path!;
+  const dir = cv.leg === 'out' ? 1 : -1;
+  const end = dir > 0 ? P.length - 1 : 0;
+  let pos = Math.max(0, Math.min(P.length - 1, cv.at ?? (dir > 0 ? 0 : end)));
+  let budget = cv.speed;
+  const wear = (cv.people + cv.animals) / 10;
+  while (budget > 0) {
+    const i = dir > 0 ? Math.floor(pos) : Math.ceil(pos);
+    if (i === end) {
+      pos = end;
+      break;
+    }
+    const j = i + dir;
+    const cost = stepCost(sim, env, P[i], P[j]);
+    // The way has gone (flooded, or the land changed): it stops where it is.
+    if (!Number.isFinite(cost)) break;
+    const need = cost * (1 - Math.abs(pos - i));
+    if (budget >= need) {
+      budget -= need;
+      pos = j;
+      sim.traffic[P[j]] += wear;
+    } else {
+      pos += (dir * budget) / Math.max(cost, 1e-6);
+      budget = 0;
+    }
+  }
+  cv.at = pos;
+  // Where it is: between the points it is walking between.
+  const i = Math.floor(pos);
+  const f = pos - i;
+  const a = P[i];
+  const b = P[Math.min(P.length - 1, i + 1)];
+  const ax = env.x0 + (a % env.w) * env.step;
+  const ay = env.y0 + Math.floor(a / env.w) * env.step;
+  let dx = env.x0 + (b % env.w) * env.step - ax;
+  if (env.wrapKm && Math.abs(dx) > env.wrapKm / 2) dx -= Math.sign(dx) * env.wrapKm;
+  cv.x = ax + dx * f;
+  cv.y = ay + (env.y0 + Math.floor(b / env.w) * env.step - ay) * f;
+  if (env.wrapKm) cv.x = ((cv.x % env.wrapKm) + env.wrapKm) % env.wrapKm;
+  return pos === end;
 }
 
 /** Each day: caravans walk on (round whatever blocks the way), barter on arrival, and come home. */
@@ -358,6 +417,17 @@ export function caravansDay(c: TradeContext): void {
     }
     if (!goal || (cv.leg === 'out' && goal.ruined)) {
       cv.leg = 'home';
+      continue;
+    }
+    // On its way over land, point to point: wearing it as it goes, slower on rough ground and at fords.
+    if (cv.path && !cv.ship && !cv.air) {
+      if (walkPath(c, cv)) {
+        if (cv.leg === 'out') arriveThere(c, cv, home, goal);
+        else arriveHome(c, cv, home);
+      } else if (sim.day - cv.started > 200) {
+        if (cv.leg === 'out') cv.leg = 'home';
+        else arriveHome(c, cv, home);
+      }
       continue;
     }
     // Feet on the ground: the way gets worn.
@@ -454,7 +524,7 @@ function arriveThere(c: TradeContext, cv: Caravan, home: Settlement, b: Settleme
   const [x, y] = home.id < b.id ? [home.id, b.id] : [b.id, home.id];
   let route = sim.routes.find((r) => r.a === x && r.b === y);
   if (!route) {
-    route = { a: x, b: y, trips: 0, worth: 0, last: sim.day };
+    route = { a: x, b: y, trips: 0, worth: 0, last: sim.day, ...(cv.path ? { path: cv.path, scouted: 1 } : {}) };
     sim.routes.push(route);
     const ca = sim.clans.find((q) => q.id === home.clan)?.name;
     const cb = sim.clans.find((q) => q.id === b.clan)?.name;

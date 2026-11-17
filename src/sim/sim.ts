@@ -6,6 +6,7 @@ import { digYear, driftYear, layerFood, layerRoom, layerSpot, layerWays, LAYER_N
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
 import { holdYear, type Presence } from './holding';
+import { straightCells } from './roads';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
 import { PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
@@ -1139,6 +1140,14 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   const { pactRoads } = politicsYear({ ...nc, newClan: (from) => newClan(sim, lib, from.species, from.race, from.culture, from.id) });
   // Going to war (wars.ts).
   warsYear(warContext(sim, env, lib, info));
+  // Village paths: short, straight paths from a town to its joined villages, walked every day;
+  // part of the town, made by no trader (roads.ts).
+  for (const v of sim.settlements) {
+    if (v.partOf === undefined || v.ruined) continue;
+    const t = sim.settlements.find((q) => q.id === v.partOf && !q.ruined);
+    if (!t) continue;
+    for (const k of straightCells(env, t.x, t.y, v.x, v.y, (x, y) => cellOf(env, x, y))) sim.traffic[k] = Math.max(sim.traffic[k], VILLAGE_PATH);
+  }
   // Trails from use; roads and railways built, kept up, or let go; bridges by settled realms (ways.ts).
   const clanById = new Map(sim.clans.map((q) => [q.id, q]));
   waysYear({ sim, env, lib, cellAt: (x, y) => cellOf(env, x, y), log: (text, x, y) => log(sim, text, x, y), royalRoads: [...royalRoads, ...pactRoads], bridges: (st) => !!clanById.get(st.clan) && !tribalRule(lib, clanById.get(st.clan)!) });
@@ -1327,6 +1336,8 @@ const FOUND_PER_YEAR = 4;
 /** The share of the families round the spot that settle in the new village. */
 const FOUND_TAKE = 0.7;
 /** A day's walk and a day's ride (km): how far a town's joined villages may be. */
+/** Traffic a village path keeps up each year (a trail, see ways.ts). */
+const VILLAGE_PATH = 25;
 export const DAY_WALK = 30;
 export const DAY_RIDE = 65;
 const xOfCell = (env: Env, k: number) => env.x0 + (k % env.w) * env.step;

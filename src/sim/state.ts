@@ -376,6 +376,9 @@ export interface Caravan {
   ship?: boolean;
   /** By airship, straight through the open-air provinces (towns that know airships). */
   air?: boolean;
+  /** On land: the way it walks (grid points from home to there), and how far along it is (roads.ts). */
+  path?: number[];
+  at?: number;
 }
 
 /** A trade route between two settlements: how often it is used and how much goes along it. */
@@ -387,6 +390,9 @@ export interface Route {
   last: number;
   /** Trips at the start of this year (so the year's trips are trips − mark). */
   mark?: number;
+  /** The way traders take (grid points, from one end to the other), and how many trips have scouted it (roads.ts). */
+  path?: number[];
+  scouted?: number;
 }
 
 /**

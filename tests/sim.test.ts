@@ -13,6 +13,7 @@ import { borderMap } from '../src/ui/borders';
 import { ensureRealm, nationsYear, type NationContext } from '../src/sim/nations';
 import { hasPact, noteAttack, politicsYear, relationOf, spiesDay, type PoliticsContext } from '../src/sim/politics';
 import { waysYear } from '../src/sim/ways';
+import { findWay } from '../src/sim/roads';
 import { armiesDay, conquer, declareWar, overlordOf, raiseArmy, wallLevel, warOutlook, warsMonth, warsYear, type WarContext } from '../src/sim/wars';
 import { newCulture, newFaith, newGod, newGovernment } from '../src/core/library';
 import { championMight, faithLoyalty, faithOf, faithYear, type FaithContext } from '../src/sim/faith';
@@ -894,18 +895,25 @@ describe('politics', () => {
     const sim = newSim(env, 413);
     const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 900, [...farming, 'roads', 'bridges', 'masonry'])!;
     const b = addDawnCity(sim, env, lib, elfId(), 6000 + env.step * 6, yAt(-12), 900, farming)!;
-    const cells = pathCells(env, a.x, a.y, b.x, b.y, cellOf);
-    const k = cells[Math.floor(cells.length / 2)];
-    const was = env.fresh[k];
-    env.fresh[k] = 1;
+    // A river running north and south between them.
+    const mid = cellOf(6000 + env.step * 3, yAt(-12));
+    const river: number[] = [];
+    for (let j = -12; j <= 12; j++) river.push(mid + j * env.w);
+    const was = river.map((q) => env.fresh[q]);
+    river.forEach((q) => (env.fresh[q] = 1));
     try {
+      const cells = findWay(sim, env, cellOf(a.x, a.y), cellOf(b.x, b.y))!.cells;
+      const k = cells.find((q) => env.fresh[q])!;
+      expect(k).toBeDefined();
+      // Walked already (roads are built only on ways in use).
+      for (const q of cells) [sim.way[q], sim.traffic[q]] = [1, 30];
       const ford = pathSpeed(sim, cells, env.fresh);
       a.economy!.stores = { ...a.economy!.stores, stone: 500, hardwood: 500 };
       for (let y = 0; y < 5 && !sim.bridge?.[k]; y++) waysYear({ sim, env, lib, cellAt: cellOf, log: () => {}, royalRoads: [[a.id, b.id]], bridges: () => true });
       expect(sim.bridge![k]).toBe(1);
       expect(pathSpeed(sim, cells, env.fresh)).toBeGreaterThan(ford * 1.5);
     } finally {
-      env.fresh[k] = was;
+      river.forEach((q, i) => (env.fresh[q] = was[i]));
     }
   });
 });

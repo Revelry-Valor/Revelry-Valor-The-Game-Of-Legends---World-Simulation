@@ -874,8 +874,22 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             g.strokeStyle = `rgba(255,214,110,${Math.min(0.95, 0.5 + r.trips / 30)})`;
             g.lineWidth = 2 + Math.min(3, r.trips / 10);
             g.beginPath();
-            g.moveTo(ax, ay);
-            g.lineTo(bx, by);
+            if (r.path && r.path.length > 1) {
+              // Along the way its traders take (roads.ts).
+              let [px, py] = [0, 0];
+              r.path.forEach((k, i) => {
+                let [x, y] = at(e.x0 + (k % e.w) * e.step, e.y0 + Math.floor(k / e.w) * e.step, c);
+                // Across the wrap: keep to the near copy.
+                if (i && Math.abs(x - px) > e.step * scale * 2) x = px + Math.sign(px - x) * e.step * scale;
+                if (i) g.lineTo(x, y);
+                else g.moveTo(x, y);
+                [px, py] = [x, y];
+              });
+              void py;
+            } else {
+              g.moveTo(ax, ay);
+              g.lineTo(bx, by);
+            }
             g.stroke();
           }
           g.setLineDash([]);

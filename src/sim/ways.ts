@@ -4,6 +4,7 @@ import { resInfoOf } from './economy';
 import type { Settlement, SimState } from './state';
 import { knows } from './tech';
 import { cellsAlong, routePlan } from './routes';
+import { betterWays, findWay } from './roads';
 export { knows };
 
 /**
@@ -15,7 +16,8 @@ export { knows };
  * Busy trade routes are improved by whichever end can. Trains need the whole way laid as railway,
  * and burn coal for each run.
  *
- * Realms build royal roads from their capital to their towns (nations.ts). Bridges are a
+ * Realms build royal roads from their capital to their towns (nations.ts), but only over ways
+ * already in use; traders find the ways (roads.ts). Bridges are a
  * nation's choice: where a settled realm that knows stone bridges builds a road over a river (to
  * shorten the way between its towns, to draw trade along a busy route, or as a pact's term of
  * shared roads between capitals). Elsewhere rivers are forded, slowly.
@@ -149,11 +151,17 @@ export function waysYear(c: WaysContext): void {
     if (sim.way[k] === 0 && sim.traffic[k] >= TRAIL_FORMS) sim.way[k] = 1;
     else if (sim.way[k] === 1 && sim.traffic[k] < TRAIL_FADES) sim.way[k] = 0;
   }
-  // Upkeep, by keeper.
+  // Upkeep, by keeper. A built way nobody uses any more is not kept up: it falls back a tier a
+  // year (an old road left when traffic moved to a better one fades away).
   const owed = new Map<number, { cost: Record<string, number>; cells: number[] }>();
   for (let k = 0; k < env.n; k++) {
     const t = sim.way[k];
     if (t < 2) continue;
+    if (sim.traffic[k] < TRAIL_FADES) {
+      sim.way[k] = t - 1;
+      if (sim.way[k] < 2) sim.wayKeeper[k] = -1;
+      continue;
+    }
     const keeper = sim.wayKeeper[k];
     const o = owed.get(keeper) ?? { cost: {}, cells: [] };
     const st = sim.settlements.find((q) => q.id === keeper);
@@ -185,7 +193,17 @@ export function waysYear(c: WaysContext): void {
     if (mine) add(mine.cost, 1);
     st.economy.reserve = reserve;
   }
-  // Busy routes are improved by whichever end can.
+  // Better ways: a route whose traders have found a much quicker way now takes it (roads.ts).
+  const at = (id: number) => {
+    const st = sim.settlements.find((q) => q.id === id && !q.ruined);
+    return st ? c.cellAt(st.x, st.y) : -1;
+  };
+  for (const r of betterWays(sim, env, at)) {
+    const a = sim.settlements.find((q) => q.id === r.a);
+    const b = sim.settlements.find((q) => q.id === r.b);
+    if (a && b && r.trips >= 5) c.log(`Traders between ${a.name} and ${b.name} found a better way; the old one will fade.`, a.x, a.y);
+  }
+  // Busy routes are improved by whichever end can, along the way their traders take.
   for (const r of sim.routes) {
     const yearTrips = r.trips - (r.mark ?? 0);
     r.mark = r.trips;
@@ -193,8 +211,8 @@ export function waysYear(c: WaysContext): void {
     const a = sim.settlements.find((q) => q.id === r.a && !q.ruined);
     const b = sim.settlements.find((q) => q.id === r.b && !q.ruined);
     if (!a || !b) continue;
-    buildToward(c, a, b);
-    buildToward(c, b, a);
+    buildToward(c, a, b, '', r.path);
+    buildToward(c, b, a, '', r.path);
   }
   // Royal roads: a realm's capital ties its towns to it (nations.ts).
   for (const [from, to] of c.royalRoads ?? []) {
@@ -204,16 +222,24 @@ export function waysYear(c: WaysContext): void {
   }
 }
 
-/** A year's building on the way from one settlement toward another, at the best tier it can build and pay for. */
-function buildToward(c: WaysContext, from: Settlement, to: Settlement, kind = ''): void {
+/**
+ * A year's building on the way from one settlement toward another, at the best tier it can build
+ * and pay for: along the way traders take (or the easiest way, roads.ts), and only where it is
+ * already in use (a worn trail at least). Nobody builds a road nobody walks.
+ */
+function buildToward(c: WaysContext, from: Settlement, to: Settlement, kind = '', path?: number[]): void {
   const { sim, env, lib } = c;
   const best = bestWay(lib, from);
   if (best.tier < 2) return;
-  const cells = pathCells(env, from.x, from.y, to.x, to.y, c.cellAt);
+  const fk = c.cellAt(from.x, from.y);
+  const tk = c.cellAt(to.x, to.y);
+  let cells = path && path.length > 1 ? (path[0] === fk ? path : path[path.length - 1] === fk ? [...path].reverse() : path) : findWay(sim, env, fk, tk)?.cells ?? [];
+  if (!cells.length) cells = pathCells(env, from.x, from.y, to.x, to.y, c.cellAt);
   let built = 0;
   for (let i = 0; i < cells.length; i++) {
     const k = cells[i];
     if (built >= BUILD_PER_YEAR) break;
+    if (sim.way[k] < 1) continue;
     if (sim.way[k] >= best.tier) {
       // An old road over an unbridged river: bridge it when it can.
       if (crossing(cells, i, env.fresh) && !sim.bridge?.[k] && c.bridges?.(from) && knows(lib, from, 'bridges') && pay(env, from, BRIDGE_COST)) {
@@ -235,5 +261,5 @@ function buildToward(c: WaysContext, from: Settlement, to: Settlement, kind = ''
     }
     if (first) c.log(`${from.name} began ${best.tier === 4 ? `a ${kind}railway` : `a ${kind}${WAYS[best.tier].name.toLowerCase()}`} toward ${to.name}.`, from.x, from.y);
   }
-  if (built && cells.every((q) => sim.way[q] >= best.tier)) c.log(`The ${kind}${WAYS[best.tier].name.toLowerCase()} between ${from.name} and ${to.name} is finished.`, to.x, to.y);
+  if (built && cells.every((q) => sim.way[q] >= best.tier || !env.land[q])) c.log(`The ${kind}${WAYS[best.tier].name.toLowerCase()} between ${from.name} and ${to.name} is finished.`, to.x, to.y);
 }

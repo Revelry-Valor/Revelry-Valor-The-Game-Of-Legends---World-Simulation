@@ -1065,6 +1065,19 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Contested land:* where another realm's presence is at least 45% of the holder's, the province is contested. It is hatched faintly in the other realm's colour, and the border between them is drawn faded and dotted. The hover and province card say how many the other realm's people are against the holder's.
 - *Gone:* the old rule that a province changed hands after a year of another clan using it while its holders were away. Tribes and settlements still take unheld land they work at once.
 
+**Built (step 4): roads** (`sim/roads.ts`)
+- *Finding a way:* a trader crosses the land point to point over the climate grid (eight neighbours), taking the easiest way.
+  - Hills, highlands and high mountains cost more (1.4, 1.8 and 3 times); peaks can't be crossed. Jungle, marsh, dunes, glacier and forest cost more too.
+  - Coming onto a river with no bridge costs a ford.
+  - On a worn way the ground matters much less (a trail takes 70% of its roughness, a built way 30%), and the way's own speed counts. So traders follow the trails and roads already there as far as they help, then break off onto a new path, and the branches grow into a network.
+- *Scouting a route:* on the first three trips between two settlements, each trader reads the land a little differently and tries a way of their own. The best found becomes the route's way, and from then on every caravan goes that way. A train keeps to the railway.
+- *Caravans walk the way:* point by point, slower on rough ground and at fords, faster on roads. Each point they come onto is worn, so trails form along the route's way. On the map, a trade route is drawn along its way.
+- *Better ways win:* once a year each settled route's way is checked against the best way now (new roads, bridges, railways). When one is at least 15% quicker the route takes it ("found a better way; the old one will fade").
+- *Old ways fade:* an unused trail goes, as before. A built way nobody walks is no longer kept up and falls back a tier a year.
+- *Building only where used:* busy routes are built up along the way their traders take, and royal and pact roads along the easiest way. Either way, only over stretches already worn into at least a trail; nobody paves a road nobody walks.
+- *Village paths:* each year a straight path from a town to each of its joined villages is kept worn as a trail. These paths are part of the town; no trader makes them.
+- *Not yet:* armies, migrants and messengers still move province to province and don't seek out the roads.
+
 **Build order (proposed)**
 1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).
 2. *Settlements from density:* founding at the best spot, belonging to the land's holder or standing alone, growth, villages joining towns (a day's walk or ride), and the pooled stores and feedback.
