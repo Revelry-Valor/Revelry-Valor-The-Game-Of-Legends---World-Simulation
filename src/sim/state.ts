@@ -561,6 +561,11 @@ export interface SimState {
   /** Monster tides out of broken rifts, and the hordes their alphas lead (monsters.ts). */
   tides?: Tide[];
   hordes?: Horde[];
+  /**
+   * Rifts held off (the World's switch): no new rift opens, none breaks, and the monster tides
+   * neither spread nor send out hordes (hordes already out go on). Rifts open stay, and are worked.
+   */
+  riftsHeld?: boolean;
   /** Tunnels dug between towns (Phase 12): underground roads. */
   tunnels?: { a: number; b: number; ax: number; ay: number; bx: number; by: number; clan: number; day: number }[];
   /** Ways down dug by tunnelers where there was no cave entrance. */

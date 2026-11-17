@@ -7,7 +7,7 @@ import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
-import { addDawnCity, addTribe, clanLand, eligibleRaces, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
+import { addDawnCity, addTribe, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
@@ -335,13 +335,31 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   const speedSeg = choice('Speed (a second)', SPEEDS.map(({ value, label }) => ({ value, label })), String(speed), (v) => {
     speed = Number(v);
   });
-  const bar = h('div', { class: 'sim-bar', hidden: true }, playBtn, speedSeg, ...skipBtns, dateEl);
+  // Rifts held off (no new rifts, none breaking, no monsters coming out), until let go again.
+  const riftBtn = h('button', {
+    type: 'button',
+    class: 'ghost small',
+    title: 'Hold off the rifts: while held, no new rift opens, none breaks, and monster tides neither spread nor send out hordes (hordes already out go on). Rifts already open stay, and are still worked.',
+    onclick: () => {
+      if (!sim) return;
+      sim.riftsHeld = !sim.riftsHeld;
+      if (sim.riftsHeld) log(sim, 'The rifts are held off: none will open or break until they are let go.');
+      else log(sim, 'The rifts are let go: they may open and break again.');
+      d.changed();
+      updateBar();
+      render();
+    },
+  });
+  const bar = h('div', { class: 'sim-bar', hidden: true }, playBtn, speedSeg, ...skipBtns, riftBtn, dateEl);
   const updateBar = () => {
     const has = ready() && alive();
     bar.hidden = !has && !active;
     playBtn.textContent = playing ? 'Pause' : 'Play';
     playBtn.disabled = !has || busy;
     skipBtns.forEach((b) => (b.disabled = !has || busy));
+    riftBtn.textContent = sim?.riftsHeld ? 'Rifts: held off' : 'Rifts: on';
+    riftBtn.setAttribute('aria-pressed', sim?.riftsHeld ? 'true' : 'false');
+    riftBtn.disabled = !has || busy;
     dateEl.textContent = !sim ? '' : busy ? `${dateText(sim.day)} · running…` : dateText(sim.day);
   };
 

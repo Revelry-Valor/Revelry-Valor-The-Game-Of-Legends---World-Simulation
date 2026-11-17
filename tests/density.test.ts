@@ -137,6 +137,15 @@ describe('wilderness density', () => {
       expect(sim.events.some((e) => /settled together/.test(e.text))).toBe(true);
     }, 120000);
 
+    it('lets a growing town keep its people: no bands sent off as new tribes', () => {
+      const sim = newSim(env, 9);
+      const city = addDawnCity(sim, env, lib, humanId(), 1500, 1000, 1200, farming)!;
+      stepDays(sim, env, lib, 360 * 8);
+      expect(sim.tribes).toHaveLength(0);
+      expect(sim.events.some((e) => /went out from/.test(e.text))).toBe(false);
+      expect(city.pop).toBeGreaterThan(1000);
+    }, 120000);
+
     it('joins villages within a day’s walk to the town of their realm, which feeds them all as one', () => {
       const sim = newSim(env, 8);
       const city = addDawnCity(sim, env, lib, humanId(), 1500, 1000, 1500, farming)!;

@@ -39,6 +39,7 @@ export interface PackedSim {
   rifts?: SimState['rifts'];
   tides?: SimState['tides'];
   hordes?: SimState['hordes'];
+  riftsHeld?: boolean;
   tunnels?: SimState['tunnels'];
   dug?: SimState['dug'];
   drift?: SimState['drift'];
@@ -136,6 +137,7 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     rifts: sim.rifts ?? [],
     tides: sim.tides ?? [],
     hordes: sim.hordes ?? [],
+    ...(sim.riftsHeld ? { riftsHeld: true } : {}),
     tunnels: sim.tunnels ?? [],
     dug: sim.dug ?? [],
     drift: sim.drift ?? {},
@@ -227,6 +229,7 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     rifts: Array.isArray(p.rifts) ? p.rifts : [],
     tides: Array.isArray(p.tides) ? p.tides : [],
     hordes: Array.isArray(p.hordes) ? p.hordes : [],
+    ...(p.riftsHeld ? { riftsHeld: true } : {}),
     tunnels: Array.isArray(p.tunnels) ? p.tunnels : [],
     dug: Array.isArray(p.dug) ? p.dug : [],
     drift: p.drift && typeof p.drift === 'object' ? p.drift : {},

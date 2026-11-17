@@ -1042,8 +1042,8 @@ This reworks a large part of the simulation. Where it disagrees with the older s
   - 70% of the families round the spot move in.
   - It belongs to whoever holds the land. In land nobody holds, it stands on its own (a clan of its own).
 - *Overflow:*
-  - A town past its first size (300, 450 for a province's seat, 900 for a dawn city) now keeps growing while its land feeds it. About one year in four it sends a small band out (4–8% of its people): to another layer if it can reach one, otherwise into the wild round it, or as a new tribe.
-  - Hungry or crowded towns, and nomads, send more out, and more often, as before.
+  - A town past its first size (300, 450 for a province's seat, 900 for a dawn city) now keeps growing while its land feeds it. (At first, about one year in four, it sent a small band out; that is gone, see "Changed after step 4".)
+  - Hungry or crowded towns lose more people, and more often.
   - Villages no longer jump straight from towns: they form from the wild.
   - The monthly trickle from a fed settlement into the wild is 0.05%.
 - *Joining:* each year a village joins the nearest town (1,000 or more, a city or a dawn city) of its own realm within a day's walk (30 km), or a day's ride (65 km) if the town knows riding, unless another town has it already.
@@ -1077,6 +1077,19 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Building only where used:* busy routes are built up along the way their traders take, and royal and pact roads along the easiest way. Either way, only over stretches already worn into at least a trail; nobody paves a road nobody walks.
 - *Village paths:* each year a straight path from a town to each of its joined villages is kept worn as a trail. These paths are part of the town; no trader makes them.
 - *Not yet:* armies, migrants and messengers still move province to province and don't seek out the roads.
+
+**Changed after step 4 (the designer's call): no emigrant bands; rifts can be held off**
+- *Bands are warbands.* A band is the first fighting force of early peoples: it stays part of its town, village or tribe and comes home (the warbands and their sorties). Towns no longer send people off as "bands":
+  - A growing town keeps its people. Past its first size, about one year in four, some may settle another layer where the way is open (as before).
+  - A hungry or crowded town loses families to the wild round it (wilderness density), where villages may form of themselves.
+  - Towns no longer split off new tribes. Tribes still split themselves when they grow large.
+  - Families still go out into the wild: 0.05% of a fed settlement's people a month, and 0.1% from a town past its first size (spread a little wider). That is well under its births, so it still grows.
+  - Fixed: a village forms from the wild where the families within about 20 km of a spot are thick enough. This used to be measured over 1.5 grid points, so on a coarse grid it needed hundreds of families.
+  - Result (a 60-year world run on 40 years with the rifts held off): seats pass 1,000 within about 25 years, and by 40 years 14 towns had 55 villages joined to them. Before, only the dawn cities ever did.
+- *Holding off the rifts:* a button on the time bar ("Rifts: on" / "Rifts: held off"), saved with the world.
+  - While held, no new rift opens, none breaks, and monster tides neither spread nor send out hordes. Hordes already out go on until they are done.
+  - Rifts already open stay, and are still worked.
+  - It is meant for letting peoples grow and arm before the rifts come into play.
 
 **Build order (proposed)**
 1. *Wilderness density:* per race, spreading and dying out, eating game and wild plants (provinces totalling their stocks and regrowth), races sharing or pushing out; the heat map (total and by race).

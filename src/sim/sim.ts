@@ -165,6 +165,8 @@ function dist(env: Env, ax: number, ay: number, bx: number, by: number): number 
 }
 /** Share of a settlement's people that go out into the wild each month (when it is fed). */
 const WILD_TRICKLE = 0.0005;
+/** The same, from a town past its first size (its growth goes partly into the land round it). */
+const WILD_TRICKLE_FULL = 0.001;
 /** How a race lives in the wild (density.ts), with how well it can live at each point (worked out once). */
 const liveCache = new WeakMap<Env, Map<string, Float32Array>>();
 function densityRace(sim: SimState, env: Env, lib: Library, info: Info, race: string): DensityRace | null {
@@ -534,7 +536,7 @@ function chooseGrounds(sim: SimState, env: Env, lib: Library, t: Tribe): void {
 // ---------------------------------------------------------------------------------------------
 // Stepping
 
-const log = (sim: SimState, text: string, x?: number, y?: number) => {
+export const log = (sim: SimState, text: string, x?: number, y?: number) => {
   const e: SimEvent = { day: sim.day, text, x, y };
   sim.events.push(e);
   if (sim.events.length > 400) sim.events.splice(0, sim.events.length - 400);
@@ -984,9 +986,12 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     if (st.ruined || st.fed < 0.9 || st.pop < 60) continue;
     const ri = info(st);
     if (!ri) continue;
-    const out = st.pop * WILD_TRICKLE;
+    // A town past its first size sends more: families going out to live off the land round it
+    // (they stay its people's kin in the wild; they are not bands, which are warbands and come home).
+    const past = st.pop > (st.kind === 'dawn' ? 900 : st.seat ? 450 : 300);
+    const out = st.pop * (past ? WILD_TRICKLE_FULL : WILD_TRICKLE);
     st.pop -= out;
-    seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, settleRange(ri, st) * 2.5), out);
+    seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, settleRange(ri, st) * (past ? 3 : 2.5)), out);
   }
   // Round a town (its pooled stores and market) life in the wild is easier: the families grow faster.
   const boost = new Float32Array(env.n);
@@ -1013,7 +1018,8 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // Wars: weariness, peace, armies raised (wars.ts).
   if (sim.wars?.some((w) => w.ended === undefined)) warsMonth(warContext(sim, env, lib, info));
   // Rifts at breaking point, monster tides and their hordes (monsters.ts).
-  if (sim.rifts?.length || sim.tides?.length) monstersMonth({ ...warContext(sim, env, lib, info), name: () => makeName(sim, lib, '') });
+  // Held off (riftsHeld): none breaks, and the tides neither spread nor send out hordes.
+  if (!sim.riftsHeld && (sim.rifts?.length || sim.tides?.length)) monstersMonth({ ...warContext(sim, env, lib, info), name: () => makeName(sim, lib, '') });
 }
 
 /** What wars and armies need: the realms' context, and each people's strength and marching pace. */
@@ -1208,8 +1214,8 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
 }
 
 /**
- * Settlements over the year: a full one sends people out (a new tribe, or a village nearby, by the
- * race's way of life); ruins are rebuilt by those who come to them, the race they are holy to most of all.
+ * Settlements over the year: a growing one keeps its people (some may settle another layer); a
+ * hungry or crowded one loses families to the wild round it; ruins are rebuilt by those who come to them, the race they are holy to most of all.
  */
 function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // Every settlement on the painted land (older ones set down between the grid's points moved onto it).
@@ -1236,8 +1242,9 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     const full = st.pop > Math.min(cap, room) && st.fed >= 0.9;
     const pressed = (st.pop > 300 && st.fed < 0.85) || st.pop > room * 1.3;
     if (!full && !pressed) continue;
-    // A growing town past its first size sends a band out now and then (about one year in four),
-    // keeping most of its growth; the hungry, the crowded and nomads send more, and more often.
+    // A growing town keeps its people (they don't go off as bands: a band is a warband, which
+    // comes home). Now and then (about one year in four) some of them settle another layer where
+    // the way is open; the hungry and the crowded lose people, more and more often.
     const settledGrowth = full && !pressed && !nomads && st.pop <= room;
     if (settledGrowth && rand(sim) >= 0.25) continue;
     const n = Math.round(settledGrowth ? Math.max(30, Math.min(200, st.pop * (0.04 + 0.04 * rand(sim)))) : Math.max(80, Math.min(250, st.pop * (0.15 + 0.1 * rand(sim)))));
@@ -1283,29 +1290,12 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
         continue;
       }
     }
-    if (village && spot && spot.s > 0) {
-      // Its overflow goes out into the land round it as families in the wild (density.ts); where
-      // they gather thick enough, villages form of themselves (villagesFromWild).
-      st.pop -= n;
-      seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, R * 3), n);
-    } else {
-      st.pop -= n;
-      // A big clan's new tribe may start a clan of its own.
-      let clanId = clan.id;
-      if (sim.tribes.filter((t) => t.clan === clan.id).length >= 6 && tribalRule(lib, clan) && rand(sim) < 0.4) {
-        const nc = newClan(sim, lib, clan.species, clan.race, clan.culture, clan.id);
-        clanId = nc.id;
-      }
-      const go = spot ?? { x: st.x + Math.cos(a0) * R * 2, y: st.y + Math.sin(a0) * R * 2 };
-      // Those who leave take what the city knows to their clan.
-      const tc = sim.clans.find((q) => q.id === clanId);
-      if (tc) tc.techs = [...new Set([...(tc.techs ?? []), ...(st.techs ?? [])])];
-      const t: Tribe = { id: sim.nextId++, name: makeName(sim, lib, st.culture), clan: clanId, species: st.species, race: st.race, culture: st.culture, x: st.x, y: st.y, target: null, summer: { ...go }, winter: { ...go }, pop: n, fed: 1, warband: Math.round(n * ri.warShare), away: 0, founded: sim.day };
-      sim.tribes.push(t);
-      chooseGrounds(sim, env, lib, t);
-      t.target = localSummer(env, t, sim.day) ? { ...t.summer } : { ...t.winter };
-      log(sim, `${t.name} went out from ${st.name} to live on the land.`, st.x, st.y);
-    }
+    // A growing town keeps the rest of its growth.
+    if (settledGrowth) continue;
+    // Hungry or crowded: families leave for the land round it, to live in the wild (density.ts);
+    // where they gather thick enough, villages form of themselves (villagesFromWild).
+    st.pop -= n;
+    seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, R * 3), n);
   }
   // Ruins rebuilt.
   for (const st of sim.settlements) {
@@ -1361,7 +1351,8 @@ function villagesFromWild(sim: SimState, env: Env, lib: Library, info: Info): vo
       if (D[k] < 4) continue;
       const x = xOfCell(env, k);
       const y = yOf(env, k);
-      const hood = cellsNear(env, x, y, env.step * 1.5).filter((c) => env.land[c]);
+      // The families within about 20 km (the same on any grid; at least the point itself).
+      const hood = cellsNear(env, x, y, Math.max(0, 20 - env.step * 0.5)).filter((c) => env.land[c]);
       const sum = hood.reduce((n, c) => n + D[c], 0);
       if (sum < Math.max(FOUND_PEOPLE, FOUND_DENSITY * hood.length * env.cellArea)) continue;
       // Where they came from: the nearest settlement of their race (its ways, knowledge and faith).

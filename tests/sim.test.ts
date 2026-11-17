@@ -199,7 +199,7 @@ describe('dawn cities', () => {
     addDawnCity(sim, env, lib, elfId(), elfCity.x + 100, elfCity.y);
     expect(sim.settlements.filter((s) => s.kind === 'dawn' && s.race === elfId()).length).toBe(1);
   });
-  it('grows, and its people spread out as villages and tribes', () => {
+  it('grows, and its people spread out into the wild and settle villages', () => {
     const sim = newSim(env, 33);
     placeStart(sim, env, lib, [{ race: humanId(), tribes: 0, start: 'dawn', cityPop: 1000, techs: ['agriculture', 'husbandry', 'fishing'] }], cl.zone);
     stepDays(sim, env, lib, DAYS_PER_YEAR * 40);
@@ -1602,6 +1602,15 @@ describe('rifts', () => {
     expect(manaAtPlace(sim, renv, r.x, r.y)).toBeGreaterThanOrEqual(PERMANENT_MANA - 0.01);
     expect(RIFT_KINDS.some((k) => k.id === r.kind)).toBe(true);
   });
+  it('opens no new rift while they are held off', () => {
+    const sim = newSim(renv, 951);
+    sim.riftsHeld = true;
+    for (let y = 0; y < 60; y++) {
+      sim.day += DAYS_PER_YEAR;
+      riftsYear(rc(sim));
+    }
+    expect(sim.rifts ?? []).toHaveLength(0);
+  });
   it('opens short-lived rifts where corruption runs high, and closes them again', () => {
     const sim = newSim(env, 952);
     sim.corruption = new Float32Array(env.n);
@@ -1691,6 +1700,26 @@ describe('rift breaks, monster tides and hordes', () => {
     expect(weak.ruined).toBe(true);
     expect(sim.events.some((e) => e.text.includes('overrun'))).toBe(true);
   });
+  it('holds the rifts off when asked: none opens, none breaks, and no tide comes out', () => {
+    const sim = newSim(env, 963);
+    const at = spot((q) => (q % env.w) > 20 && (q % env.w) < env.w - 20);
+    const weak = addDawnCity(sim, env, lib, humanId(), at.x + env.step, at.y, 300, [])!;
+    weak.kind = 'village';
+    weak.warband = 10;
+    sim.rifts = [rift(at.x, at.y)];
+    sim.riftsHeld = true;
+    stepDays(sim, env, lib, 360 * 2);
+    expect(sim.tides ?? []).toHaveLength(0);
+    expect(weak.ruined).toBe(false);
+    // It never even came to a test of what holds it.
+    expect(sim.rifts![0].lastStand).toBeUndefined();
+    // Saved held; and let go again, a rift at breaking point with nothing holding it breaks.
+    expect(unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!.riftsHeld).toBe(true);
+    sim.riftsHeld = false;
+    Object.assign(sim.rifts![0], { strength: 1, hold: 'none', holder: -1 });
+    stepDays(sim, env, lib, 30);
+    expect(sim.tides?.length).toBe(1);
+  }, 120000);
   it('lets a strong encampment hold a breaking rift, pushing it back', () => {
     const sim = newSim(env, 962);
     const at = spot(() => true);

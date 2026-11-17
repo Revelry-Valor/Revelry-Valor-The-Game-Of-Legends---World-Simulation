@@ -104,7 +104,8 @@ export function riftsYear(c: RiftContext): void {
     sim.rifts = sim.rifts.filter((q) => q !== r);
     c.log(`The ${r.name} closed.`, r.x, r.y);
   }
-  openRifts(c, mana, corruption);
+  // Held off: no new rift opens.
+  if (!sim.riftsHeld) openRifts(c, mana, corruption);
   for (const r of sim.rifts) holdRift(c, r, mana);
 }
 
