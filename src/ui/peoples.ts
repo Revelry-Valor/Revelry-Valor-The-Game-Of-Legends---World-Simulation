@@ -3,11 +3,13 @@ import { raceMissing, type Library } from '../core/library';
 import type { Surface } from '../core/paint';
 import type { World } from '../core/world';
 import { attachLandAt, buildEnv, type Env } from '../sim/env';
+import { attraction, provinceAttraction, provinceLiving, type Attraction } from '../sim/attraction';
+import { RAIN_NAMES, rainClass } from '../core/climate';
 import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
-import { addDawnCity, addTribe, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
+import { addDawnCity, addTribe, attractionFor, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
@@ -63,6 +65,8 @@ export interface PeoplesDeps {
   openPeoples?(): void;
   /** The wilderness density to show: 'off', 'total', or a race id. */
   density?(): string;
+  /** The race whose attraction the map shows ('off' or a race id). */
+  attraction?(): string;
   /** The other layers' provinces, as far as they have been made (the peoples hold them too). */
   layerProvinces?(): LayerProvs;
   /** The provinces (the peoples hold land by province), and opening the Provinces tab to make them. */
@@ -89,6 +93,8 @@ export interface Peoples {
   live(): SimState | null;
   /** The races living in the wild (for the density map's choice). */
   densityRaces(): { id: string; name: string }[];
+  /** Every race the simulation can use (for the Attraction view's choice). */
+  attractionRaces(): { id: string; name: string }[];
   /** The selected settlement's or realm's resources (for the resource panel), or null. */
   resources(): ResourceView | null;
   dispose(): void;
@@ -107,6 +113,13 @@ const perSqMi = (v: number) => (v >= 10 ? Math.round(v).toLocaleString() : v >= 
 const DENSITY_TOP = 20;
 /** And below which it shows nothing. */
 const DENSITY_FLOOR = 0.005;
+/** A place's attraction for a race, part by part (attraction.ts). */
+function attractionText(a: Attraction): string {
+  const n = (v: number) => v.toFixed(2);
+  if (a.off) return `off limits: ${a.off}`;
+  const pulls = [`food ${n(a.food)}`, a.prefer ? `preferences ${a.prefer > 0 ? '+' : ''}${n(a.prefer)}` : '', a.resources ? `resources +${n(a.resources)}` : '', a.trade ? `trade +${n(a.trade)}` : '', a.mana ? `mana ${a.mana > 0 ? '+' : ''}${n(a.mana)}` : ''].filter(Boolean).join(' + ');
+  return `${n(a.score)} = water ${n(a.water)} (${a.waterWhy}) × climate ${n(a.climate)}${a.harsh.length ? ` (${a.harsh.join(', ')})` : ''} × (${pulls})`;
+}
 /** The heat map's colour for so many people per square mile (null: too few to show): pale yellow through orange and red to deep purple, on a log scale. */
 function densityColour(per: number): string | null {
   if (per < DENSITY_FLOOR) return null;
@@ -190,6 +203,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let resDirty = true;
   let densityImg: HTMLCanvasElement | null = null;
   let densityFills: (string | null)[] = [];
+  let attractFills: (string | null)[] = [];
+  let attractPaths: Path2D[] = [];
+  let attractPathsFor: unknown = null;
+  let attractKey = '';
+  let attractEnv: Env | null = null;
   let densityPaths: Path2D[] = [];
   let densityPathsFor: unknown = null;
   let densityKey = "";
@@ -508,6 +526,52 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       return active;
     },
     draw(g, at, scale, copies) {
+      // Where a race would live (attraction.ts): each province coloured by how much it draws them;
+      // off limits dark. Shown as soon as the land is known, before the peoples begin.
+      const aShow = d.attraction?.() ?? 'off';
+      const apm = d.provinces();
+      if (aShow !== 'off' && env && apm && env.prov.real && env.prov.count === apm.rings.length) {
+        const e0 = env;
+        if (attractKey !== `${aShow}|${apm.rings.length}` || attractEnv !== e0) {
+          const af = attractionFor(e0, lib(), aShow);
+          attractFills = Array.from({ length: e0.prov.count }, (_, p) => {
+            if (!af || e0.prov.kind[p] !== PK.land) return null;
+            const pa = provinceAttraction(e0, af.wants, e0.prov.cells.subarray(e0.prov.start[p], e0.prov.start[p + 1]), af.score);
+            if (!pa) return null;
+            if (pa.off >= 0.5) return 'rgba(30,28,34,0.62)';
+            // Red (poor) through yellow to green (much wanted).
+            const t = Math.max(0, Math.min(1, pa.score / 1.4));
+            const c = t < 0.5 ? [200, 60 + 340 * t, 50] : [200 - 300 * (t - 0.5), 230 - 40 * (t - 0.5), 50 + 40 * (t - 0.5)];
+            return `rgba(${c.map((v) => Math.round(Math.max(0, Math.min(255, v)))).join(',')},0.55)`;
+          });
+          attractKey = `${aShow}|${apm.rings.length}`;
+          attractEnv = e0;
+        }
+        if (attractPathsFor !== apm) {
+          attractPaths = apm.rings.map((rings) => {
+            const path = new Path2D();
+            for (const r of rings) {
+              path.moveTo(r[0], r[1]);
+              for (let i = 2; i < r.length; i += 2) path.lineTo(r[i], r[i + 1]);
+              path.closePath();
+            }
+            return path;
+          });
+          attractPathsFor = apm;
+        }
+        for (const c of copies) {
+          const [ox, oy] = at(0, 0, c);
+          g.save();
+          g.translate(ox, oy);
+          g.scale(scale, scale);
+          attractFills.forEach((fill, p) => {
+            if (!fill || !attractPaths[p]) return;
+            g.fillStyle = fill;
+            g.fill(attractPaths[p]);
+          });
+          g.restore();
+        }
+      }
       if (!ready()) return;
       const s = sim!;
       const e = env!;
@@ -1304,9 +1368,17 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       return true;
     },
     describe(x, y) {
-      if (!ready()) return null;
+      // The Attraction view's breakdown for the race shown, here.
+      const pre: InfoItem[] = [];
+      const aShow = d.attraction?.() ?? 'off';
+      if (aShow !== 'off' && env) {
+        const k = cellOf(x, y);
+        const af = attractionFor(env, lib(), aShow);
+        if (af && k >= 0 && env.land[k]) pre.push({ label: `Draws the ${raceName(aShow)}`, value: attractionText(attraction(env, af.wants, k)) });
+      }
+      if (!ready()) return pre.length ? pre : null;
       const s = sim!;
-      const out: InfoItem[] = [];
+      const out: InfoItem[] = [...pre];
       const push = (label: string, value: string) => out.push({ label, value });
       // Families in the wild here.
       {
@@ -2370,6 +2442,24 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           if (cmax >= 0.05) out.push({ label: 'Corruption', value: `${Math.round(cmax * 100)}%` });
         }
       }
+      // Living here: its climate, height and water (attraction.ts), and how much it draws the race shown.
+      if (P.kind[index] === PK.land) {
+        const cells = P.cells.subarray(P.start[index], P.start[index + 1]);
+        const lv = provinceLiving(env, cells);
+        if (lv) {
+          const F = (c: number) => `${Math.round((c * 9) / 5 + 32)}°F`;
+          const rainName = (r: number) => RAIN_NAMES[rainClass(r)];
+          out.push({ label: 'Seasons', value: `hottest ${F(lv.hot)}, coldest ${F(lv.cold)}; ${rainName(lv.wetSeason)} in the wetter season, ${rainName(lv.drySeason)} in the drier` });
+          out.push({ label: 'Height', value: `about ${Math.round((lv.heightKm * 3280.84) / 100) * 100} ft` });
+          out.push({ label: 'Fresh water', value: lv.fresh ? `a river or lake in it; ${Math.round(lv.nearWater * 100)}% of it within a short walk of fresh water` : Number.isFinite(lv.freshKm) ? `none in it; the nearest about ${Math.max(1, Math.round(lv.freshKm / 1.609))} mi off${lv.nearWater > 0 ? ` (${Math.round(lv.nearWater * 100)}% of it within a short walk)` : ''}` : 'none anywhere near' });
+          out.push({ label: 'Rain to live on', value: lv.rainFed >= 0.99 ? 'wet enough all over to live off the rain' : lv.rainFed > 0 ? `wet enough to live off the rain in ${Math.round(lv.rainFed * 100)}% of it` : 'not wet enough to live off the rain' });
+          if (lv.coast) out.push({ label: 'Coast', value: 'on the sea (salt water: fishing, not drinking)' });
+        }
+        const aShow = d.attraction?.() ?? 'off';
+        const af = aShow !== 'off' ? attractionFor(env, lib(), aShow) : null;
+        const pa = af ? provinceAttraction(env, af.wants, cells, af.score) : null;
+        if (pa) out.push({ label: `Draws the ${raceName(aShow)}`, value: pa.off >= 0.5 ? `off limits for most of it (${pa.why})` : `${pa.score.toFixed(2)}${pa.off > 0 ? `; ${Math.round(pa.off * 100)}% of it off limits (${pa.why})` : ''}` });
+      }
       let road = 0;
       for (let q = P.start[index]; q < P.start[index + 1]; q++) road = Math.max(road, sim?.way[P.cells[q]] ?? 0);
       if (road) out.push({ label: 'Best way', value: WAYS[road].name });
@@ -2415,6 +2505,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       return { lines, nodes, anchor: env.manaLand.anchor, grid: { x0: env.x0, y0: env.y0, step: env.step, w: env.w, h: env.h, wrapKm: env.wrapKm }, field: manaNow(sim, env) };
     },
     provincesChanged,
+    attractionRaces: () => eligibleRaces(lib()).map(({ race }) => ({ id: race.id, name: raceName(race.id) })),
     densityRaces: () => [...new Set([...Object.keys(sim?.density ?? {}).filter((id) => sim!.density![id].some((v) => v > 0)), ...(sim?.settlements ?? []).filter((q) => !q.ruined).map((q) => q.race), ...(sim?.tribes ?? []).map((t) => t.race)])].map((id) => ({ id, name: raceName(id) })),
     live: () => (sim && env && !gridProblem ? sim : null),
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),

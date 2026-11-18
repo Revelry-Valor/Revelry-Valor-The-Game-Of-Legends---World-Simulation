@@ -36,7 +36,7 @@ import type { MapOverlay } from './mapview';
 export function showWorld(app: App, start: World): () => void {
   let world = start;
   let dirty = false;
-  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay, density: 'off', layer: 'surface' as 'surface' | 'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3' };
+  const look = { style: 'satellite' as MapStyle, zones: false, grid: true, view: 'land' as MapView, season: 1 as 1 | -1, labels: 'all' as 'all' | 'main' | 'off', provinces: 'lines' as ProvinceDisplay, mana: 'off' as ManaDisplay, density: 'off', attraction: 'off', layer: 'surface' as 'surface' | 'underdark' | 'canopy' | 'sky1' | 'sky2' | 'sky3' };
 
   const status = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Saved');
   const save = () => {
@@ -569,6 +569,25 @@ export function showWorld(app: App, start: World): () => void {
     climateLegend.hidden = look.view === 'land';
   };
   renderClimateLegend();
+  /** The Attraction view: where a race would want to live (each province by how much it draws them; off limits dark). */
+  function attractionField(): HTMLElement {
+    const sel = h('select', { 'aria-label': 'Attraction' }) as HTMLSelectElement;
+    const fill = () => {
+      const races = peoples?.attractionRaces() ?? [];
+      sel.replaceChildren(h('option', { value: 'off' }, 'Hidden'), ...races.map((r) => h('option', { value: r.id }, r.name)));
+      if (look.attraction !== 'off' && !races.some((r) => r.id === look.attraction)) look.attraction = 'off';
+      sel.value = look.attraction;
+    };
+    fill();
+    sel.addEventListener('focus', fill);
+    sel.addEventListener('mousedown', fill);
+    sel.addEventListener('change', () => {
+      look.attraction = sel.value;
+      refreshDrops();
+      map.redraw();
+    });
+    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Attraction'), sel, h('span', { class: 'muted small hint' }, 'Where a race would want to live: each province from red (poor) through yellow to green (much wanted); dark where it won’t live at all (no fresh water within a short walk and too dry to live off the rain, or a climate past what it can bear). Hover for the reasons.'));
+  }
   /** The wilderness density map: hidden, everyone, or one race (the races living in the wild now). */
   function densityField(): HTMLElement {
     const sel = h('select', { 'aria-label': 'Population density' }) as HTMLSelectElement;
@@ -643,6 +662,8 @@ export function showWorld(app: App, start: World): () => void {
     climateLegend,
     // The population heat map: where the peoples live out in the wild.
     densityField(),
+    // Where a race would want to live.
+    attractionField(),
   );
 
   // ---- Layers ----
@@ -947,6 +968,7 @@ export function showWorld(app: App, start: World): () => void {
     openPeoples: () => showTab('peoples'),
     provinces: () => provinces?.map() ?? null,
     density: () => look.density,
+    attraction: () => look.attraction,
     layerProvinces: () => {
       const air = airProv?.maps();
       return { underdark: underProv?.map() ?? undefined, canopy: air?.get(0), sky1: air?.get(1), sky2: air?.get(2), sky3: air?.get(3) };
@@ -1152,7 +1174,7 @@ export function showWorld(app: App, start: World): () => void {
     return { el, refresh: () => (value.textContent = now()) };
   };
   const drops = [
-    drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}${look.density !== 'off' ? ' · population' : ''}`, false, mapPanel),
+    drop('View', () => `${MAP_NAMES[look.view] ?? look.view} · ${look.season === 1 ? 'northern summer' : 'northern winter'}${look.density !== 'off' ? ' · population' : ''}${look.attraction !== 'off' ? ' · attraction' : ''}`, false, mapPanel),
     drop('Map look', () => `${look.style === 'paper' ? 'Paper' : 'Satellite'}${look.zones ? ' · mountain zones' : ''}${look.provinces === 'lines' ? ' · province outlines' : look.provinces === 'colour' ? ' · provinces coloured' : ''}${look.mana === 'lines' ? ' · mana lines' : look.mana === 'heat' ? ' · mana heat map' : ''}`, false, lookPanel, zonesPanel),
     drop('Layers', () => `${look.layer === 'underdark' ? 'Showing the Underdark · ' : look.layer.startsWith('sky') ? `Showing sky layer ${look.layer.slice(3)} · ` : look.layer === 'canopy' ? 'Showing the canopy · ' : ''}${LAYERS.filter((l) => world.layers[l.id]).map((l) => l.name).join(', ') || 'Surface'}`, false, layersPanel),
     drop('Reference image', () => (world.reference ? 'One laid over the map' : 'None'), false, refPanel),

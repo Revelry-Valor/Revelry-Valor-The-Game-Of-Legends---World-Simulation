@@ -1109,6 +1109,32 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *The population heat map* is in the View panel ("Population heat map"), not Map look. It works province by province: each land province is coloured by the people per square mile living in it (families in the wild, and the people of its villages, towns and tribes; everyone, or one race), pale yellow through orange and red to deep purple. A province's card gives its people too. (A world without provinces yet still shows the wild families point by point.)
 - *Spreading by what suits the race:* families spread into a point as easily as it suits them, by the species' (or race's) preferred climates, ground covers and heights; along coasts and rivers half as fast again. In country that doesn't suit them most of those setting out turn back, so the spread there is several times slower (for example, men into jungle if Humans don't list it). Peoples with no preferences set spread evenly. Setting these preferences per race is for the race options.
 
+### Where peoples live: requirements and attraction (agreed with the designer)
+- *Each province reads its own data:* its seasons (hottest and coldest temperature), rain (in its wetter and drier season), height, fresh water (a river or lake in it, or how far the nearest is), whether it is wet enough to live off the rain, coast, resources, wild food and game. Its card shows them.
+- *Requirements first.* A race won't even try to live where a requirement fails, however attractive the rest:
+  - **Water:** best right by fresh water (a town or village beside a river or lake). People won't live more than a short walk from fresh water, unless the country is wet enough to live off the rain (as in a rainforest). Salt water alone doesn't do: an island people lives off its rain, or not at all, until later technology (wells, carrying water) lets villages spread further from water.
+  - **Climate:** the race's tolerances (1 poor to 5 excellent) for heat, cold, wet, dry and altitude, against the place. The more inhospitable a place, the harder it is to live there; far enough past a tolerance, off limits. Room is left for peoples to move in and adapt over generations (humans most of all): step 3.
+- *Then pulls add up* (food, the race's preferred climates, covers and heights, resources, trade, mana) *and pushes add up* (crowding, others' land, enemies).
+- *Priorities by race:* how much each pull counts is set per race; cultures add to and take away from them as they develop.
+- *Technology* that changes these (wells, carrying water and the like) comes later.
+- *An Attraction view* shows where a race would want to live.
+- **Build steps:** (1) province data and the attraction score, with the Attraction view; (2) race options in the Library (tolerances, water needs, preferences, priorities, adaptable); (3) hardship past tolerance, and adaptation over generations.
+
+**Built (step 1): the attraction score** (`sim/attraction.ts`)
+- *Water:* 1 by a river or lake; 0.75 within a short walk (10 km) of one; 0.6 where it is wet enough to live off the rain (very wet in one season and at least wet in the other); otherwise off limits. The distance to fresh water is worked out for every point across the land.
+- *Climate:* 1 within all tolerances, falling the further past each one; below 0.15, off limits ("too harsh: too hot, too dry…"). The limits for each tolerance level 1 to 5:
+  - heat (hottest season): 79, 86, 93, 100, 111 °F;
+  - cold (coldest season): 46, 32, 14, −4, −31 °F;
+  - dry (the wetter season's rain at least): from moist to almost none;
+  - wet (the drier season's rain at most): a middling tolerance bears rainforest;
+  - altitude: about 2,600, 5,200, 8,200, 11,500, 16,400 ft.
+  - Species with no tolerances set count as 3 for each (all of them, until step 2).
+- *Pulls:* food (wild plants, game, and fish by the coast or fresh water), preferences (+0.3 for a preferred climate, −0.2 for another; covers and heights smaller), resources (up to +0.3), trade (coast and river, up to +0.25), mana for those who feel it.
+- *The score* is water × climate × pulls. It replaces the old "how good a point is to live" everywhere: where tribes are placed and choose their seasonal grounds (off-limits ground is never chosen), where they settle, where villages form from the wild, and where wild families can live (they die out on off-limits land).
+- *Settling* thresholds were rescaled for the new score (rich at 1.1, good at 0.8; settled peoples settle at 0.6).
+- *The Attraction view* (View panel): choose a race and each province is coloured from red (poor) through yellow to green (much wanted), dark where it is off limits for most of it. Shown as soon as the land is known, before the peoples begin. Hovering gives the breakdown, for example "1.15 = water 0.60 (wet enough to live off the rain) × climate 1.00 × (food 1.62 + resources +0.30)", or "off limits: no fresh water, and too dry to live off the rain".
+- *The province card* shows its seasons and rain, height, fresh water (in it, or how far, and how much of it is within a short walk), how much of it is wet enough to live off the rain, the coast, and (with the Attraction view on) how much it draws that race.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

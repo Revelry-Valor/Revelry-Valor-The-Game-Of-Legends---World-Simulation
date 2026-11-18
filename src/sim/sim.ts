@@ -10,6 +10,7 @@ import { holdYear, type Presence } from './holding';
 import { straightCells } from './roads';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
 import { landCell, PLANT_K, type Env } from './env';
+import { attraction, type Wants } from './attraction';
 import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
@@ -298,18 +299,40 @@ export function addTribe(sim: SimState, env: Env, lib: Library, raceId: string, 
   return t;
 }
 
-/** How good a point is for a race to live: food over the year, water, and its preferred climates. */
-function liveScore(env: Env, ri: RaceInfo, k: number, cl?: { zone: Int8Array }): number {
-  if (!env.land[k] || !passable(env, ri, k)) return -1;
-  const food = (env.plant[0][k] + env.plant[1][k]) / 2 / PLANT_K;
-  let game = 0;
-  for (const b of env.beastInfo) if (!b.water) game += env.beastK[b.id][k] * b.meat;
-  const water = env.fresh[k] ? 0.4 : env.coast[k] ? 0.25 : 0;
-  const prefs = ri.race.climates.length ? ri.race.climates : ri.species.profile.climates;
-  const pref = prefs.length && cl ? (prefs.includes(cl.zone[k]) ? 1 : 0.3) : 1;
-  // Mana-sensitive peoples are drawn to dense mana, and unsettled where it is thin.
-  const mana = ri.manaSensitive ? 0.5 * (env.manaBase[k] - 0.2) : 0;
-  return (food + Math.min(1, game / 8) * 0.6 + water) * pref + mana;
+/** What a race asks of a place and what draws it (attraction.ts): its species' tolerances and preferences, the race's own climates. */
+export function wantsOf(env: Env, ri: RaceInfo): Wants {
+  const p = ri.species.profile;
+  return {
+    tolerances: { heat: p.heat ?? 3, cold: p.cold ?? 3, wet: p.wet ?? 3, dry: p.dry ?? 3, altitude: p.altitude ?? 3 },
+    climates: ri.race.climates.length ? ri.race.climates : p.climates,
+    covers: p.covers,
+    heights: p.mountainZones,
+    manaSensitive: ri.manaSensitive,
+    passable: (k) => passable(env, ri, k),
+  };
+}
+const attractCache = new WeakMap<Env, Map<string, Float32Array>>();
+/** A race's attraction (for the Attraction view and readouts): what it asks, and its score at each point (cached; −1 off limits). */
+export function attractionFor(env: Env, lib: Library, raceId: string): { wants: Wants; score: (k: number) => number } | null {
+  const ri = raceInfo(lib, raceId);
+  if (!ri) return null;
+  return { wants: wantsOf(env, ri), score: (k) => liveScore(env, ri, k) };
+}
+/**
+ * How much a race wants to live at a point (attraction.ts): its water and climate requirements,
+ * then food, preferences, resources, trade and mana. −1 where it won't live at all.
+ */
+function liveScore(env: Env, ri: RaceInfo, k: number, _cl?: { zone: Int8Array }): number {
+  if (k < 0) return -1;
+  let m = attractCache.get(env);
+  if (!m) attractCache.set(env, (m = new Map()));
+  let A = m.get(ri.race.id);
+  if (!A) {
+    A = new Float32Array(env.n).fill(NaN);
+    m.set(ri.race.id, A);
+  }
+  if (Number.isNaN(A[k])) A[k] = attraction(env, wantsOf(env, ri), k).score;
+  return A[k];
 }
 
 /**
@@ -539,9 +562,11 @@ function groundScore(sim: SimState, env: Env, ri: RaceInfo, t: Tribe, x: number,
   for (const o of sim.settlements) if (!o.ruined && dist(env, o.x, o.y, x, y) < ri.range * 3) crowd += o.pop / 300;
   const owner = sim.owner[k];
   const land = owner === t.clan ? 0.15 : owner < 0 ? 0.08 : -0.3;
-  const water = env.fresh[k] ? 0.3 : env.coast[k] ? 0.15 : 0;
+  // Where they would live at all (water, a climate they can bear): and how much it draws them.
+  const live = liveScore(env, ri, k);
+  if (live < 0) return -Infinity;
   const warmth = summerLocal ? 0 : 0.4 * Math.max(0, Math.min(1, (env.temp[s][k] + 15) / 25));
-  return food + water + warmth + land - crowd * 0.4;
+  return food + 0.5 * live + warmth + land - crowd * 0.4;
 }
 /** Can the tribe walk straight there? */
 function reachable(env: Env, ri: RaceInfo, ax: number, ay: number, bx: number, by: number): boolean {
@@ -1236,10 +1261,11 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
   if (k < 0 || !env.land[k] || !passable(env, ri, k)) return false;
   if (sim.settlements.some((s) => !s.ruined && !s.layer && dist(env, s.x, s.y, t.winter.x, t.winter.y) < ri.range * 3)) return false;
   const score = liveScore(env, ri, k);
-  const rich = score >= 1.4 ? 1 : score >= 1.05 ? 0.5 : 0;
+  // (The attraction: water and climate times the pulls, so lower than food alone.)
+  const rich = score >= 1.1 ? 1 : score >= 0.8 ? 0.5 : 0;
   let crowd = 0;
   for (const o of sim.tribes) if (o !== t && dist(env, o.x, o.y, t.x, t.y) < ri.range * 3) crowd += o.pop / 300;
-  const p = ri.lifestyle === 'Settled' ? (score >= 0.8 ? 0.3 : 0.05) : ri.lifestyle === 'Nomadic' ? (rich === 1 ? 0.01 : 0) : 0.02 + 0.08 * rich + 0.06 * Math.min(1, crowd);
+  const p = ri.lifestyle === 'Settled' ? (score >= 0.6 ? 0.3 : 0.05) : ri.lifestyle === 'Nomadic' ? (rich === 1 ? 0.01 : 0) : 0.02 + 0.08 * rich + 0.06 * Math.min(1, crowd);
   if (rand(sim) >= p) return false;
   const at = landPoint(env, t.winter.x, t.winter.y);
   const v: Settlement = { id: sim.nextId++, name: t.name, kind: 'village', clan: t.clan, species: t.species, race: t.race, culture: t.culture, x: at.x, y: at.y, pop: t.pop, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(t.pop, ri.need, foundingMonths(env, t.winter.x, t.winter.y, sim.day)), techs: [...(clan?.techs ?? [])] };
@@ -1405,7 +1431,7 @@ function villagesFromWild(sim: SimState, env: Env, lib: Library, info: Info): vo
       let spot = -1;
       let best = -Infinity;
       for (const c of cellsNear(env, x, y, env.step * 2.5)) {
-        if (!env.land[c] || !passable(env, ri, c)) continue;
+        if (!env.land[c] || !passable(env, ri, c) || liveScore(env, ri, c) < 0) continue;
         const water = env.fresh[c] === 1 || env.coast[c] === 1;
         if (!canSettle(knowsIt, water)) continue;
         const cx = xOfCell(env, c);

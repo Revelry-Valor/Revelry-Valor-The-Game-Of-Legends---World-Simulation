@@ -8,6 +8,7 @@ import type { Surface } from '../core/paint';
 import type { ProvinceMap } from '../core/provinces';
 import { attachProvinces, type ProvIndex } from './land';
 import { evaluate } from '../core/terrain';
+import { freshDistance } from './attraction';
 import { anchorOf, leyLines, manaField, naturalNodes, rootLines, type ManaLine, type ManaNode } from '../core/mana';
 
 /**
@@ -94,6 +95,10 @@ export interface Env {
    * the climate points decide.
    */
   landAt?: (x: number, y: number) => boolean;
+  /** Rain index ([northern summer, northern winter]; see rainClass), height (km), and how far fresh water is (km; 0 at a river or lake). */
+  rain?: [Float32Array, Float32Array];
+  height?: Float32Array;
+  freshKm?: Float32Array;
   /** Climate zone at each point (index into ZONE_INFO; −1 at sea). */
   zone?: Int8Array;
   lat: Float32Array;
@@ -241,7 +246,8 @@ export function buildEnv(cl: Climate, lib: Library, surface: Surface, provinces:
   // Mana crystals are richest where mana is dense.
   const crystal = res['mana-crystal'];
   if (crystal) for (let k = 0; k < n; k++) crystal[k] = Math.min(1, crystal[k] * (0.25 + 1.5 * manaBase[k]));
-  const env: Env = { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, zone: Int8Array.from(cl.zone), res, resInfo, prov: null as unknown as ProvIndex, manaLand, manaBase, layers: buildLayerLand(surface, cl) };
+  const env: Env = { w, h, n, step, x0: cl.x0, y0: cl.y0, wrapKm: cl.wrapKm, cellArea: step * step, land: cl.land, plant, temp, fresh, coast, mzone, lat, beastK, beastInfo, volcanic, cover: cl.cover.main, zone: Int8Array.from(cl.zone), rain: [cl.summer.rain, cl.winter.rain], height: cl.height, res, resInfo, prov: null as unknown as ProvIndex, manaLand, manaBase, layers: buildLayerLand(surface, cl) };
+  env.freshKm = freshDistance(env);
   attachProvinces(env, provinces);
   return env;
 }

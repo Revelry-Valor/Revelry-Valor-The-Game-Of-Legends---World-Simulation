@@ -16,6 +16,10 @@ const settings = defaultSettings({ widthKm: 3000, heightKm: 2000, northLatitude:
 const surface: Surface = { strokes: [], nextId: 1 };
 const add = (brush: BrushId, pts: number[], o: Partial<Stroke> = {}) => surface.strokes.push({ ...brushDefaults(brush), id: surface.nextId++, pts, roughness: 0.2, ...o } as Stroke);
 add('land', [1500, 1000], { size: 2200, roughness: 0.1 });
+// A river across the middle (people live no further than a short walk from fresh water).
+const riverPts: number[] = [];
+for (let x = 700; x <= 2350; x += 25) riverPts.push(x, 1000 + 15 * Math.sin(x / 150));
+add('river', riverPts, { width: 2 });
 
 let env: Env;
 let lib: Library;

@@ -286,7 +286,8 @@ describe('settlements and their economy', () => {
     const run = (life: string) => {
       race.lifestyle = life;
       const sim = newSim(env, 41);
-      placeStart(sim, env, lib, [{ race: race.id, tribes: 8 }], cl.zone);
+      // Knowing how to farm (this world has no rivers: they live off the rain, inland, where fishing can't feed a village).
+      placeStart(sim, env, lib, [{ race: race.id, tribes: 8, techs: ['agriculture'] }], cl.zone);
       stepDays(sim, env, lib, DAYS_PER_YEAR * 15);
       return sim.events.filter((e) => e.text.includes('settled down')).length;
     };
