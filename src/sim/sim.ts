@@ -10,7 +10,8 @@ import { holdYear, type Presence } from './holding';
 import { straightCells } from './roads';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
 import { landCell, PLANT_K, type Env } from './env';
-import { attraction, type Wants } from './attraction';
+import { attraction, hardBirths, hardDeaths, type Wants } from './attraction';
+import { adaptYear } from './adapt';
 import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
@@ -65,6 +66,8 @@ export interface RaceInfo {
   lw: LayerWays;
   /** Adapts quickly to new lands (its own setting, or the Adaptable trait). */
   adaptable: boolean;
+  /** Tolerance its culture's people have gained in hard country (levels, to the nearest quarter). */
+  adapt: { heat: number; cold: number; wet: number; dry: number; altitude: number };
   /** The summed effect of its traits on a target (e.g. 'Cold tolerance'). */
   traitEffect(target: string): number;
 }
@@ -112,6 +115,11 @@ export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures:
       manaSensitive: traits.has('mana-sensitive'),
       lw: layerWays(lib, species, race),
       adaptable: race.living?.adaptable ? race.living.adaptable === 'Yes' : traits.has('adaptable'),
+      adapt: (() => {
+        const a = (cultures.find((c) => c.id === cultureId) as LiveCulture | undefined)?.adapt;
+        const q = (v: number | undefined) => Math.round((v ?? 0) * 4) / 4;
+        return { heat: q(a?.heat), cold: q(a?.cold), wet: q(a?.wet), dry: q(a?.dry), altitude: q(a?.altitude) };
+      })(),
       traitEffect: (target) => {
         let n = 0;
         for (const id of traits) for (const e of lib.traits.find((t) => t.id === id)?.effects ?? []) if (e.target === target) n += e.amount;
@@ -219,7 +227,7 @@ function densityRace(sim: SimState, env: Env, lib: Library, info: Info, race: st
     easeCache.get(env)!.set(wk, E);
   }
   const ease = E;
-  return { need: ri.need, births: ri.births, deaths: ri.deaths, attitude: ri.attitude, species: ri.species.id, live: (k) => live[k], ease: (k) => ease[k] };
+  return { need: ri.need, births: ri.births, deaths: ri.deaths, attitude: ri.attitude, species: ri.species.id, live: (k) => live[k], ease: (k) => ease[k], hard: (k) => climateAt(env, ri, k) };
 }
 const NO_LAYERS: LayerLand = { under: [], underStep: 20, ways: [], islands: [], trees: [], cities: [], vines: [] };
 /** What the layer rules (layers.ts) need. */
@@ -317,7 +325,8 @@ export function addTribe(sim: SimState, env: Env, lib: Library, raceId: string, 
 export function wantsOf(env: Env, ri: RaceInfo): Wants {
   const p = ri.species.profile;
   const own = ri.race.living;
-  const tol = (key: 'heat' | 'cold' | 'wet' | 'dry' | 'altitude', label: string) => Math.max(1, Math.min(5, (own?.[key] ?? p[key] ?? 3) + ri.traitEffect(label)));
+  // The race's (or species') tolerance, its traits', and what its culture's people have gained in hard country.
+  const tol = (key: 'heat' | 'cold' | 'wet' | 'dry' | 'altitude', label: string) => Math.max(1, Math.min(7, Math.min(5, (own?.[key] ?? p[key] ?? 3) + ri.traitEffect(label)) + (ri.adapt?.[key] ?? 0)));
   return {
     tolerances: { heat: tol('heat', 'Heat tolerance'), cold: tol('cold', 'Cold tolerance'), wet: tol('wet', 'Wet tolerance'), dry: tol('dry', 'Dry tolerance'), altitude: tol('altitude', 'Altitude tolerance') },
     climates: ri.race.climates.length ? ri.race.climates : p.climates,
@@ -329,7 +338,7 @@ export function wantsOf(env: Env, ri: RaceInfo): Wants {
     priorities: own?.priorities ?? { food: 1, water: 1, resources: 1, trade: 1 },
   };
 }
-const attractCache = new WeakMap<Env, Map<string, Float32Array>>();
+const attractCache = new WeakMap<Env, Map<string, { score: Float32Array; climate: Float32Array }>>();
 /** A race's settings as a key (so its worked-out maps are kept until its Library options change). */
 const wantsKeys = new WeakMap<RaceInfo, string>();
 const wantsMemo = new WeakMap<RaceInfo, { env: Env; w: Wants }>();
@@ -354,20 +363,39 @@ export function attractionFor(env: Env, lib: Library, raceId: string): { wants: 
  */
 function liveScore(env: Env, ri: RaceInfo, k: number, _cl?: { zone: Int8Array }): number {
   if (k < 0) return -1;
+  const A = placeCache(env, ri);
+  if (Number.isNaN(A.score[k])) fillPlace(env, ri, A, k);
+  return A.score[k];
+}
+/**
+ * How hard the climate is on a race at a point (attraction.ts): 1 within all its tolerances,
+ * less the further past them (below 0.15 it wouldn't choose to live there at all).
+ */
+function climateAt(env: Env, ri: RaceInfo, k: number): number {
+  if (k < 0) return 1;
+  const A = placeCache(env, ri);
+  if (Number.isNaN(A.climate[k])) fillPlace(env, ri, A, k);
+  return A.climate[k];
+}
+function placeCache(env: Env, ri: RaceInfo): { score: Float32Array; climate: Float32Array } {
   let m = attractCache.get(env);
   if (!m) attractCache.set(env, (m = new Map()));
   const wk = wantsKey(env, ri);
   let A = m.get(wk);
   if (!A) {
-    A = new Float32Array(env.n).fill(NaN);
+    // As peoples adapt their settings change: old maps are let go now and then.
+    if (m.size > 48) m.clear();
+    A = { score: new Float32Array(env.n).fill(NaN), climate: new Float32Array(env.n).fill(NaN) };
     m.set(wk, A);
   }
-  if (Number.isNaN(A[k])) {
-    let wm = wantsMemo.get(ri);
-    if (!wm || wm.env !== env) wantsMemo.set(ri, (wm = { env, w: wantsOf(env, ri) }));
-    A[k] = attraction(env, wm.w, k).score;
-  }
-  return A[k];
+  return A;
+}
+function fillPlace(env: Env, ri: RaceInfo, A: { score: Float32Array; climate: Float32Array }, k: number): void {
+  let wm = wantsMemo.get(ri);
+  if (!wm || wm.env !== env) wantsMemo.set(ri, (wm = { env, w: wantsOf(env, ri) }));
+  const a = attraction(env, wm.w, k);
+  A.score[k] = a.score;
+  A.climate[k] = a.off && !a.water && a.climate === 0 ? 1 : a.climate;
 }
 
 /**
@@ -973,8 +1001,10 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     t.fed = need > 0 ? got / need : 1;
     // People: births and deaths, with hunger.
     const f = Math.min(1.2, t.fed);
-    const births = (ri.births / 12) * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * cfx.births;
-    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * cfx.famine) / 12 : 0);
+    // Past what they can bear (attraction.ts), fewer are born and more die.
+    const hc = climateAt(env, ri, cellOf(env, t.x, t.y));
+    const births = (ri.births / 12) * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * cfx.births * hardBirths(hc);
+    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * cfx.famine) / 12 : 0) + hardDeaths(hc) / 12;
     const change = t.pop * (births - deaths);
     t.pop = Math.max(0, t.pop + change + (rand(sim) - 0.5) * 0.5);
     t.warband = Math.max(t.away, Math.round(t.pop * ri.warShare));
@@ -1064,8 +1094,10 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const f = Math.min(1.2, st.fed);
     const comfort = st.economy?.comfort ?? 1;
     const scfx = cultureFx(sim, st.culture);
-    const births = (ri.births / 12) * 1.1 * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * (0.85 + 0.15 * comfort) * scfx.births;
-    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * scfx.famine) / 12 : 0);
+    // Past what they can bear (attraction.ts), fewer are born and more die (walls and stores soften it a little).
+    const hc = st.layer ? 1 : climateAt(env, ri, landCell(env, st.x, st.y));
+    const births = (ri.births / 12) * 1.1 * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * (0.85 + 0.15 * comfort) * scfx.births * hardBirths(hc);
+    const deaths = ri.deaths / 12 + (f < 1 ? ((1 - f) * 0.5 * scfx.famine) / 12 : 0) + (hardDeaths(hc) * 0.75) / 12;
     st.pop = Math.max(0, st.pop + st.pop * (births - deaths));
     st.warband = Math.round(st.pop * ri.warShare * 0.6);
     useLand(sim, env, cells, st.clan, st);
@@ -1233,6 +1265,21 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     const clan = sim.clans.find((q) => q.id === g.clan);
     if (clan && !clan.culture) clan.culture = g.culture;
   }
+  // Peoples living past what their race can bear adapt over the generations (adapt.ts).
+  adaptYear({
+    sim,
+    env,
+    people: (cu) => {
+      const out: { k: number; pop: number; wants: Wants; adaptable: boolean }[] = [];
+      for (const g of [...sim.settlements.filter((q) => !q.ruined && !q.layer), ...sim.tribes]) {
+        if (g.culture !== cu.id) continue;
+        const ri = info(g);
+        if (ri) out.push({ k: landCell(env, g.x, g.y), pop: g.pop, wants: wantsOf(env, ri), adaptable: ri.adaptable });
+      }
+      return out;
+    },
+    log: (text, x, y) => log(sim, text, x, y),
+  });
   cultureYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
   cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });

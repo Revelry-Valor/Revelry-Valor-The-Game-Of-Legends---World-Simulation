@@ -24,6 +24,13 @@ import { PLANT_K, type Env } from './env';
  * The score is water × climate × pulls; a place failing a requirement is off limits.
  */
 
+/**
+ * Hardship past a race's tolerance (step 3), from a place's climate factor (1 within all its
+ * tolerances): births fall to half, and deaths rise, the harsher it is.
+ */
+export const hardBirths = (climate: number) => 0.5 + 0.5 * Math.max(0, Math.min(1, climate));
+export const hardDeaths = (climate: number) => 0.08 * (1 - Math.max(0, Math.min(1, climate))) ** 2;
+
 /** A short walk (km): people live no further than this from fresh water (wet country aside). */
 export const SHORT_WALK_KM = 10;
 /** Below this the climate is too harsh to try at all. */
@@ -68,16 +75,34 @@ export const WATER: Record<string, { walkKm: number; rain: 'very' | 'wet' | 'nev
 
 // Each tolerance's limit, by level 1–5, and how much past the limit makes the place one step harsher.
 /** Hottest season's mean temperature (°C). */
-const HEAT = [26, 30, 34, 38, 44];
+export const HEAT = [26, 30, 34, 38, 44];
 /** Coldest season's mean temperature (°C). */
-const COLD = [8, 0, -10, -20, -35];
+export const COLD = [8, 0, -10, -20, -35];
 /** The wetter season's rain index at least (dry country). */
-const DRY = [0.35, 0.22, 0.12, 0.06, 0.02];
+export const DRY = [0.35, 0.22, 0.12, 0.06, 0.02];
 /** The drier season's rain index at most (rain all year): a middling tolerance bears rainforest. */
-const WET = [0.35, 0.6, 0.9, 1.3, 2];
+export const WET = [0.35, 0.6, 0.9, 1.3, 2];
 /** Height (km). */
-const ALT = [0.8, 1.6, 2.5, 3.5, 5];
-const lvl = (v: number) => Math.max(1, Math.min(5, Math.round(v || 3))) - 1;
+export const ALT = [0.8, 1.6, 2.5, 3.5, 5];
+/**
+ * A tolerance's limit at a level, between the levels too (a people part way adapted), and past
+ * 5 by the last step again (up to 7: a people adapted past what its kind could ever bear).
+ */
+export function limitAt(table: number[], level: number): number {
+  const t = Math.max(1, Math.min(7, level || 3)) - 1;
+  if (t >= 4) return table[4] + (table[4] - table[3]) * (t - 4);
+  const i = Math.floor(t);
+  return table[i] + (table[i + 1] - table[i]) * (t - i);
+}
+/** The tolerance level a place calls for (continuous; 1 when it is easy), for each kind. */
+export function levelNeeded(table: number[], value: number, higherIsHarder: boolean): number {
+  // Find the level whose limit just covers the value (tables run easy to hard as level rises).
+  for (let l = 1; l <= 7; l += 0.05) {
+    const lim = limitAt(table, l);
+    if (higherIsHarder ? value <= lim : value >= lim) return l;
+  }
+  return 7;
+}
 
 /** The parts of a place's attraction, each shown in the breakdown. */
 export interface Attraction {
@@ -139,11 +164,11 @@ export function attraction(env: Env, w: Wants, k: number): Attraction {
     past += amount / step;
     harsh.push(what);
   };
-  over(hot - HEAT[lvl(t.heat)], 6, 'too hot');
-  over(COLD[lvl(t.cold)] - cold, 8, 'too cold');
-  over(DRY[lvl(t.dry)] - wetSeason, 0.08, 'too dry');
-  over(drySeason - WET[lvl(t.wet)], 0.3, 'too wet');
-  over(height - ALT[lvl(t.altitude)], 0.7, 'too high');
+  over(hot - limitAt(HEAT, t.heat), 6, 'too hot');
+  over(limitAt(COLD, t.cold) - cold, 8, 'too cold');
+  over(limitAt(DRY, t.dry) - wetSeason, 0.08, 'too dry');
+  over(drySeason - limitAt(WET, t.wet), 0.3, 'too wet');
+  over(height - limitAt(ALT, t.altitude), 0.7, 'too high');
   const climate = Math.exp(-past);
   // ---- Pulls ----
   const plants = (env.plant[0][k] + env.plant[1][k]) / 2 / PLANT_K;

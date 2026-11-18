@@ -1159,6 +1159,21 @@ This reworks a large part of the simulation. Where it disagrees with the older s
   - Everyone else is at 3 until set.
 - The simulation keeps what it works out about each race until its options change.
 
+**Built (step 3): hard country and adapting to it** (`sim/attraction.ts`, `sim/adapt.ts`)
+- *Hardship:* where a people lives past what its race can bear (its climate factor below 1: too hot, cold, wet, dry or high), fewer are born and more die, the harsher the more:
+  - births down to half;
+  - deaths up to 8% a year more at the very worst.
+  - It applies to tribes, settlements (a little softer: walls and stores) and families in the wild.
+  - Hovering a tribe or settlement in hard country says so ("Hard country: too cold for its people…").
+- *Adapting:* each year, where at least a quarter of a culture's people live past one of their tolerances, that culture gains toward bearing it:
+  - about a level in fifty years, three times as fast for an adaptable race (the Adaptable trait: humans);
+  - up to two levels on its race;
+  - where none of its people live in such country any more, the gain fades very slowly.
+  - The gain belongs to the culture (the people living there): their kin of other cultures bear no more than before.
+  - The chronicle notes each half level ("Over the generations the … people have grown used to the cold"), and the culture's card shows what it has grown used to.
+- *Tolerances are now continuous,* so a culture part way adapted counts part way (and past 5, up to 7, for a people adapted beyond what its kind could ever bear).
+- On the 60-year test world (rainforest, where everyone is within their tolerances), 30 more years with the rifts held off grew settlements from 64 to 131 and people from about 12,300 to 27,300, and nobody needed to adapt.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

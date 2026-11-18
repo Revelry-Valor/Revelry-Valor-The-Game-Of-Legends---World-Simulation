@@ -2,14 +2,14 @@ import type { Climate } from '../core/climate';
 import { raceMissing, type Library } from '../core/library';
 import type { Surface } from '../core/paint';
 import type { World } from '../core/world';
-import { attachLandAt, buildEnv, type Env } from '../sim/env';
-import { attraction, provinceAttraction, provinceLiving, type Attraction } from '../sim/attraction';
+import { attachLandAt, buildEnv, landCell, type Env } from '../sim/env';
+import { attraction, hardBirths, hardDeaths, provinceAttraction, provinceLiving, type Attraction } from '../sim/attraction';
 import { RAIN_NAMES, rainClass } from '../core/climate';
 import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
-import { addDawnCity, addTribe, attractionFor, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
+import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
@@ -1395,6 +1395,14 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       if (t) push('Tribe', `${t.name} (${clanOf(t.clan) ? realmName(lib(), clanOf(t.clan)!) : '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
       const st = t ? null : settlementAt(x, y, pxKm);
       if (st) push('Settlement', settlementLine(st));
+      // Living past what their race can bear: hard country (fewer births, more deaths).
+      for (const g of [t, st]) {
+        if (!g || (g as Settlement).layer) continue;
+        const ri = raceInfo(lib(), g.race, g.culture, s.cultures ?? []);
+        if (!ri || !env) continue;
+        const a = attraction(env, wantsOf(env, ri), landCell(env, g.x, g.y));
+        if (a.climate < 0.97) push('Hard country', `${g.name}: ${a.harsh.join(', ')} for its people (births ×${hardBirths(a.climate).toFixed(2)}, deaths +${(hardDeaths(a.climate) * 100).toFixed(1)}% a year); it adapts over the generations`);
+      }
       if (showTrade) for (const cv of s.caravans) {
         let dx = Math.abs(cv.x - x);
         if (env!.wrapKm) dx = Math.min(dx, env!.wrapKm - dx);
@@ -1805,6 +1813,18 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     ];
   };
   /** A culture: pillars, traditions (with their degree, and whether they are rising or fading), behaviours, and its people. */
+  /** What a culture's people have grown used to in hard country (adapt.ts). */
+  const adaptPart = (cu: LiveCulture): HTMLElement[] => {
+    const a = cu.adapt;
+    const names = { heat: 'heat', cold: 'cold', wet: 'endless rain', dry: 'dry country', altitude: 'heights' } as const;
+    const gained = a ? (Object.keys(names) as (keyof typeof names)[]).filter((k) => a[k] >= 0.05) : [];
+    if (!gained.length) return [];
+    return [
+      h('div', { class: 'econ-head' }, 'Grown used to'),
+      h('div', {}, gained.map((k) => `${names[k]} +${a![k].toFixed(1)}`).join(' · ')),
+      h('div', { class: 'muted' }, 'Tolerance its people have gained over the generations by living where their race once found it too hard (up to two levels; adaptable races such as humans adapt three times as fast). Their kin elsewhere bear no more than before.'),
+    ];
+  };
   const cultureCard = (cu: LiveCulture): HTMLElement => {
     const L = lib();
     const s = sim!;
@@ -1833,6 +1853,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         forming.length ? h('div', { class: 'muted' }, `Taking root: ${forming.map((t) => trad(t.id)?.name ?? t.id).join(', ')}.`) : null,
         cu.specialties.length ? h('div', {}, `Specialties: ${cu.specialties.map((q) => q.name).join(', ')}`) : null,
         ...acceptancePart(cu),
+        ...adaptPart(cu),
         h('div', { class: 'econ-head' }, 'Learned behaviours'),
         h('div', {}, cu.behaviours.map((b) => L.behaviours.find((q) => q.id === b)?.name ?? b).join(', ') || 'None yet.'),
         h('div', { class: 'muted' }, 'Traditions are earned by living a certain way for generations (about twenty years a degree) and fade when that life ends; behaviours spread by practice and from neighbours.'),

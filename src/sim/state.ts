@@ -427,6 +427,11 @@ export interface LiveCulture {
   colour?: string;
   /** This year's doings, for the traditions they earn. */
   stats?: { fights: number; raids: number; foreignTrade: number; famines: number; lastFight: number };
+  /**
+   * Tolerance its people have gained by living in hard country over generations (levels, on top
+   * of their race's; REDESIGN.md, "Where peoples live", step 3).
+   */
+  adapt?: { heat: number; cold: number; wet: number; dry: number; altitude: number };
 }
 
 /** Bad blood: a race against another (for raiding its holy place), until a day. */

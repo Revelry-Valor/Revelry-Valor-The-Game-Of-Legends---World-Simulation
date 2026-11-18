@@ -1,4 +1,5 @@
 import type { Env } from './env';
+import { hardBirths, hardDeaths } from './attraction';
 import { markThinned } from './thinned';
 import type { SimState } from './state';
 
@@ -35,6 +36,8 @@ export interface DensityRace {
    * doesn't suit the race (its climates, ground covers and heights), high along coasts and rivers.
    */
   ease?(k: number): number;
+  /** How hard the climate is on it at a point (1 within its tolerances; less the further past): fewer births, more deaths. */
+  hard?(k: number): number;
 }
 
 export interface DensityContext {
@@ -127,8 +130,9 @@ export function densityMonth(c: DensityContext): void {
       }
       const f = need > 0 ? Math.min(1.2, got / need) : 1;
       fed[k] = f;
-      const births = (r.births / 12) * Math.min(1, f) * (f >= 1 ? 1.2 : 1) * (c.boost?.[k] ? 1.5 : 1);
-      const deaths = r.deaths / 12 + (f < 1 ? ((1 - f) * 0.6) / 12 : 0);
+      const hc = r.hard ? r.hard(k) : 1;
+      const births = (r.births / 12) * Math.min(1, f) * (f >= 1 ? 1.2 : 1) * (c.boost?.[k] ? 1.5 : 1) * hardBirths(hc);
+      const deaths = r.deaths / 12 + (f < 1 ? ((1 - f) * 0.6) / 12 : 0) + hardDeaths(hc) / 12;
       D[k] = P * (1 + births - deaths);
       // A last few, hungry, are gone (well fed, even a family or two at the edge holds on).
       if (D[k] < GONE && f < 1) D[k] = 0;
