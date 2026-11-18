@@ -496,6 +496,14 @@ export function createMapView(o: MapViewOptions): MapView {
     if (refImg.getAttribute('src') !== ref.src) refImg.src = ref.src;
     const [ax, ay] = toScreen(ref.x, ref.y, r);
     const [bx, by] = toScreen(ref.x + ref.w, ref.y + ref.h, r);
+    if (refImg.complete && refImg.naturalWidth && o.referenceEditing?.()) {
+      // While it is being moved and sized, the part hanging off the map shows faintly too, to line it up by.
+      g.save();
+      g.globalAlpha = ref.opacity * 0.35;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(refImg, ax, ay, bx - ax, by - ay);
+      g.restore();
+    }
     if (refImg.complete && refImg.naturalWidth) {
       g.save();
       // Kept inside the map's frame (a wrapping map shows it on the wrapped copies too).
@@ -541,6 +549,16 @@ export function createMapView(o: MapViewOptions): MapView {
     // Shift (or the panel's Keep its shape) keeps the picture's shape while stretching.
     refDrag = { pointer: e.pointerId, corner, x, y, start: { ...ref }, keep: e.shiftKey || !!o.referenceKeepShape?.() };
     return true;
+  };
+  /** The cursor over the reference picture while it can be moved and sized ('' elsewhere). */
+  const referenceCursor = (x: number, y: number): string => {
+    if (refDrag) return refDrag.corner < 0 ? 'grabbing' : refDrag.corner % 2 === 0 ? 'nwse-resize' : 'nesw-resize';
+    const ref = o.world().reference;
+    if (!ref) return '';
+    const corners = [[ref.x, ref.y], [ref.x + ref.w, ref.y], [ref.x + ref.w, ref.y + ref.h], [ref.x, ref.y + ref.h]];
+    const c = corners.findIndex(([cx, cy]) => Math.hypot(cx - x, cy - y) * view.scale < REF_HANDLE);
+    if (c >= 0) return c % 2 === 0 ? 'nwse-resize' : 'nesw-resize';
+    return x >= ref.x && x <= ref.x + ref.w && y >= ref.y && y <= ref.y + ref.h ? 'move' : '';
   };
   const dragReference = (x: number, y: number, done: boolean) => {
     if (!refDrag) return;
@@ -1580,6 +1598,12 @@ export function createMapView(o: MapViewOptions): MapView {
       schedule();
       return;
     }
+    // Moving and sizing the reference picture comes first, whatever tool or tab is active: a press
+    // on it (or a corner) takes it; anywhere else pans as usual.
+    if (o.referenceEditing?.() && e.button === 0 && !spaceDown && refPointer(e, x, y)) {
+      schedule();
+      return;
+    }
     if (hand && e.button === 0) {
       o.overlay?.()?.pick?.(wrapX(x), y, 1 / view.scale);
       panning = true;
@@ -1673,6 +1697,9 @@ export function createMapView(o: MapViewOptions): MapView {
     }
     const [x, y] = toWorld(e.clientX - r.left, e.clientY - r.top, r);
     hover = { x, y };
+    // Over the reference picture while it can be moved: a hand to move it, arrows at its corners.
+    const refCursor = o.referenceEditing?.() ? referenceCursor(x, y) : '';
+    if (canvas.style.cursor !== refCursor) canvas.style.cursor = refCursor;
     if (dragging?.pointer === e.pointerId) dragSketch(x, y);
     if (highDrag?.pointer === e.pointerId) dragHigh(x, y);
     if (refDrag?.pointer === e.pointerId) dragReference(x, y, false);
