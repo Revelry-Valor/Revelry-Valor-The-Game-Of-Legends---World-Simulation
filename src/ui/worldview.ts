@@ -474,6 +474,8 @@ export function showWorld(app: App, start: World): () => void {
   // ---- Climate: worked out with the button, or (auto update on) a moment after painting pauses. ----
   const climateStatus = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'Working out the climate…');
   const climateBtn = h('button', { type: 'button', class: 'ghost small', title: 'Work the climate out again now.' }, 'Update climate');
+  // Shown over every tab while the painting has changed and the climate (and so the provinces and peoples) hasn't caught up.
+  const staleBar = h('div', { class: 'stale-bar small', hidden: true, role: 'status' }, h('span', {}, 'The climate is out of date with the painting (provinces and peoples use it).'), h('button', { type: 'button', class: 'primary small', onclick: () => climate.now() }, 'Update climate'));
   const climate = createClimateRunner(
     () => ({ surface: world.surface, settings: world.settings }),
     () => {
@@ -489,6 +491,7 @@ export function showWorld(app: App, start: World): () => void {
       climateBtn.disabled = st === 'working';
       climateBtn.classList.toggle('primary', st === 'stale');
       climateBtn.classList.toggle('ghost', st !== 'stale');
+      staleBar.hidden = st !== 'stale';
     },
   );
   climateBtn.addEventListener('click', () => climate.now());
@@ -1161,7 +1164,7 @@ export function showWorld(app: App, start: World): () => void {
     map.redraw();
   };
   const collapse = h('button', { type: 'button', class: 'ghost small collapse', title: 'Fold the creation panel away', 'aria-label': 'Fold the creation panel away', onclick: () => setSide(false) }, '«');
-  const side = h('aside', { class: 'side' }, h('div', { class: 'side-head' }, h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Tool sets' }, ...tabButtons), collapse), tabBody);
+  const side = h('aside', { class: 'side' }, h('div', { class: 'side-head' }, h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Tool sets' }, ...tabButtons), collapse), staleBar, tabBody);
   const sideStrip = h('button', { type: 'button', class: 'side-strip', hidden: true, title: 'Open the creation panel', onclick: () => setSide(true) }, 'Create »');
   showTab('land');
   sideToggle.addEventListener('click', () => setSide(side.classList.contains('closed')));

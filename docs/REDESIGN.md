@@ -1141,6 +1141,7 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 
 **Designer's notes: climate updates and map drawing**
 - *The climate updates only when asked:* painting marks it out of date ("Climate is out of date: press Update climate", the button highlighted) instead of working it out again after every pause. An *Auto update* box beside the button turns the old behaviour back on (remembered on this device; off to begin with).
+- *A bar over every tab* says when the climate is out of date with the painting (the provinces and peoples use the climate), with its own Update climate button.
 - *Panning draws ahead:* besides what is on screen, the map's pictures are drawn ahead of time in a ring round the view (nearly twice its size at the zoom shown, three times its size a little coarser), and a coarse picture of the whole map is always kept as a backdrop, so moving across the map finds the pictures ready, or at worst a coarse stand-in, never blank.
 
 **Build order (proposed)**
