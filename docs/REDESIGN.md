@@ -1106,8 +1106,12 @@ This reworks a large part of the simulation. Where it disagrees with the older s
   - paved road: stone dashes with a dark edge;
   - railway: black with white sleepers.
   - Trade routes are drawn in gold only while in use (a trip within the year), along the way their traders take. Where three or more routes run along the same way (a great trade artery, a silk road), it is drawn gold edged in blue.
-- *The population heat map* is in the View panel ("Population heat map"), not Map look.
+- *The population heat map* is in the View panel ("Population heat map"), not Map look. It works province by province: each land province is coloured by the people per square mile living in it (families in the wild, and the people of its villages, towns and tribes; everyone, or one race), pale yellow through orange and red to deep purple. A province's card gives its people too. (A world without provinces yet still shows the wild families point by point.)
 - *Spreading by what suits the race:* families spread into a point as easily as it suits them, by the species' (or race's) preferred climates, ground covers and heights; along coasts and rivers half as fast again. In country that doesn't suit them most of those setting out turn back, so the spread there is several times slower (for example, men into jungle if Humans don't list it). Peoples with no preferences set spread evenly. Setting these preferences per race is for the race options.
+
+**Designer's notes: towns on the coast**
+- A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
+- For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.
 
 **Designer's notes: climate updates and map drawing**
 - *The climate updates only when asked:* painting marks it out of date ("Climate is out of date: press Update climate", the button highlighted) instead of working it out again after every pause. An *Auto update* box beside the button turns the old behaviour back on (remembered on this device; off to begin with).

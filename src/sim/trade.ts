@@ -1,6 +1,6 @@
 import { tradeFactor } from './politics';
 import type { Library } from '../core/library';
-import type { Env } from './env';
+import { landCell, type Env } from './env';
 import { isFood, NEEDS, resInfoOf } from './economy';
 import type { RaceInfo } from './sim';
 import type { Caravan, Settlement, SimState } from './state';
@@ -215,7 +215,7 @@ function seaPlanBetween(c: TradeContext, a: Settlement, b: Settlement): RoutePla
   return p;
 }
 const coastal = (c: TradeContext, st: Settlement) => {
-  const k = c.cellAt(st.x, st.y);
+  const k = landCell(c.env, st.x, st.y);
   return k >= 0 && !!c.env.coast[k];
 };
 
@@ -250,7 +250,7 @@ export function tradeMonth(c: TradeContext): void {
     if (!ra) continue;
     const pA = a.economy!.prices ?? {};
     // Pack animals, where beasts that carry loads live round it.
-    const k = c.cellAt(a.x, a.y);
+    const k = landCell(env, a.x, a.y);
     const animalsHere = k >= 0 && env.beastInfo.some((b) => b.haul && (env.beastK[b.id]?.[k] ?? 0) > 0.2);
     const speed = ra.speed * (animalsHere ? 0.9 : 0.8);
     // Wagons where it knows the wheel carry half as much again.
@@ -337,7 +337,7 @@ export function tradeMonth(c: TradeContext): void {
     if (!cv.ship && !cv.air) {
       const [x, y] = a.id < best.b.id ? [a.id, best.b.id] : [best.b.id, a.id];
       // A train keeps to the railway.
-      const way = best.train ? pathBetween(c, a, best.b) : traderWay(sim, env, sim.routes.find((r) => r.a === x && r.b === y), c.cellAt(a.x, a.y), c.cellAt(best.b.x, best.b.y));
+      const way = best.train ? pathBetween(c, a, best.b) : traderWay(sim, env, sim.routes.find((r) => r.a === x && r.b === y), landCell(env, a.x, a.y), landCell(env, best.b.x, best.b.y));
       if (way && way.length > 1) {
         cv.path = way;
         cv.at = 0;

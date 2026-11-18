@@ -2,7 +2,7 @@ import type { Climate } from '../core/climate';
 import { raceMissing, type Library } from '../core/library';
 import type { Surface } from '../core/paint';
 import type { World } from '../core/world';
-import { buildEnv, type Env } from '../sim/env';
+import { attachLandAt, buildEnv, type Env } from '../sim/env';
 import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
@@ -25,7 +25,7 @@ import type { MapOverlay } from './mapview';
 import { holder, isOcc, occ, OUTSIDE, SEA, UNCLAIMED } from './borders';
 import { assembleRings } from '../core/trace';
 import type { ProvinceMap } from '../core/provinces';
-import { attachProvinces, bindProvinces, PK, provincesNear } from '../sim/land';
+import { attachProvinces, bindProvinces, PK, provAt, provincesNear } from '../sim/land';
 import { manaAtPlace, manaLinesNow, manaNow } from '../sim/mana';
 import { CORRUPTION_RIFT, HOLD_NAMES, type Rift } from '../sim/rifts';
 import { buildLayerLand, LAYER_NAMES } from '../sim/layers';
@@ -107,7 +107,41 @@ const perSqMi = (v: number) => (v >= 10 ? Math.round(v).toLocaleString() : v >= 
 const DENSITY_TOP = 20;
 /** And below which it shows nothing. */
 const DENSITY_FLOOR = 0.005;
-/** The wilderness density as a picture over the climate grid: pale yellow through orange and red to deep purple. */
+/** The heat map's colour for so many people per square mile (null: too few to show): pale yellow through orange and red to deep purple, on a log scale. */
+function densityColour(per: number): string | null {
+  if (per < DENSITY_FLOOR) return null;
+  const ramp = [[255, 238, 150], [250, 160, 60], [220, 60, 50], [110, 20, 90]];
+  const t = Math.max(0, Math.min(0.999, Math.log(per / DENSITY_FLOOR) / Math.log(DENSITY_TOP / DENSITY_FLOOR)));
+  const sc = t * (ramp.length - 1);
+  const i = Math.floor(sc);
+  const f = sc - i;
+  const c = ramp[i].map((x, q) => Math.round(x + (ramp[i + 1][q] - x) * f));
+  return `rgba(${c[0]},${c[1]},${c[2]},${((110 + 130 * t) / 255).toFixed(3)})`;
+}
+/**
+ * The population of each province, per square mile: the families living in the wild there, and
+ * the people of its villages, towns and tribes (everyone, or one race).
+ */
+function provincePopulation(s: SimState, e: Env, which: string): Float32Array {
+  const P = e.prov;
+  const people = new Float32Array(P.count);
+  const maps = which === 'total' ? Object.values(s.density ?? {}) : s.density?.[which] ? [s.density[which]] : [];
+  for (let p = 0; p < P.count; p++) for (let q = P.start[p]; q < P.start[p + 1]; q++) for (const D of maps) people[p] += D[P.cells[q]] ?? 0;
+  const mine = (race: string) => which === 'total' || race === which;
+  for (const st of s.settlements) {
+    if (st.ruined || st.layer || !mine(st.race)) continue;
+    const p = provAt(e, st.x, st.y);
+    if (p >= 0) people[p] += st.pop;
+  }
+  for (const t of s.tribes) {
+    if (!mine(t.race)) continue;
+    const p = provAt(e, t.x, t.y);
+    if (p >= 0) people[p] += t.pop;
+  }
+  for (let p = 0; p < P.count; p++) people[p] = P.area[p] > 0 ? (people[p] / P.area[p]) * SQ_KM_PER_SQ_MI : 0;
+  return people;
+}
+/** The wilderness density as a picture over the climate grid (for a world without provinces yet). */
 function drawDensity(s: SimState, e: Env, which: string): HTMLCanvasElement {
   const cv = document.createElement('canvas');
   cv.width = e.w;
@@ -155,6 +189,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let landsBy: 'clan' | 'culture' | 'faith' = 'clan';
   let resDirty = true;
   let densityImg: HTMLCanvasElement | null = null;
+  let densityFills: (string | null)[] = [];
+  let densityPaths: Path2D[] = [];
+  let densityPathsFor: unknown = null;
   let densityKey = "";
   let resImg: HTMLCanvasElement | null = null;
   let follow = true;
@@ -189,6 +226,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     const c = cl();
     if (!c) return;
     env = buildEnv(c, lib(), d.surface(), d.provinces());
+    // The painted land itself, so towns can stand right on the coast (as painted now).
+    const ws = d.world().settings;
+    attachLandAt(env, () => d.surface(), ws.seed, ws.edges === 'wrap' ? ws.widthKm : 0);
     layersFor = d.surface().strokes;
     if (!sim && pending) {
       sim = unpackSim(pending, env);
@@ -481,9 +521,41 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         }
         g.restore();
       };
-      // The wilderness density (density.ts): everyone, or one race.
+      // The population heat map: each province coloured by the people living in it (everyone, or one race).
       const dShow = d.density?.() ?? 'off';
-      if (dShow !== 'off' && s.density) {
+      const dpm = d.provinces();
+      if (dShow !== 'off' && dpm && e.prov.real && e.prov.count === dpm.rings.length) {
+        const key = `${dShow}|${s.day}|${s.settlements.length}`;
+        if (key !== densityKey || !densityFills.length) {
+          const per = provincePopulation(s, e, dShow);
+          densityFills = Array.from(per, (v, p) => (e.prov.kind[p] === PK.land ? densityColour(v) : null));
+          densityKey = key;
+        }
+        if (densityPathsFor !== dpm) {
+          densityPaths = dpm.rings.map((rings) => {
+            const path = new Path2D();
+            for (const r of rings) {
+              path.moveTo(r[0], r[1]);
+              for (let i = 2; i < r.length; i += 2) path.lineTo(r[i], r[i + 1]);
+              path.closePath();
+            }
+            return path;
+          });
+          densityPathsFor = dpm;
+        }
+        for (const c of copies) {
+          const [ox, oy] = at(0, 0, c);
+          g.save();
+          g.translate(ox, oy);
+          g.scale(scale, scale);
+          densityFills.forEach((fill, p) => {
+            if (!fill || !densityPaths[p]) return;
+            g.fillStyle = fill;
+            g.fill(densityPaths[p]);
+          });
+          g.restore();
+        }
+      } else if (dShow !== 'off' && s.density) {
         const key = `${dShow}|${s.day}`;
         if (key !== densityKey || !densityImg) {
           densityImg = drawDensity(s, e, dShow);
@@ -1188,7 +1260,8 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const st = draggingCity;
         draggingCity = null;
         const k = cellOf(x, y);
-        if (k >= 0 && env!.land[k]) moveSettlement(sim!, env!, lib(), st.id, x, y);
+        // On the painted land, right up to the coast (the climate's points are too coarse for that).
+        if (env!.landAt ? env!.landAt(x, y) : k >= 0 && env!.land[k]) moveSettlement(sim!, env!, lib(), st.id, x, y);
         else {
           toast('A dawn city stands on land.');
           moveSettlement(sim!, env!, lib(), st.id, cityFrom.x, cityFrom.y);
@@ -2305,6 +2378,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const owner = s.provOwner?.[index] ?? -1;
       const oc = owner >= 0 ? clanOf(owner) : undefined;
       out.push({ label: 'Held by', value: oc ? realmName(lib(), oc) : P.kind[index] === PK.land ? 'Nobody yet' : 'Nobody can hold it' });
+      if (env && P.kind[index] === PK.land && env.prov.count === P.count) {
+        const per = provincePopulation(s, env, 'total')[index];
+        const sqmi = env.prov.area[index] / SQ_KM_PER_SQ_MI;
+        if (per > 0) out.push({ label: 'People', value: `about ${Math.round(per * sqmi).toLocaleString()} (${perSqMi(per)} per sq mi): in the wild, villages, towns and tribes` });
+      }
       if ((s.provRival?.[index] ?? -1) >= 0 && (s.provRivalUse?.[index] ?? 0) > 0) {
         const rc = clanOf(s.provRival![index]);
         const pct = Math.round(s.provRivalUse![index]);
@@ -2337,7 +2415,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       return { lines, nodes, anchor: env.manaLand.anchor, grid: { x0: env.x0, y0: env.y0, step: env.step, w: env.w, h: env.h, wrapKm: env.wrapKm }, field: manaNow(sim, env) };
     },
     provincesChanged,
-    densityRaces: () => Object.keys(sim?.density ?? {}).filter((id) => sim!.density![id].some((v) => v > 0)).map((id) => ({ id, name: raceName(id) })),
+    densityRaces: () => [...new Set([...Object.keys(sim?.density ?? {}).filter((id) => sim!.density![id].some((v) => v > 0)), ...(sim?.settlements ?? []).filter((q) => !q.ruined).map((q) => q.race), ...(sim?.tribes ?? []).map((t) => t.race)])].map((id) => ({ id, name: raceName(id) })),
     live: () => (sim && env && !gridProblem ? sim : null),
     pack: () => (sim && env && !gridProblem && (sim.tribes.length || sim.settlements.length || sim.started) ? packSim(sim, env) : pending),
     resources: resourceView,

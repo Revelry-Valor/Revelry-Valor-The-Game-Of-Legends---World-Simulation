@@ -1,5 +1,5 @@
 import type { Library } from '../core/library';
-import type { Env } from './env';
+import { landCell, type Env } from './env';
 import { resInfoOf } from './economy';
 import type { Settlement, SimState } from './state';
 import { knows } from './tech';
@@ -196,7 +196,7 @@ export function waysYear(c: WaysContext): void {
   // Better ways: a route whose traders have found a much quicker way now takes it (roads.ts).
   const at = (id: number) => {
     const st = sim.settlements.find((q) => q.id === id && !q.ruined);
-    return st ? c.cellAt(st.x, st.y) : -1;
+    return st ? landCell(env, st.x, st.y) : -1;
   };
   for (const r of betterWays(sim, env, at)) {
     const a = sim.settlements.find((q) => q.id === r.a);
@@ -231,8 +231,8 @@ function buildToward(c: WaysContext, from: Settlement, to: Settlement, kind = ''
   const { sim, env, lib } = c;
   const best = bestWay(lib, from);
   if (best.tier < 2) return;
-  const fk = c.cellAt(from.x, from.y);
-  const tk = c.cellAt(to.x, to.y);
+  const fk = landCell(env, from.x, from.y);
+  const tk = landCell(env, to.x, to.y);
   let cells = path && path.length > 1 ? (path[0] === fk ? path : path[path.length - 1] === fk ? [...path].reverse() : path) : findWay(sim, env, fk, tk)?.cells ?? [];
   if (!cells.length) cells = pathCells(env, from.x, from.y, to.x, to.y, c.cellAt);
   let built = 0;

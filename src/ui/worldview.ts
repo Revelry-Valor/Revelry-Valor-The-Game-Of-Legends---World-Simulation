@@ -589,7 +589,7 @@ export function showWorld(app: App, start: World): () => void {
       look.density = sel.value;
       map.redraw();
     });
-    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Population heat map'), sel, h('span', { class: 'muted small hint' }, 'Families living out in the wild, per square mile: everyone, or one race (the peoples’ simulation must be running).'));
+    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Population heat map'), sel, h('span', { class: 'muted small hint' }, 'People per square mile in each province (families in the wild, villages, towns and tribes): everyone, or one race. The peoples’ simulation must be running.'));
   }
   const lookPanel = h(
     'section',

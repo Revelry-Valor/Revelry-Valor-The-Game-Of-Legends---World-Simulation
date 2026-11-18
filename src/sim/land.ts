@@ -1,5 +1,5 @@
 import type { ProvinceMap } from '../core/provinces';
-import type { Env } from './env';
+import { landCell, type Env } from './env';
 import type { SimState } from './state';
 
 /**
@@ -186,7 +186,13 @@ export function attachProvinces(env: Env, pm: ProvinceMap | null): void {
 /** The province at a place (−1 none). */
 export function provAt(env: Env, x: number, y: number): number {
   const k = cellOf(env, x, y);
-  return k >= 0 ? env.prov.of[k] : -1;
+  const p = k >= 0 ? env.prov.of[k] : -1;
+  // On the painted land though its climate point is sea (a town on the coast): the land province by it.
+  if (env.landAt && (p < 0 || env.prov.kind[p] !== PK.land)) {
+    const m = landCell(env, x, y);
+    if (m !== k && m >= 0 && env.landAt(x, y)) return env.prov.of[m];
+  }
+  return p;
 }
 /** The province a climate point lies in. */
 export const provOfCell = (env: Env, k: number) => (k >= 0 ? env.prov.of[k] : -1);

@@ -7,6 +7,7 @@ import { freshWaters } from '../core/geography';
 import type { Surface } from '../core/paint';
 import type { ProvinceMap } from '../core/provinces';
 import { attachProvinces, type ProvIndex } from './land';
+import { evaluate } from '../core/terrain';
 import { anchorOf, leyLines, manaField, naturalNodes, rootLines, type ManaLine, type ManaNode } from '../core/mana';
 
 /**
@@ -87,6 +88,12 @@ export interface Env {
   coast: Uint8Array;
   /** Mountain zone: 0 lowland, 1 foothills, 2 highlands, 3 high mountains, 4 peaks. */
   mzone: Uint8Array;
+  /**
+   * Is a place on the painted land itself (not the sea or a lake)? Finer than the climate points:
+   * a town can stand right on the coast. Set by the page (it knows the world's seed); without it
+   * the climate points decide.
+   */
+  landAt?: (x: number, y: number) => boolean;
   /** Climate zone at each point (index into ZONE_INFO; −1 at sea). */
   zone?: Int8Array;
   lat: Float32Array;
@@ -330,4 +337,37 @@ function distanceToLand(cl: Climate): Float32Array {
     }
   }
   return Float32Array.from(hops, (v) => (v < 0 ? 1e6 : v * cl.step));
+}
+
+/** Give the simulation the exact painted land (for placing towns right up to the coast). */
+export function attachLandAt(env: Env, surface: () => Surface, seed: number, wrapKm: number): void {
+  env.landAt = (x, y) => {
+    const f = evaluate(surface(), { x0: x, y0: y, px: 0.3, w: 1, h: 1 }, { seed, wrapKm, noRelief: true });
+    return f.ground[0] >= 1.5 && !(f.water[0] > 0.5 && f.waterKind[0] === 2);
+  };
+}
+
+/** The climate point a place belongs to: its own, or (a town on the coast whose point is sea) the nearest land point round it. */
+export function landCell(env: Env, x: number, y: number): number {
+  const ci = Math.round((x - env.x0) / env.step);
+  const cj = Math.round((y - env.y0) / env.step);
+  const at = (i: number, j: number) => {
+    if (j < 0 || j >= env.h) return -1;
+    if (i < 0 || i >= env.w) {
+      if (!env.wrapKm) return -1;
+      i = ((i % env.w) + env.w) % env.w;
+    }
+    return j * env.w + i;
+  };
+  const k = at(ci, cj);
+  if (k >= 0 && env.land[k]) return k;
+  let best = k;
+  let bd = Infinity;
+  for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+    const m = at(ci + di, cj + dj);
+    if (m < 0 || !env.land[m]) continue;
+    const d = Math.hypot(env.x0 + (ci + di) * env.step - x, env.y0 + (cj + dj) * env.step - y);
+    if (d < bd) [best, bd] = [m, d];
+  }
+  return best;
 }

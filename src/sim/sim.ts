@@ -9,7 +9,7 @@ import { manaYear } from './mana';
 import { holdYear, type Presence } from './holding';
 import { straightCells } from './roads';
 import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, provincesNear, setHolder, tidyProvinces, transferAll, useProvinces } from './land';
-import { PLANT_K, type Env } from './env';
+import { landCell, PLANT_K, type Env } from './env';
 import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
@@ -404,6 +404,19 @@ function dropUnusedClans(sim: SimState): void {
  * between them, by a coast, can be painted sea).
  */
 export function landPoint(env: Env, x: number, y: number): { x: number; y: number } {
+  // With the painted land to go by: the place itself if it is land (right up to the coast), or
+  // the nearest land to it, looked for in widening rings.
+  if (env.landAt) {
+    if (env.landAt(x, y)) return { x, y };
+    for (let r = 1; r <= 12; r++) {
+      const d = (r * env.step) / 4;
+      for (let a = 0; a < 16; a++) {
+        const px = x + Math.cos((a / 16) * Math.PI * 2) * d;
+        const py = y + Math.sin((a / 16) * Math.PI * 2) * d;
+        if (env.landAt(px, py)) return { x: px, y: py };
+      }
+    }
+  }
   const k = cellOf(env, x, y);
   if (k >= 0 && env.land[k]) return { x: xOf(env, k), y: yOf(env, k) };
   let best: { x: number; y: number } | null = null;
@@ -978,7 +991,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
       const near = mine.length
         ? () => [...new Set([st, ...mine].flatMap((q) => cellsNear(env, q.x, q.y, R)))]
         : (x: number, y: number, r: number) => cellsNear(env, x, y, r);
-      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, cellOf(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
+      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, landCell(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
     }
     // On another layer: less from the land below, and what the layer itself grows (layers.ts).
     if (st.layer && !town) {

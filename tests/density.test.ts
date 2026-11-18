@@ -5,9 +5,10 @@ import type { Library } from '../src/core/library';
 import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { defaultSettings } from '../src/core/settings';
 import { canLiveTogether, densityAt, densityMonth, densityOf, seedDensity, totalsOver, type DensityRace } from '../src/sim/density';
-import { buildEnv, type Env } from '../src/sim/env';
+import { attachLandAt, buildEnv, landCell, type Env } from '../src/sim/env';
+import { provAt, PK } from '../src/sim/land';
 import { packSim, unpackSim } from '../src/sim/pack';
-import { addDawnCity, DAY_WALK, newSim, settlementTier, stepDays } from '../src/sim/sim';
+import { addDawnCity, DAY_WALK, moveSettlement, newSim, settlementTier, stepDays } from '../src/sim/sim';
 import { newEconomy } from '../src/sim/economy';
 import type { Settlement } from '../src/sim/state';
 
@@ -133,6 +134,32 @@ describe('wilderness density', () => {
     expect(total('dwarf')).toBeGreaterThan(90);
     expect(total('elf')).toBeLessThan(total('dwarf'));
   });
+
+  it('lets a dawn city stand right on the coast, where it is dropped, without snapping to the climate’s points', () => {
+    const e2 = buildEnv(computeClimate(surface, settings), lib, surface);
+    attachLandAt(e2, () => surface, settings.seed, 0);
+    // A spot on the painted land whose climate point is sea (the coast between the points).
+    let spot: { x: number; y: number } | null = null;
+    for (let x = 2200; x < 2600 && !spot; x += 0.1) {
+      const k = Math.round((1000 - e2.y0) / e2.step) * e2.w + Math.round((x - e2.x0) / e2.step);
+      if (e2.landAt!(x, 1000) && !e2.land[k]) spot = { x, y: 1000 };
+    }
+    expect(spot).not.toBeNull();
+    const sim = newSim(e2, 21);
+    const humanId = lib.species.find((q) => q.name === 'Human')!.races.find((r) => r.name === 'Human')!.id;
+    const city = addDawnCity(sim, e2, lib, humanId, 1500, 1000, 600, ['agriculture', 'husbandry', 'fishing'])!;
+    moveSettlement(sim, e2, lib, city.id, spot!.x, spot!.y);
+    expect([city.x, city.y]).toEqual([spot!.x, spot!.y]);
+    // Its climate point (for food, trade and roads) is land, and its province a land one.
+    expect(e2.land[landCell(e2, city.x, city.y)]).toBe(1);
+    const p = provAt(e2, city.x, city.y);
+    expect(p).toBeGreaterThanOrEqual(0);
+    expect(e2.prov.kind[p]).toBe(PK.land);
+    // A year on, it is still exactly there.
+    stepDays(sim, e2, lib, 360);
+    expect([city.x, city.y]).toEqual([spot!.x, spot!.y]);
+    expect(city.ruined).toBe(false);
+  }, 120000);
 
   describe('settlements from the wild (step 2)', () => {
     const humanId = () => lib.species.find((q) => q.name === 'Human')!.races.find((r) => r.name === 'Human')!.id;
