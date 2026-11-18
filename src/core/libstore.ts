@@ -1,4 +1,4 @@
-import { cloneLibrary, emptyProfile, emptyStats, LIBRARY_FORMAT, readLibrary, STAT_KEYS, type Library, type Size, type Species } from './library';
+import { cloneLibrary, emptyLiving, emptyProfile, emptyStats, LIBRARY_FORMAT, readLibrary, STAT_KEYS, type Library, type RaceLiving, type Size, type Species } from './library';
 import { ROSTER } from '../data/roster';
 import { START_BEASTS, START_RESOURCES, START_TRAITS } from '../data/startlists';
 import { START_TECHS } from '../data/techs';
@@ -34,11 +34,58 @@ export function defaultLibrary(): Library {
       races: sp.races.map((r, i) => {
         const stats = emptyStats();
         STAT_KEYS.forEach((k, j) => (stats[k] = r.stats[j]));
-        return { id: `${id}.${i + 1}`, name: r.name, size: r.size as Size | null, stats, fightingAge: r.fightingAge, lifespan: r.lifespan, affinity: r.affinity, affinity2: r.affinity2, specialty: r.specialty, notes: r.notes, addTraits: [], removeTraits: [], lifestyle: '', climates: [] };
+        return { id: `${id}.${i + 1}`, name: r.name, size: r.size as Size | null, stats, fightingAge: r.fightingAge, lifespan: r.lifespan, affinity: r.affinity, affinity2: r.affinity2, specialty: r.specialty, notes: r.notes, addTraits: [], removeTraits: [], lifestyle: '', climates: [], living: emptyLiving() };
       }),
     };
   });
-  return cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS, techs: START_TECHS, behaviours: START_BEHAVIOURS, traditions: START_TRADITIONS, cultures: [], governments: START_GOVERNMENTS, tenets: START_TENETS, faiths: [], gods: [] });
+  return livingDefaults(cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS, techs: START_TECHS, behaviours: START_BEHAVIOURS, traditions: START_TRADITIONS, cultures: [], governments: START_GOVERNMENTS, tenets: START_TENETS, faiths: [], gods: [] }));
+}
+
+type Tol = Partial<Pick<RaceLiving, 'heat' | 'cold' | 'wet' | 'dry' | 'altitude'>>;
+/**
+ * Where the roster's peoples live (REDESIGN.md, "Where peoples live", step 2), filled in once:
+ * the Adaptable trait (Humans have it), and tolerances and water needs only where the people
+ * plainly calls for them (the rest stay unset: the middle, 3). Only values still unset are
+ * filled, and never again once the author has had the library (so their changes stand).
+ */
+function livingDefaults(lib: Library): Library {
+  const done = new Set(lib.applied ?? []);
+  if (done.has('living-1')) return lib;
+  if (!lib.traits.some((t) => t.id === 'adaptable')) lib.traits.push({ id: 'adaptable', name: 'Adaptable', description: 'Takes to new lands quickly: over generations its people come to bear climates past what their kind once could.', for: ['sentient'], effects: [] });
+  const sp = (name: string) => lib.species.find((s) => s.name === name);
+  const species = (name: string, t: Tol) => {
+    const s = sp(name);
+    if (!s) return;
+    for (const [k, v] of Object.entries(t) as [keyof Tol, number][]) if (s.profile[k] === null) s.profile[k] = v;
+  };
+  const races = (name: string, o: { race?: string; t?: Tol; water?: string; covers?: string[] }) => {
+    for (const r of sp(name)?.races ?? []) {
+      if (o.race && r.name !== o.race) continue;
+      for (const [k, v] of Object.entries(o.t ?? {}) as [keyof Tol, number][]) if (r.living[k] === null) r.living[k] = v;
+      if (o.water && !r.living.water) r.living.water = o.water;
+      if (o.covers && !r.living.covers.length) r.living.covers = o.covers.slice();
+    }
+  };
+  const human = sp('Human');
+  if (human && !human.traits.includes('adaptable')) human.traits.push('adaptable');
+  races('Elf', { race: 'Winter Elves', t: { cold: 5, heat: 2 } });
+  species('Dwarf', { altitude: 4, cold: 4 });
+  species('Capra', { altitude: 5, cold: 4 });
+  species('Bird-folk', { altitude: 4 });
+  species('Bear-folk', { cold: 4 });
+  races('Bear-folk', { race: 'GoatBear', t: { altitude: 4 } });
+  species('Crocodile-folk', { heat: 4, wet: 5, cold: 2 });
+  races('Crocodile-folk', { water: 'High' });
+  species('Lizard-folk', { heat: 4, dry: 4, cold: 2 });
+  species('Shwana', { wet: 5 });
+  races('Shwana', { water: 'High' });
+  species('Taluty', { heat: 4, wet: 4 });
+  races('Taluty', { covers: ['jungle'] });
+  // Constructs don't drink.
+  for (const c of ['Gargoyle', 'Toy Soldier', 'Vasaleth']) races(c, { water: 'None' });
+  species('Gargoyle', { heat: 5, cold: 5, altitude: 5 });
+  lib.applied = [...done, 'living-1'];
+  return lib;
 }
 
 /**
@@ -52,6 +99,8 @@ export function upgradeLibrary(raw: unknown): Library {
   for (const key of ['traits', 'resources', 'species', 'beasts', 'techs', 'behaviours', 'traditions', 'cultures', 'governments', 'tenets', 'faiths', 'gods'] as const) {
     if (!Array.isArray(o[key])) (lib[key] as unknown[]) = start[key] as unknown[];
   }
+  // Where its peoples live (step 2 of "Where peoples live"), filled in once where still unset.
+  livingDefaults(lib);
   // Cultures named their preferred government before there was a creator: link the name to the government.
   for (const c of lib.cultures) {
     if (c.government && !lib.governments.some((gv) => gv.id === c.government)) {

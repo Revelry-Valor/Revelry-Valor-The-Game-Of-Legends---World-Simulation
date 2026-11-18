@@ -10,6 +10,9 @@ import {
   HERDING,
   LAYERS_PREF,
   LIFESTYLES,
+  PRIORITIES,
+  WATER_NEEDS,
+  emptyLiving,
   LIMBS,
   makeId,
   MOVES,
@@ -349,7 +352,39 @@ export function showLibrary(app: App, world: World | null): () => void {
       multi('Lacks these species traits', sp.traits, sp.traits.map((id) => lib.traits.find((t) => t.id === id)?.name ?? id), () => r.removeTraits, (v) => (r.removeTraits = v)),
       multi('Own preferred climates', ZONE_INFO.map((_, i) => i), ZONE_NAMES, () => r.climates, (v) => (r.climates = v), 'Leave empty to share the species’.'),
       text('Notes', () => r.notes, (v) => (r.notes = v), { long: true }),
+      livingEditor(sp, r),
     );
+  /** Where a race lives: its own requirements (blank: as the species) and what draws it most (REDESIGN.md, "Where peoples live"). */
+  const livingEditor = (sp: Species, r: Race) => {
+    r.living ??= emptyLiving();
+    const L = r.living;
+    const p = sp.profile;
+    const tolField = (label: string, key: 'heat' | 'cold' | 'wet' | 'dry' | 'altitude', what: string) =>
+      select(label, ['1', '2', '3', '4', '5'], () => (L[key] === null ? '' : String(L[key])), (v) => (L[key] = v ? Number(v) : null), { names: TOL, blank: `As the species (${p[key] ?? '3, not set'})`, hint: what });
+    const PRI_VALUES = ['0', '0.5', '1', '1.5', '2'];
+    const PRI_NAMES = ['Not at all', 'Little', 'Usual', 'Much', 'Very much'];
+    const priField = (key: (typeof PRIORITIES)[number], label: string, what: string) =>
+      select(label, PRI_VALUES, () => (L.priorities[key] === 1 ? '' : String(L.priorities[key])), (v) => (L.priorities[key] = v ? Number(v) : 1), { names: PRI_NAMES, blank: 'Usual', hint: what });
+    const hasTrait = sp.traits.includes('adaptable') ? !r.removeTraits.includes('adaptable') : r.addTraits.includes('adaptable');
+    return h('details', { class: 'lib-section lib-wide', open: true }, h('summary', {}, 'Where it lives'),
+      h('p', { class: 'muted small' }, 'What this race needs from a place, and what draws it. A place failing a need is off limits however rich; past a tolerance life gets harder the further past. Leave a tolerance blank to share the species’. See them at work in View → Attraction.'),
+      h('div', { class: 'lib-grid' },
+        tolField('Heat tolerance', 'heat', 'The hottest season it can bear (1: about 79 °F, 3: 93 °F, 5: 111 °F).'),
+        tolField('Cold tolerance', 'cold', 'The coldest season it can bear (1: about 46 °F, 3: 14 °F, 5: −31 °F).'),
+        tolField('Wet tolerance', 'wet', 'Rain all year round (3 bears rainforest).'),
+        tolField('Dry tolerance', 'dry', 'Little rain (1 needs moist country, 5 bears near desert).'),
+        tolField('Altitude tolerance', 'altitude', 'Height it can live at (1: about 2,600 ft, 3: 8,200 ft, 5: 16,400 ft).'),
+        select('Fresh water it needs', WATER_NEEDS, () => L.water, (v) => (L.water = v), { blank: 'Normal', names: ['High: right by a river or lake', 'Normal: within a short walk (about 6 mi), or rain enough to live on', 'Low: within a long walk (about 19 mi), or some rain', 'None: it doesn’t drink'] }),
+        multi('Own preferred ground cover', COVER_BRUSHES, COVER_BRUSHES.map(coverName), () => L.covers, (v) => (L.covers = v), 'Leave empty to share the species’.'),
+        multi('Own heights', [0, 1, 2, 3, 4], MOUNTAIN_ZONES, () => L.heights, (v) => (L.heights = v), 'Where it likes to live, lowland to peaks. Leave empty to share the species’.'),
+        priField('food', 'Draws it: food', 'Wild food, game and fish.'),
+        priField('water', 'Draws it: being by water', 'How much it prefers right by a river or lake over a walk away.'),
+        priField('resources', 'Draws it: resources', 'Wood, stone, metals and the like.'),
+        priField('trade', 'Draws it: trade', 'Coasts and rivers.'),
+        select('Adaptable', ['Yes', 'No'], () => L.adaptable, (v) => (L.adaptable = v), { blank: `From its traits (${hasTrait ? 'yes' : 'no'})`, hint: 'Adapts quickly to new lands: over generations its people come to bear climates past what their kind once could.' }),
+      ),
+    );
+  };
   const missingEl = h('p', { class: 'needs' });
   let missingFor: Race | null = null;
   const renderMissing = () => {

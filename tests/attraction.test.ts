@@ -5,6 +5,7 @@ import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/c
 import { defaultSettings } from '../src/core/settings';
 import { attraction, CLIMATE_OFF, provinceAttraction, provinceLiving, rainFed, SHORT_WALK_KM, type Wants } from '../src/sim/attraction';
 import { buildEnv, type Env } from '../src/sim/env';
+import { attractionFor, wantsOf, raceInfo } from '../src/sim/sim';
 
 const settings = defaultSettings({ widthKm: 3000, heightKm: 2000, northLatitude: 45, seed: 12 });
 const surface: Surface = { strokes: [], nextId: 1 };
@@ -61,6 +62,48 @@ describe('where peoples live: requirements and attraction', () => {
     const zb = env.zone![by];
     expect(attraction(env, wants({ climates: [zb] }), by).score).toBeGreaterThan(attraction(env, wants({ climates: [(zb + 5) % 14] }), by).score);
     void zone;
+  });
+
+  it('asks of each race the water it needs: right by it, a short or long walk, or none at all', () => {
+    const near = [...env.land.keys()].find((k) => env.land[k] && !env.fresh[k] && env.freshKm![k] > 4 && env.freshKm![k] <= SHORT_WALK_KM)!;
+    const mid = [...env.land.keys()].find((k) => env.land[k] && env.freshKm![k] > 15 && env.freshKm![k] < 28 && !rainFed(env, k))!;
+    expect(attraction(env, wants({ water: 'High' }), near).off).toMatch(/right by fresh water/);
+    expect(attraction(env, wants({ water: 'Normal' }), near).water).toBe(0.75);
+    if (mid !== undefined) {
+      expect(attraction(env, wants({ water: 'Normal' }), mid).off).not.toBe('');
+      expect(attraction(env, wants({ water: 'Low' }), mid).water).toBeGreaterThan(0);
+    }
+    const dry = [...env.land.keys()].find((k) => env.land[k] && env.freshKm![k] > 60 && !rainFed(env, k, 'wet'));
+    if (dry !== undefined) expect(attraction(env, wants({ water: 'None' }), dry).water).toBe(1);
+  });
+
+  it('weighs what draws each race most: trade counts double for a trading people', () => {
+    const coast = [...env.coast.keys()].find((k) => env.coast[k] && env.land[k] && attraction(env, wants(), k).score > 0)!;
+    expect(coast).toBeDefined();
+    const usual = attraction(env, wants(), coast);
+    const traders = attraction(env, wants({ priorities: { food: 1, water: 1, resources: 1, trade: 2 } }), coast);
+    expect(traders.trade).toBeCloseTo(usual.trade * 2, 5);
+    expect(traders.score).toBeGreaterThan(usual.score);
+  });
+
+  it('takes a race’s own options over its species’, with its traits’ effects', () => {
+    const lib = defaultLibrary();
+    const elf = lib.species.find((q) => q.name === 'Elf')!;
+    const winter = elf.races.find((r) => r.name === 'Winter Elves')!;
+    const plain = elf.races.find((r) => r.name === 'Elf')!;
+    expect(wantsOf(env, raceInfo(lib, winter.id)!).tolerances.cold).toBe(5);
+    expect(wantsOf(env, raceInfo(lib, plain.id)!).tolerances.cold).toBe(3);
+    // A trait with an effect on a tolerance (Cold-adapted: cold +2, heat −1).
+    plain.addTraits.push('cold-adapted');
+    const t = wantsOf(env, raceInfo(lib, plain.id)!).tolerances;
+    expect([t.cold, t.heat]).toEqual([5, 2]);
+    // Water need and adaptable from the race's options; Humans adaptable by their trait.
+    winter.living.water = 'Low';
+    expect(wantsOf(env, raceInfo(lib, winter.id)!).water).toBe('Low');
+    const human = lib.species.find((q) => q.name === 'Human')!.races[0];
+    expect(raceInfo(lib, human.id)!.adaptable).toBe(true);
+    expect(raceInfo(lib, winter.id)!.adaptable).toBe(false);
+    expect(attractionFor(env, lib, winter.id)).not.toBeNull();
   });
 
   it('sums up each province: its seasons, height and water, and how much it draws a race', () => {

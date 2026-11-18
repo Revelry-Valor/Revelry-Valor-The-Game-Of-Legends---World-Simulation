@@ -63,6 +63,10 @@ export interface RaceInfo {
   manaSensitive: boolean;
   /** What it brings to the other layers: digging, and the layers it prefers (Phase 12). */
   lw: LayerWays;
+  /** Adapts quickly to new lands (its own setting, or the Adaptable trait). */
+  adaptable: boolean;
+  /** The summed effect of its traits on a target (e.g. 'Cold tolerance'). */
+  traitEffect(target: string): number;
 }
 
 const SIZE_NEED: Record<string, number> = { Tiny: 0.3, Small: 0.6, Medium: 1, Large: 1.6, Giant: 3 };
@@ -107,6 +111,12 @@ export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures:
       attitude: p.attitude || 'Wary',
       manaSensitive: traits.has('mana-sensitive'),
       lw: layerWays(lib, species, race),
+      adaptable: race.living?.adaptable ? race.living.adaptable === 'Yes' : traits.has('adaptable'),
+      traitEffect: (target) => {
+        let n = 0;
+        for (const id of traits) for (const e of lib.traits.find((t) => t.id === id)?.effects ?? []) if (e.target === target) n += e.amount;
+        return n;
+      },
     };
   }
   return null;
@@ -175,15 +185,13 @@ const easeCache = new WeakMap<Env, Map<string, Float32Array>>();
  * ground covers and heights (the species' and the race's own), far quicker along coasts and
  * rivers. Peoples with no preferences set spread evenly.
  */
-function wildEase(env: Env, ri: RaceInfo, k: number): number {
+function wildEase(env: Env, ri: RaceInfo, k: number, w: Wants = wantsOf(env, ri)): number {
   if (!env.land[k]) return 0.1;
-  const p = ri.species.profile;
-  const climates = ri.race.climates.length ? ri.race.climates : p.climates;
   const zone = env.zone?.[k] ?? -1;
-  const cm = climates.length && zone >= 0 ? (climates.includes(zone) ? 1 : 0.35) : 1;
+  const cm = w.climates.length && zone >= 0 ? (w.climates.includes(zone) ? 1 : 0.35) : 1;
   const cover = env.cover[k] >= 0 ? COVER_BRUSHES[env.cover[k]] : '';
-  const vm = p.covers.length && cover ? (p.covers.includes(cover) ? 1 : 0.5) : 1;
-  const zm = p.mountainZones.length ? (p.mountainZones.includes(env.mzone[k]) ? 1 : 0.4) : env.mzone[k] >= 3 ? 0.4 : 1;
+  const vm = w.covers.length && cover ? (w.covers.includes(cover) ? 1 : 0.5) : 1;
+  const zm = w.heights.length ? (w.heights.includes(env.mzone[k]) ? 1 : 0.4) : env.mzone[k] >= 3 ? 0.4 : 1;
   const water = env.coast[k] || env.fresh[k] ? 1.5 : 1;
   return Math.max(0.1, Math.min(1.5, cm * vm * zm * water));
 }
@@ -194,19 +202,21 @@ function densityRace(sim: SimState, env: Env, lib: Library, info: Info, race: st
   if (!ri) return null;
   let m = liveCache.get(env);
   if (!m) liveCache.set(env, (m = new Map()));
-  let L = m.get(race);
+  const wk = wantsKey(env, ri);
+  let L = m.get(wk);
   if (!L) {
     L = new Float32Array(env.n);
     for (let k = 0; k < env.n; k++) L[k] = liveScore(env, ri, k);
-    m.set(race, L);
+    m.set(wk, L);
   }
   const live = L;
-  let E = easeCache.get(env)?.get(race);
+  let E = easeCache.get(env)?.get(wk);
   if (!E) {
     E = new Float32Array(env.n);
-    for (let k = 0; k < env.n; k++) E[k] = wildEase(env, ri, k);
+    const w = wantsOf(env, ri);
+    for (let k = 0; k < env.n; k++) E[k] = wildEase(env, ri, k, w);
     if (!easeCache.has(env)) easeCache.set(env, new Map());
-    easeCache.get(env)!.set(race, E);
+    easeCache.get(env)!.set(wk, E);
   }
   const ease = E;
   return { need: ri.need, births: ri.births, deaths: ri.deaths, attitude: ri.attitude, species: ri.species.id, live: (k) => live[k], ease: (k) => ease[k] };
@@ -299,19 +309,39 @@ export function addTribe(sim: SimState, env: Env, lib: Library, raceId: string, 
   return t;
 }
 
-/** What a race asks of a place and what draws it (attraction.ts): its species' tolerances and preferences, the race's own climates. */
+/**
+ * What a race asks of a place and what draws it (attraction.ts): its own tolerances, preferences,
+ * water need and priorities (the Library's race options), else its species', with its traits'
+ * effects on the tolerances (Cold-adapted, Heat-adapted…); unset tolerances are the middle, 3.
+ */
 export function wantsOf(env: Env, ri: RaceInfo): Wants {
   const p = ri.species.profile;
+  const own = ri.race.living;
+  const tol = (key: 'heat' | 'cold' | 'wet' | 'dry' | 'altitude', label: string) => Math.max(1, Math.min(5, (own?.[key] ?? p[key] ?? 3) + ri.traitEffect(label)));
   return {
-    tolerances: { heat: p.heat ?? 3, cold: p.cold ?? 3, wet: p.wet ?? 3, dry: p.dry ?? 3, altitude: p.altitude ?? 3 },
+    tolerances: { heat: tol('heat', 'Heat tolerance'), cold: tol('cold', 'Cold tolerance'), wet: tol('wet', 'Wet tolerance'), dry: tol('dry', 'Dry tolerance'), altitude: tol('altitude', 'Altitude tolerance') },
     climates: ri.race.climates.length ? ri.race.climates : p.climates,
-    covers: p.covers,
-    heights: p.mountainZones,
+    covers: own?.covers.length ? own.covers : p.covers,
+    heights: own?.heights.length ? own.heights : p.mountainZones,
     manaSensitive: ri.manaSensitive,
     passable: (k) => passable(env, ri, k),
+    water: own?.water || 'Normal',
+    priorities: own?.priorities ?? { food: 1, water: 1, resources: 1, trade: 1 },
   };
 }
 const attractCache = new WeakMap<Env, Map<string, Float32Array>>();
+/** A race's settings as a key (so its worked-out maps are kept until its Library options change). */
+const wantsKeys = new WeakMap<RaceInfo, string>();
+const wantsMemo = new WeakMap<RaceInfo, { env: Env; w: Wants }>();
+function wantsKey(env: Env, ri: RaceInfo): string {
+  let k = wantsKeys.get(ri);
+  if (!k) {
+    const { passable: _p, ...rest } = wantsOf(env, ri);
+    k = `${ri.race.id}|${ri.flies}|${ri.mountains}|${ri.swims}|${JSON.stringify(rest)}`;
+    wantsKeys.set(ri, k);
+  }
+  return k;
+}
 /** A race's attraction (for the Attraction view and readouts): what it asks, and its score at each point (cached; −1 off limits). */
 export function attractionFor(env: Env, lib: Library, raceId: string): { wants: Wants; score: (k: number) => number } | null {
   const ri = raceInfo(lib, raceId);
@@ -326,12 +356,17 @@ function liveScore(env: Env, ri: RaceInfo, k: number, _cl?: { zone: Int8Array })
   if (k < 0) return -1;
   let m = attractCache.get(env);
   if (!m) attractCache.set(env, (m = new Map()));
-  let A = m.get(ri.race.id);
+  const wk = wantsKey(env, ri);
+  let A = m.get(wk);
   if (!A) {
     A = new Float32Array(env.n).fill(NaN);
-    m.set(ri.race.id, A);
+    m.set(wk, A);
   }
-  if (Number.isNaN(A[k])) A[k] = attraction(env, wantsOf(env, ri), k).score;
+  if (Number.isNaN(A[k])) {
+    let wm = wantsMemo.get(ri);
+    if (!wm || wm.env !== env) wantsMemo.set(ri, (wm = { env, w: wantsOf(env, ri) }));
+    A[k] = attraction(env, wm.w, k).score;
+  }
   return A[k];
 }
 

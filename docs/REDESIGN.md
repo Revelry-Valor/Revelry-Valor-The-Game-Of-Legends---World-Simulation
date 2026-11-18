@@ -1135,6 +1135,30 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *The Attraction view* (View panel): choose a race and each province is coloured from red (poor) through yellow to green (much wanted), dark where it is off limits for most of it. Shown as soon as the land is known, before the peoples begin. Hovering gives the breakdown, for example "1.15 = water 0.60 (wet enough to live off the rain) × climate 1.00 × (food 1.62 + resources +0.30)", or "off limits: no fresh water, and too dry to live off the rain".
 - *The province card* shows its seasons and rain, height, fresh water (in it, or how far, and how much of it is within a short walk), how much of it is wet enough to live off the rain, the coast, and (with the Attraction view on) how much it draws that race.
 
+**Built (step 2): race options in the Library** (each race's "Where it lives" section)
+- *Its own tolerances* for heat, cold, wet, dry and altitude (blank: as the species, and 3 where the species has none). Traits with tolerance effects count too (Cold-adapted: cold +2, heat −1; Heat-adapted the other way).
+- *Its own preferred ground cover and heights* (empty: as the species'); its preferred climates as before.
+- *Fresh water it needs:*
+  - High: right by a river or lake, within about 3 km (rain won't do);
+  - Normal: a short walk (10 km), or rain enough to live on;
+  - Low: a long walk (30 km), or wet country in one season;
+  - None: it doesn't drink (constructs).
+- *What draws it most:* food, being by water, resources and trade, each from "not at all" through "usual" to "very much" (0 to 2). Food, resources and trade scale their pulls; "being by water" sets how much it prefers right by the water over a walk away. Cultures will push these up and down later.
+- *Adaptable:* Yes, No, or from its traits. The new *Adaptable* trait (Humans have it) is used by step 3.
+- *Starting values,* filled in once (also in libraries already saved, only where still unset; never put back after the author changes them):
+  - Winter Elves: cold 5, heat 2.
+  - Dwarves: altitude 4, cold 4.
+  - Capra: altitude 5, cold 4.
+  - Bird-folk: altitude 4.
+  - Bear-folk: cold 4 (GoatBear also altitude 4).
+  - Crocodile-folk: heat 4, wet 5, cold 2; needs water High.
+  - Lizard-folk: heat 4, dry 4, cold 2.
+  - Shwana: wet 5; needs water High.
+  - Taluty: heat 4, wet 4, jungle.
+  - Gargoyles, Toy Soldiers and Vasaleth need no water (Gargoyles bear any climate).
+  - Everyone else is at 3 until set.
+- The simulation keeps what it works out about each race until its options change.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

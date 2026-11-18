@@ -164,6 +164,54 @@ export interface Race {
   /** Overrides of the species' lifestyle and preferred climates (empty: as the species). */
   lifestyle: string;
   climates: number[];
+  /** Where it lives (REDESIGN.md, "Where peoples live"): its requirements and what draws it. */
+  living: RaceLiving;
+}
+
+/** How much fresh water a people needs: High (right by it), Normal (a short walk), Low (a long walk; light rain will do), None (it doesn't drink). */
+export const WATER_NEEDS = ['High', 'Normal', 'Low', 'None'] as const;
+/** What draws a people most: each counts from 0 (not at all) to 2 (twice as much); 1 is usual. */
+export const PRIORITIES = ['food', 'water', 'resources', 'trade'] as const;
+export type Priority = (typeof PRIORITIES)[number];
+
+/** A race's own requirements and what draws it (nulls and empties: as its species, or the usual). */
+export interface RaceLiving {
+  /** Tolerances, 1 (poor) to 5 (excellent); null as the species. */
+  heat: number | null;
+  cold: number | null;
+  wet: number | null;
+  dry: number | null;
+  altitude: number | null;
+  /** Its own preferred ground covers and mountain zones (empty: as the species). */
+  covers: string[];
+  heights: number[];
+  /** How much fresh water it needs ('' Normal). */
+  water: string;
+  /** What draws it most (1 usual). */
+  priorities: Record<Priority, number>;
+  /** Adapts quickly to new lands: Yes, No, or '' (from its traits: Adaptable). */
+  adaptable: string;
+}
+
+export const emptyLiving = (): RaceLiving => ({ heat: null, cold: null, wet: null, dry: null, altitude: null, covers: [], heights: [], water: '', priorities: { food: 1, water: 1, resources: 1, trade: 1 }, adaptable: '' });
+
+export function readLiving(v: unknown): RaceLiving {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const pr = (o.priorities && typeof o.priorities === 'object' ? o.priorities : {}) as Record<string, unknown>;
+  const tol = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(1, Math.min(5, Math.round(x))) : null);
+  const pri = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(2, x)) : 1);
+  return {
+    heat: tol(o.heat),
+    cold: tol(o.cold),
+    wet: tol(o.wet),
+    dry: tol(o.dry),
+    altitude: tol(o.altitude),
+    covers: Array.isArray(o.covers) ? o.covers.filter((x): x is string => typeof x === 'string') : [],
+    heights: Array.isArray(o.heights) ? o.heights.filter((x): x is number => typeof x === 'number') : [],
+    water: typeof o.water === 'string' && (WATER_NEEDS as readonly string[]).includes(o.water) ? o.water : '',
+    priorities: { food: pri(pr.food), water: pri(pr.water), resources: pri(pr.resources), trade: pri(pr.trade) },
+    adaptable: o.adaptable === 'Yes' || o.adaptable === 'No' ? o.adaptable : '',
+  };
 }
 
 export interface Species {
@@ -402,6 +450,8 @@ export interface Library {
   tenets: Tenet[];
   faiths: Faith[];
   gods: God[];
+  /** One-time upgrades already made to this library (so a value the author changed is never put back). */
+  applied?: string[];
 }
 
 export const LIBRARY_FORMAT = 1;
@@ -433,7 +483,7 @@ export const emptyProfile = (): Profile => ({
   interbreeds: [],
 });
 
-export const newRace = (id: string, name: string): Race => ({ id, name, size: null, stats: emptyStats(), fightingAge: null, lifespan: null, affinity: '', affinity2: '', specialty: '', notes: '', addTraits: [], removeTraits: [], lifestyle: '', climates: [] });
+export const newRace = (id: string, name: string): Race => ({ id, name, size: null, stats: emptyStats(), fightingAge: null, lifespan: null, affinity: '', affinity2: '', specialty: '', notes: '', addTraits: [], removeTraits: [], lifestyle: '', climates: [], living: emptyLiving() });
 export const newSpecies = (id: string, name: string, kind = ''): Species => ({ id, name, kind, setAside: false, traits: [], notes: '', profile: emptyProfile(), social: '', lifestyle: '', temperament: '', building: [], troops: '', races: [newRace(`${id}.1`, name)] });
 export const newBeast = (id: string, name: string): Beast => ({ id, name, kind: '', size: null, stats: emptyStats(), lifespan: null, traits: [], notes: '', profile: emptyProfile(), uses: [], resources: [], herding: '', hunting: null, domestication: null });
 export const newTrait = (id: string, name: string): Trait => ({ id, name, description: '', for: ['sentient', 'beast'], effects: [] });
@@ -516,6 +566,7 @@ export function readLibrary(raw: unknown): Library {
   const hasId = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && typeof (x as Record<string, unknown>).id === 'string';
   return {
     format: LIBRARY_FORMAT,
+    ...(Array.isArray(o.applied) ? { applied: strs(o.applied) } : {}),
     traits: arr(o.traits, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), description: str(x.description), for: strs(x.for).filter((f) => f === 'sentient' || f === 'beast') as Trait['for'], effects: arr(x.effects, (e) => (e && typeof e === 'object' ? { target: str((e as Record<string, unknown>).target), amount: num((e as Record<string, unknown>).amount) ?? 0 } : null)) } : null)),
     resources: arr(o.resources, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), category: str(x.category), source: str(x.source), rarity: str(x.rarity) || 'Common', description: str(x.description), climates: nums(x.climates), covers: strs(x.covers), terrain: strs(x.terrain) } : null)),
     species: arr(o.species, (x) => {
@@ -533,7 +584,7 @@ export function readLibrary(raw: unknown): Library {
         temperament: str(x.temperament),
         building: strs(x.building),
         troops: str(x.troops),
-        races: arr(x.races, (r) => (hasId(r) ? { id: r.id as string, name: str(r.name), size: sizeOf(r.size), stats: readStats(r.stats), fightingAge: num(r.fightingAge), lifespan: num(r.lifespan), affinity: str(r.affinity), affinity2: str(r.affinity2), specialty: str(r.specialty), notes: str(r.notes), addTraits: strs(r.addTraits), removeTraits: strs(r.removeTraits), lifestyle: str(r.lifestyle), climates: nums(r.climates) } : null)),
+        races: arr(x.races, (r) => (hasId(r) ? { id: r.id as string, name: str(r.name), size: sizeOf(r.size), stats: readStats(r.stats), fightingAge: num(r.fightingAge), lifespan: num(r.lifespan), affinity: str(r.affinity), affinity2: str(r.affinity2), specialty: str(r.specialty), notes: str(r.notes), addTraits: strs(r.addTraits), removeTraits: strs(r.removeTraits), lifestyle: str(r.lifestyle), climates: nums(r.climates), living: readLiving(r.living) } : null)),
       };
     }),
     beasts: arr(o.beasts, (x) => (hasId(x) ? { id: x.id as string, name: str(x.name), kind: str(x.kind), size: sizeOf(x.size), stats: readStats(x.stats), lifespan: num(x.lifespan), traits: strs(x.traits), notes: str(x.notes), profile: readProfile(x.profile), uses: strs(x.uses), resources: strs(x.resources), herding: str(x.herding), hunting: num(x.hunting), domestication: num(x.domestication) } : null)),

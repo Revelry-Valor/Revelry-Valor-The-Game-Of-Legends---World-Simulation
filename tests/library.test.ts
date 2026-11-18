@@ -61,9 +61,27 @@ describe('technology and culture in the library', () => {
     const old = { format: 1, traits: [], resources: [], species: lib.species.slice(0, 2), beasts: [] };
     const up = upgradeLibrary(old);
     expect(up.species.length).toBe(2);
-    expect(up.traits).toEqual([]);
+    // What it had is kept; only the Adaptable trait is added (where peoples live, step 2).
+    expect(up.traits.map((t) => t.id)).toEqual(['adaptable']);
     expect(up.techs.length).toBe(lib.techs.length);
     expect(up.traditions.length).toBe(lib.traditions.length);
+  });
+  it('fills in where the roster’s peoples live once, and never puts back what the author changed', () => {
+    expect(lib.traits.some((t) => t.id === 'adaptable')).toBe(true);
+    expect(lib.species.find((s) => s.name === 'Human')!.traits).toContain('adaptable');
+    const winter = lib.species.find((s) => s.name === 'Elf')!.races.find((r) => r.name === 'Winter Elves')!;
+    expect(winter.living.cold).toBe(5);
+    expect(lib.species.find((s) => s.name === 'Gargoyle')!.races[0].living.water).toBe('None');
+    // An older library (before races had these options) gets them, unset, with the same fill.
+    const old = JSON.parse(JSON.stringify({ ...lib, applied: undefined }));
+    for (const s of old.species) for (const r of s.races) delete r.living;
+    const up = upgradeLibrary(old);
+    expect(up.species.find((s) => s.name === 'Elf')!.races.find((r) => r.name === 'Winter Elves')!.living.cold).toBe(5);
+    expect(up.applied).toContain('living-1');
+    // Changed by the author afterwards: kept as it is.
+    up.species.find((s) => s.name === 'Elf')!.races.find((r) => r.name === 'Winter Elves')!.living.cold = 2;
+    const again = upgradeLibrary(JSON.parse(JSON.stringify(up)));
+    expect(again.species.find((s) => s.name === 'Elf')!.races.find((r) => r.name === 'Winter Elves')!.living.cold).toBe(2);
   });
 });
 

@@ -276,7 +276,7 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .lib-section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 1rem 0.9rem; }
 .lib-section > summary { cursor: pointer; font-family: var(--serif); font-weight: 700; font-size: 1.05rem; padding: 0.2rem 0; }
 .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.8rem 1.1rem; margin-top: 0.6rem; }
-.lib-grid .wide, .lib-grid .stats-grid, .lib-grid textarea { grid-column: 1 / -1; }
+.lib-grid .wide, .lib-grid .lib-wide, .lib-grid .stats-grid, .lib-grid textarea { grid-column: 1 / -1; }
 .lib-grid .field:has(.chips), .lib-grid .field:has(textarea), .lib-grid .field.wide { grid-column: 1 / -1; }
 .lib-grid input[type='text'], .lib-grid select, .lib-grid textarea { font: inherit; width: 100%; padding: 0.35rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
 .lib-grid input[type='number'] { width: 7rem; }

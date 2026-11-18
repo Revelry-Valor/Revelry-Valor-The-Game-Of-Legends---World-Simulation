@@ -48,7 +48,23 @@ export interface Wants {
   manaSensitive: boolean;
   /** Can it go there at all (high mountains, water). */
   passable(k: number): boolean;
+  /** How much fresh water it needs: High, Normal, Low or None (see WATER). */
+  water?: string;
+  /** What draws it most: food, water, resources and trade, each 0 to 2 (1 usual). */
+  priorities?: { food: number; water: number; resources: number; trade: number };
 }
+
+/**
+ * Water needs: how far from fresh water it will live (km), and what rain will do instead
+ * ('very': very wet in one season and wet in the other; 'wet': wet in one season; 'never').
+ */
+export const WATER: Record<string, { walkKm: number; rain: 'very' | 'wet' | 'never'; none?: boolean }> = {
+  High: { walkKm: 3, rain: 'never' },
+  Normal: { walkKm: 10, rain: 'very' },
+  Low: { walkKm: 30, rain: 'wet' },
+  None: { walkKm: Infinity, rain: 'very', none: true },
+};
+
 
 // Each tolerance's limit, by level 1–5, and how much past the limit makes the place one step harsher.
 /** Hottest season's mean temperature (°C). */
@@ -83,11 +99,12 @@ export interface Attraction {
   score: number;
 }
 
-/** Whether a place's rain is enough to live on without a river or lake. */
-export const rainFed = (env: Env, k: number) => {
+/** Whether a place's rain is enough to live on without a river or lake (for a people needing the usual; 'wet' for those needing little). */
+export const rainFed = (env: Env, k: number, how: 'very' | 'wet' | 'never' = 'very') => {
+  if (how === 'never') return false;
   const a = env.rain?.[0][k] ?? 0;
   const b = env.rain?.[1][k] ?? 0;
-  return Math.max(a, b) >= RAIN_VERY_WET && Math.min(a, b) >= RAIN_WET;
+  return how === 'wet' ? Math.max(a, b) >= RAIN_WET : Math.max(a, b) >= RAIN_VERY_WET && Math.min(a, b) >= RAIN_WET;
 };
 
 /** How much a place draws a people, and why (see the top of this file). */
@@ -95,14 +112,19 @@ export function attraction(env: Env, w: Wants, k: number): Attraction {
   const none: Attraction = { off: '', water: 0, waterWhy: '', climate: 0, harsh: [], food: 0, prefer: 0, resources: 0, trade: 0, mana: 0, score: -1 };
   if (k < 0 || !env.land[k]) return { ...none, off: 'not land' };
   if (!w.passable(k)) return { ...none, off: 'they cannot go there' };
-  // ---- Water ----
+  // ---- Water (by how much it needs) ----
+  const need = WATER[w.water || 'Normal'] ?? WATER.Normal;
   const fk = env.freshKm?.[k] ?? (env.fresh[k] ? 0 : Infinity);
   let water = 0;
   let waterWhy = '';
-  if (env.fresh[k]) [water, waterWhy] = [1, 'by a river or lake'];
-  else if (fk <= SHORT_WALK_KM) [water, waterWhy] = [0.75, `fresh water ${Math.round(fk)} km off`];
-  else if (rainFed(env, k)) [water, waterWhy] = [0.6, 'wet enough to live off the rain'];
-  else waterWhy = Number.isFinite(fk) ? `no fresh water within a short walk (nearest ${Math.round(fk)} km), and too dry to live off the rain` : 'no fresh water, and too dry to live off the rain';
+  if (need.none) [water, waterWhy] = [1, 'needs no water'];
+  else if (env.fresh[k]) [water, waterWhy] = [1, 'by a river or lake'];
+  else if (fk <= need.walkKm) [water, waterWhy] = [need.walkKm > SHORT_WALK_KM ? Math.max(0.6, 0.85 - fk / 100) : 0.75, `fresh water ${Math.round(fk)} km off`];
+  else if (rainFed(env, k, need.rain)) [water, waterWhy] = [0.6, 'wet enough to live off the rain'];
+  else waterWhy = need.rain === 'never' ? `must live right by fresh water (nearest ${Number.isFinite(fk) ? `${Math.round(fk)} km` : 'far'} off)` : Number.isFinite(fk) ? `no fresh water within a ${need.walkKm > SHORT_WALK_KM ? 'long' : 'short'} walk (nearest ${Math.round(fk)} km), and too dry to live off the rain` : 'no fresh water, and too dry to live off the rain';
+  const pri = w.priorities ?? { food: 1, water: 1, resources: 1, trade: 1 };
+  // How much being right by the water matters to them (1 usual; 0 not at all, 2 twice as much).
+  if (water > 0) water = Math.pow(water, pri.water);
   // ---- Climate ----
   const t = w.tolerances;
   const hot = Math.max(env.temp[0][k], env.temp[1][k]);
@@ -140,8 +162,8 @@ export function attraction(env: Env, w: Wants, k: number): Attraction {
   const resources = Math.min(0.3, res);
   const trade = Math.min(0.25, (env.coast[k] ? 0.15 : 0) + (env.fresh[k] ? 0.15 : 0));
   const mana = w.manaSensitive ? 0.5 * (env.manaBase[k] - 0.2) : 0;
-  const pulls = Math.max(0, food + prefer + resources + trade) + mana;
-  const a: Attraction = { off: '', water, waterWhy, climate, harsh, food, prefer, resources, trade, mana, score: water * climate * pulls };
+  const pulls = Math.max(0, food * pri.food + prefer + resources * pri.resources + trade * pri.trade) + mana;
+  const a: Attraction = { off: '', water, waterWhy, climate, harsh, food: food * pri.food, prefer, resources: resources * pri.resources, trade: trade * pri.trade, mana, score: water * climate * pulls };
   if (!water) a.off = waterWhy;
   else if (climate < CLIMATE_OFF) a.off = `too harsh: ${harsh.join(', ')}`;
   if (a.off) a.score = -1;
