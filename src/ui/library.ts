@@ -382,6 +382,7 @@ export function showLibrary(app: App, world: World | null): () => void {
         priField('resources', 'Draws it: resources', 'Wood, stone, metals and the like.'),
         priField('trade', 'Draws it: trade', 'Coasts and rivers.'),
         select('Adaptable', ['Yes', 'No'], () => L.adaptable, (v) => (L.adaptable = v), { blank: `From its traits (${hasTrait ? 'yes' : 'no'})`, hint: 'Adapts quickly to new lands: over generations its people come to bear climates past what their kind once could.' }),
+        multi('Always has', lib.traditions.map((t) => t.id), lib.traditions.map((t) => t.name), () => (L.always ??= []), (v) => (L.always = v), 'Traditions every culture of this race always keeps, in every town, whatever else it develops (a race made for war is always warlike).'),
       ),
     );
   };

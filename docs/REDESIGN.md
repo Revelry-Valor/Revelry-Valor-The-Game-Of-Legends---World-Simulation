@@ -1193,6 +1193,14 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Shown:* on the town's card ("Culture: Toral (here: + Seafaring (Partial))") and in the hover; the chronicle notes each change ("Torgal has taken to Seafaring (still Toral: its own ways there)").
 - On the 60-year test world, 30 more years: coastal towns of the Toral culture took to Seafaring, others to Artisans and Tillers, all still their culture.
 
+**Built (step 2): conquest leftovers, the core following its towns, ways that draw a people, and "Always has"**
+- *A town that changes culture keeps its old ways for a while:* when a town becomes another culture (conquered, won over), up to three of its old culture's traditions that the new one lacks stay with it as local ways, shown by where they came from ("Culture: Roman (here: Celtic ways: + Clan loyalty)"). The chronicle notes it ("Alesia keeps its old Celtic ways (Clan loyalty, Storytellers) as it becomes Roman").
+  - Old ways its life still calls for become its own local ways (a Celtic port keeps Seafaring).
+  - The rest fade over the generations (about thirty years a degree), with a note when one is gone ("Alesia's old Celtic Clan loyalty has faded: it is Roman now").
+- *The core follows the majority:* where a culture has three or more towns and most of its people (60%, towns and their villages, by population) share the same local change, it becomes the culture's own: added to the culture (or let go, unless Locked), and no longer a local change ("The Toral as a whole have taken to Seafaring: most of their towns live that way").
+- *Ways draw a people:* a culture's traditions add to how much a place draws its people: Seafaring the coast, River folk rivers, Highlanders and Miners hills, Forest folk forest, Herders and Horse lords open grass, Tillers rivers and open land, Desert wanderers dry country (more the deeper the tradition). This counts where families spread and settle in the wild, and where a town's people found new villages (by the town's own version).
+- *Always has* (race options, Library): traditions every culture of that race keeps, locked, whatever their land or history (a warlike race always Warrior culture).
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

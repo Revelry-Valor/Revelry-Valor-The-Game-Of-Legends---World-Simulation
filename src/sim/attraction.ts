@@ -59,6 +59,8 @@ export interface Wants {
   water?: string;
   /** What draws it most: food, water, resources and trade, each 0 to 2 (1 usual). */
   priorities?: { food: number; water: number; resources: number; trade: number };
+  /** What its culture's ways draw it to at a point (a seafaring people to coasts…; culture.ts). */
+  lean?: (k: number) => number;
 }
 
 /**
@@ -182,6 +184,7 @@ export function attraction(env: Env, w: Wants, k: number): Attraction {
   if (w.climates.length && zone >= 0) prefer += w.climates.includes(zone) ? 0.3 : -0.2;
   if (w.covers.length && cover) prefer += w.covers.includes(cover) ? 0.15 : -0.05;
   if (w.heights.length) prefer += w.heights.includes(env.mzone[k]) ? 0.15 : -0.1;
+  prefer += w.lean?.(k) ?? 0;
   let res = 0;
   for (const r of env.resInfo) if ((env.res[r.id]?.[k] ?? 0) > 0.4) res += 0.03;
   const resources = Math.min(0.3, res);

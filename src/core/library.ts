@@ -191,9 +191,11 @@ export interface RaceLiving {
   priorities: Record<Priority, number>;
   /** Adapts quickly to new lands: Yes, No, or '' (from its traits: Adaptable). */
   adaptable: string;
+  /** Traditions every culture of this race always keeps, in every town (a race made for war is always warlike). */
+  always: string[];
 }
 
-export const emptyLiving = (): RaceLiving => ({ heat: null, cold: null, wet: null, dry: null, altitude: null, covers: [], heights: [], water: '', priorities: { food: 1, water: 1, resources: 1, trade: 1 }, adaptable: '' });
+export const emptyLiving = (): RaceLiving => ({ heat: null, cold: null, wet: null, dry: null, altitude: null, covers: [], heights: [], water: '', priorities: { food: 1, water: 1, resources: 1, trade: 1 }, adaptable: '', always: [] });
 
 export function readLiving(v: unknown): RaceLiving {
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
@@ -211,6 +213,7 @@ export function readLiving(v: unknown): RaceLiving {
     water: typeof o.water === 'string' && (WATER_NEEDS as readonly string[]).includes(o.water) ? o.water : '',
     priorities: { food: pri(pr.food), water: pri(pr.water), resources: pri(pr.resources), trade: pri(pr.trade) },
     adaptable: o.adaptable === 'Yes' || o.adaptable === 'No' ? o.adaptable : '',
+    always: Array.isArray(o.always) ? o.always.filter((x): x is string => typeof x === 'string') : [],
   };
 }
 

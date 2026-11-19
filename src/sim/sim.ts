@@ -16,7 +16,7 @@ import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
-import { cultureFx, cultureOf, cultureYear, ensureCulture, localYear, note, pushes, townFx } from './culture';
+import { cultureFx, cultureOf, cultureYear, ensureCulture, leanAt, leansOf, localYear, note, pushes, townFx, traditionsHere, type Leans } from './culture';
 import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
 import { ensureRealm, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
@@ -66,6 +66,8 @@ export interface RaceInfo {
   lw: LayerWays;
   /** Adapts quickly to new lands (its own setting, or the Adaptable trait). */
   adaptable: boolean;
+  /** Where its culture's ways draw its people (culture.ts: seafaring to coasts…). */
+  leans: Leans;
   /** Tolerance its culture's people have gained in hard country (levels, to the nearest quarter). */
   adapt: { heat: number; cold: number; wet: number; dry: number; altitude: number };
   /** The summed effect of its traits on a target (e.g. 'Cold tolerance'). */
@@ -115,6 +117,7 @@ export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures:
       manaSensitive: traits.has('mana-sensitive'),
       lw: layerWays(lib, species, race),
       adaptable: race.living?.adaptable ? race.living.adaptable === 'Yes' : traits.has('adaptable'),
+      leans: leansOf((cultures.find((c) => c.id === cultureId) ?? lib.cultures.find((c) => c.id === cultureId))?.traditions.filter((t) => t.level >= 0) ?? []),
       adapt: (() => {
         const a = (cultures.find((c) => c.id === cultureId) as LiveCulture | undefined)?.adapt;
         const q = (v: number | undefined) => Math.round((v ?? 0) * 4) / 4;
@@ -336,6 +339,7 @@ export function wantsOf(env: Env, ri: RaceInfo): Wants {
     passable: (k) => passable(env, ri, k),
     water: own?.water || 'Normal',
     priorities: own?.priorities ?? { food: 1, water: 1, resources: 1, trade: 1 },
+    lean: Object.keys(ri.leans ?? {}).length ? (k) => leanAt(env, ri.leans, k) : undefined,
   };
 }
 const attractCache = new WeakMap<Env, Map<string, { score: Float32Array; climate: Float32Array }>>();
@@ -346,7 +350,7 @@ function wantsKey(env: Env, ri: RaceInfo): string {
   let k = wantsKeys.get(ri);
   if (!k) {
     const { passable: _p, ...rest } = wantsOf(env, ri);
-    k = `${ri.race.id}|${ri.flies}|${ri.mountains}|${ri.swims}|${JSON.stringify(rest)}`;
+    k = `${ri.race.id}|${ri.flies}|${ri.mountains}|${ri.swims}|${JSON.stringify(rest)}|${JSON.stringify(ri.leans ?? {})}`;
     wantsKeys.set(ri, k);
   }
   return k;
@@ -1510,6 +1514,7 @@ function villagesFromWild(sim: SimState, env: Env, lib: Library, info: Info): vo
       let kin: Settlement | null = null;
       for (const s of sim.settlements) if (!s.ruined && s.race === race && !s.layer && (!kin || dist(env, s.x, s.y, x, y) < dist(env, kin.x, kin.y, x, y))) kin = s;
       const knowsIt = (id: string) => (kin ? knows(lib, kin, id) : false);
+      const kinLeans = kin ? leansOf(traditionsHere(sim, kin)) : null;
       // The best spot round them, not on top of another settlement.
       const spacing = ri.range * 1.6;
       let spot = -1;
@@ -1521,7 +1526,8 @@ function villagesFromWild(sim: SimState, env: Env, lib: Library, info: Info): vo
         const cx = xOfCell(env, c);
         const cy = yOf(env, c);
         if (sim.settlements.some((o) => !o.ruined && !o.layer && dist(env, o.x, o.y, cx, cy) < spacing)) continue;
-        const s = liveScore(env, ri, c) + (env.fresh[c] ? 0.4 : env.coast[c] ? 0.3 : 0) + Math.min(1, D[c] / 20) * 0.3;
+        // Its kin town's own ways draw it too (a seafaring town's families to the coast).
+        const s = liveScore(env, ri, c) + (env.fresh[c] ? 0.4 : env.coast[c] ? 0.3 : 0) + Math.min(1, D[c] / 20) * 0.3 + (kinLeans ? leanAt(env, kinLeans, c) : 0);
         if (s > best) [best, spot] = [s, c];
       }
       if (spot < 0) continue;

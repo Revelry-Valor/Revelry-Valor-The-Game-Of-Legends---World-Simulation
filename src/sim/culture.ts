@@ -377,10 +377,24 @@ function behaviourPractice(id: string, pr: ReturnType<typeof profile>): number {
 }
 
 /** The year's change in every culture: traditions taking root, deepening and fading; behaviours taken up. */
+/** What its races always keep (the Library's "Always has"): locked in, at least at the first degree. */
+function keepAlways(lib: Library, cult: LiveCulture): void {
+  for (const sp of lib.species) for (const r of sp.races) {
+    if (!cult.races.includes(r.id) || !r.living?.always?.length) continue;
+    for (const id of r.living.always) {
+      if (!lib.traditions.some((t) => t.id === id)) continue;
+      const e = cult.traditions.find((t) => t.id === id);
+      if (e) Object.assign(e, { hold: 'Locked', level: Math.max(0, e.level) });
+      else cult.traditions.push({ id, level: 0, hold: 'Locked', progress: 0 });
+    }
+  }
+}
+
 export function cultureYear(c: CultureContext): void {
   const { sim, lib } = c;
   fxCache.delete(sim);
   const cultures = sim.cultures ?? [];
+  for (const cu of cultures) keepAlways(lib, cu);
   const alive = cultures.filter((cu) => sim.settlements.some((s) => !s.ruined && s.culture === cu.id) || sim.tribes.some((t) => t.culture === cu.id));
   // Where each culture is (for contact with others).
   const places = new Map(alive.map((cu) => [cu.id, [...sim.settlements.filter((s) => !s.ruined && s.culture === cu.id), ...sim.tribes.filter((t) => t.culture === cu.id)]]));
@@ -504,11 +518,38 @@ export function localYear(c: CultureContext): void {
     if (pr.p.pop <= 0) continue;
     const local = (st.local ??= []);
     const core = new Map(cult.traditions.filter((t) => t.level >= 0).map((t) => [t.id, t]));
-    const active = () => local.filter((q) => q.level >= 0).length;
+    // Taken on another culture (by its rulers, a big neighbour, a split): its old ways it keeps
+    // for a while as its own, fading over generations unless its life there keeps them.
+    if (st.lastCulture && st.lastCulture !== st.culture) inherit(c, st, cultureOf(sim, st.lastCulture), cult);
+    st.lastCulture = st.culture;
+    const scoreOf = (id: string) => traditionScore(c, cult, id, pr, [], true);
+    for (const q of [...local]) {
+      if (!q.from) continue;
+      if (core.has(q.id)) {
+        local.splice(local.indexOf(q), 1);
+        continue;
+      }
+      // Still lived by: an old way it keeps as its own.
+      if (LOCAL_WAYS.includes(q.id) && scoreOf(q.id) >= 0.3) {
+        delete q.from;
+        continue;
+      }
+      q.progress -= 1 / (YEARS_PER_DEGREE * 1.5);
+      if (q.progress <= -1) {
+        q.level--;
+        q.progress = 0;
+        if (q.level < 0) {
+          local.splice(local.indexOf(q), 1);
+          c.log(`${st.name}'s old ${q.from} ${tradName(lib, q.id)} has faded: it is ${cult.name} now.`, st.x, st.y);
+        }
+      }
+    }
+    const active = () => local.filter((q) => q.level >= 0 && !q.from).length;
     for (const id of LOCAL_WAYS) {
       const t = lib.traditions.find((q) => q.id === id);
       if (!t) continue;
-      const score = traditionScore(c, cult, id, pr, [], true);
+      if (local.some((q) => q.id === id && q.from)) continue;
+      const score = scoreOf(id);
       const levels = Math.max(1, t.levels.length);
       const want = score < 0.3 ? -2 : Math.min(levels - 1, Math.floor(((score - 0.3) / 0.7) * levels));
       const inCore = core.get(id);
@@ -562,17 +603,100 @@ export function localYear(c: CultureContext): void {
       }
     }
     // Joined villages live by their town's version.
-    for (const v of members) delete v.local;
+    for (const v of members) {
+      delete v.local;
+      v.lastCulture = v.culture;
+    }
   }
+  coreFollows(c);
   fxCache.delete(sim);
+}
+
+/** A town that has taken on another culture keeps its old culture's traditions (those the new one lacks) as its own, for a while. */
+function inherit(c: CultureContext, st: Settlement, old: LiveCulture | undefined, now: LiveCulture): void {
+  if (!old) return;
+  const has = new Set(now.traditions.filter((t) => t.level >= 0).map((t) => t.id));
+  const kept = old.traditions.filter((t) => t.level >= 0 && !has.has(t.id)).sort((a, b) => b.level - a.level).slice(0, MAX_LOCAL);
+  // What it had of its own goes with the old culture; the old culture's ways come in their place.
+  st.local = (st.local ?? []).filter((q) => q.change === 'add' && !q.from && !kept.some((t) => t.id === q.id) && !has.has(q.id));
+  for (const t of kept) st.local.push({ id: t.id, change: 'add', level: Math.min(t.level, 1), progress: 0, from: old.name });
+  if (kept.length) c.log(`${st.name} keeps its old ${old.name} ways (${kept.map((t) => tradName(c.lib, t.id)).join(', ')}) as it becomes ${now.name}.`, st.x, st.y);
+}
+
+/**
+ * The core follows the majority: where most of a culture's people (by its towns) live by the same
+ * local change, it becomes the culture's own (or, for a tradition dropped, the culture lets it go),
+ * and the towns no longer need it as a change of their own.
+ */
+function coreFollows(c: CultureContext): void {
+  const { sim, lib } = c;
+  for (const cult of sim.cultures ?? []) {
+    const towns = sim.settlements.filter((s) => !s.ruined && !s.layer && s.partOf === undefined && s.culture === cult.id);
+    if (towns.length < 3) continue;
+    const popOf = (s: Settlement) => s.pop + sim.settlements.filter((q) => q.partOf === s.id && !q.ruined).reduce((n, q) => n + q.pop, 0);
+    const total = towns.reduce((n, s) => n + popOf(s), 0);
+    if (total <= 0) continue;
+    for (const change of ['add', 'drop'] as const) {
+      const ids = new Set(towns.flatMap((s) => (s.local ?? []).filter((q) => q.change === change && q.level >= 0 && !q.from).map((q) => q.id)));
+      for (const id of ids) {
+        const living = towns.filter((s) => s.local?.some((q) => q.id === id && q.change === change && q.level >= 0 && !q.from));
+        if (living.reduce((n, s) => n + popOf(s), 0) / total < 0.6) continue;
+        const entry = cult.traditions.find((t) => t.id === id);
+        if (change === 'add') {
+          if (entry && entry.level >= 0) continue;
+          if (entry) Object.assign(entry, { level: 0, progress: 0 });
+          else cult.traditions.push({ id, level: 0, hold: '', progress: 0 });
+          c.log(`The ${cult.name} as a whole have taken to ${tradName(lib, id)}: most of their towns live that way.`, living[0].x, living[0].y);
+        } else {
+          if (!entry || entry.hold === 'Locked') continue;
+          cult.traditions = cult.traditions.filter((t) => t !== entry);
+          c.log(`The ${cult.name} as a whole have let ${tradName(lib, id)} go: most of their towns no longer live that way.`, living[0].x, living[0].y);
+        }
+        for (const s of living) s.local = s.local!.filter((q) => !(q.id === id && q.change === change));
+      }
+    }
+  }
 }
 
 /** A settlement's local changes, for its card and the hover ("+ Seafaring (Partial), − Tillers"), or ''. */
 export function localText(sim: SimState, lib: Library, st: Settlement): string {
   const ways = localOf(sim, st).filter((q) => q.level >= 0);
   if (!ways.length) return '';
-  return ways.map((q) => {
+  const one = (q: (typeof ways)[number]) => {
     const t = lib.traditions.find((x) => x.id === q.id);
     return q.change === 'add' ? `+ ${t?.name ?? q.id}${t && t.levels.length > 1 ? ` (${t.levels[q.level]?.name ?? ''})` : ''}` : `− ${t?.name ?? q.id}`;
-  }).join(', ');
+  };
+  const own = ways.filter((q) => !q.from).map(one);
+  // Old ways kept from a culture it had before, by that culture.
+  const old = [...new Set(ways.filter((q) => q.from).map((q) => q.from!))].map((from) => `${from} ways: ${ways.filter((q) => q.from === from).map(one).join(', ')}`);
+  return [...own, ...old].join('; ');
+}
+
+/**
+ * Where a people's traditions draw it (REDESIGN.md, step 2): a seafaring people favours coasts, river
+ * folk rivers, highlanders and miners hills, forest folk forest, herders open grass, desert
+ * wanderers dry country. Pulls added to a place of that kind, by degree.
+ */
+const LEANS: Record<string, Partial<Record<'coast' | 'river' | 'hills' | 'forest' | 'open' | 'desert', number>>> = {
+  seafaring: { coast: 0.3 },
+  'river-folk': { river: 0.25 },
+  highlanders: { hills: 0.25 },
+  miners: { hills: 0.15 },
+  woodland: { forest: 0.25 },
+  herders: { open: 0.2 },
+  'horse-lords': { open: 0.2 },
+  tillers: { river: 0.1, open: 0.1 },
+  'desert-wanderers': { desert: 0.25 },
+};
+export type Leans = Partial<Record<'coast' | 'river' | 'hills' | 'forest' | 'open' | 'desert', number>>;
+export function leansOf(trads: { id: string; level: number }[]): Leans {
+  const out: Leans = {};
+  for (const t of trads) for (const [k, v] of Object.entries(LEANS[t.id] ?? {}) as [keyof Leans, number][]) out[k] = (out[k] ?? 0) + v * (1 + 0.5 * t.level);
+  return out;
+}
+/** How much a place draws a people with these leanings. */
+export function leanAt(env: Env, leans: Leans, k: number): number {
+  if (k < 0) return 0;
+  const pl = placeOf(env, k);
+  return (pl.coast ? leans.coast ?? 0 : 0) + (pl.fresh ? leans.river ?? 0 : 0) + (pl.hills ? leans.hills ?? 0 : 0) + (pl.forest ? leans.forest ?? 0 : 0) + (pl.open ? leans.open ?? 0 : 0) + (pl.desert ? leans.desert ?? 0 : 0);
 }

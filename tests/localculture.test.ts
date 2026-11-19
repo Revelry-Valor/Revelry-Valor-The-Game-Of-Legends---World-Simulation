@@ -4,7 +4,9 @@ import { defaultLibrary } from '../src/core/libstore';
 import type { Library } from '../src/core/library';
 import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { defaultSettings } from '../src/core/settings';
-import { localText, localYear, pushes, townFx, traditionsHere, type CultureContext } from '../src/sim/culture';
+import { cultureYear, localText, localYear, pushes, townFx, traditionsHere, type CultureContext } from '../src/sim/culture';
+import { attraction } from '../src/sim/attraction';
+import { raceInfo, wantsOf } from '../src/sim/sim';
 import { newEconomy } from '../src/sim/economy';
 import { buildEnv, type Env } from '../src/sim/env';
 import { addDawnCity, newSim } from '../src/sim/sim';
@@ -82,5 +84,75 @@ describe('regional versions of a culture (step 1)', () => {
     expect(townFx(sim, frontier).fight).toBeGreaterThan(townFx(sim, city).fight);
     // Never more than a few changes a town.
     for (const st of sim.settlements) expect((st.local ?? []).filter((q) => q.level >= 0).length).toBeLessThanOrEqual(3);
+  });
+
+  describe('step 2', () => {
+    it('lets a conquered town keep its old culture’s ways for a while as it becomes the new one', () => {
+      const sim = newSim(env, 3);
+      const inlandK = [...env.land.keys()].find((k) => env.land[k] && !env.coast[k] && !env.fresh[k] && env.mzone[k] === 0)!;
+      const rome = addDawnCity(sim, env, lib, humanId(), at(inlandK).x, at(inlandK).y, 1500, ['agriculture'])!;
+      rome.economy!.jobs = { 'farm:grain': 300 };
+      const romans = sim.cultures!.find((c) => c.id === rome.culture)!;
+      romans.traditions = romans.traditions.filter((t) => t.id !== 'clan-loyalty' && t.id !== 'oral-tradition');
+      const celtic = { ...sim.cultures!.find((c) => c.id === rome.culture)!, id: 'celtic', name: 'Celtic', traditions: [{ id: 'clan-loyalty', level: 1, hold: '', progress: 0 }, { id: 'oral-tradition', level: 0, hold: '', progress: 0 }] };
+      sim.cultures!.push(celtic);
+      const taken = town(sim, rome, inlandK + 5, { 'farm:grain': 300 });
+      taken.culture = 'celtic';
+      sim.day += 360;
+      localYear(ctx(sim));
+      // Rome's rulers win it over.
+      taken.culture = rome.culture;
+      sim.day += 360;
+      localYear(ctx(sim));
+      expect(traditionsHere(sim, taken).map((t) => t.id)).toEqual(expect.arrayContaining(['clan-loyalty', 'oral-tradition']));
+      expect(localText(sim, lib, taken)).toMatch(/Celtic ways: \+ Clan loyalty/);
+      expect(sim.events.some((e) => e.text.includes(`${taken.name} keeps its old Celtic ways`))).toBe(true);
+      // Generations on, ways its life no longer calls for fade: it is Roman now.
+      for (let y = 0; y < 90; y++) {
+        sim.day += 360;
+        localYear(ctx(sim));
+      }
+      expect(traditionsHere(sim, taken).some((t) => t.id === 'clan-loyalty' || t.id === 'oral-tradition')).toBe(false);
+      expect(sim.events.some((e) => /old Celtic .* has faded/.test(e.text))).toBe(true);
+    });
+
+    it('makes a way most of its towns live by the culture’s own, and lets its ways draw its people', () => {
+      const sim = newSim(env, 4);
+      const coasts = [...env.coast.keys()].filter((k) => env.coast[k] && env.land[k] && env.mzone[k] === 0);
+      const first = coasts[0];
+      const city = addDawnCity(sim, env, lib, humanId(), at(first).x, at(first).y, 1500, ['agriculture', 'fishing'])!;
+      city.economy!.jobs = { 'fish:fish': 300 };
+      const cult = sim.cultures!.find((c) => c.id === city.culture)!;
+      cult.traditions = cult.traditions.filter((t) => t.id !== 'seafaring');
+      const others = [coasts[Math.floor(coasts.length / 3)], coasts[Math.floor((2 * coasts.length) / 3)], coasts[coasts.length - 1]].map((k) => town(sim, city, k, { 'fish:fish': 300 }));
+      for (let y = 0; y < 60; y++) {
+        sim.day += 360;
+        localYear(ctx(sim));
+      }
+      expect(cult.traditions.some((t) => t.id === 'seafaring' && t.level >= 0)).toBe(true);
+      expect(sim.events.some((e) => /as a whole have taken to Seafaring/.test(e.text))).toBe(true);
+      // No longer a change of their own: it is the culture's.
+      for (const st of [city, ...others]) expect((st.local ?? []).some((q) => q.id === 'seafaring')).toBe(false);
+      // Its people are drawn to the coast more than before.
+      const ri = raceInfo(lib, humanId(), cult.id, sim.cultures!)!;
+      const plain = raceInfo(lib, humanId())!;
+      const k = coasts.find((q) => attraction(env, wantsOf(env, plain), q).score > 0)!;
+      expect(attraction(env, wantsOf(env, ri), k).prefer).toBeGreaterThan(attraction(env, wantsOf(env, plain), k).prefer);
+    });
+
+    it('keeps what a race always has in every culture of it', () => {
+      const sim = newSim(env, 5);
+      const human = lib.species.find((s) => s.name === 'Human')!.races[0];
+      human.living.always = ['martial'];
+      const k = [...env.land.keys()].find((q) => env.land[q] && env.mzone[q] === 0)!;
+      const city = addDawnCity(sim, env, lib, human.id, at(k).x, at(k).y, 800, ['agriculture'])!;
+      sim.day += 360;
+      cultureYear(ctx(sim));
+      const entry = sim.cultures!.find((c) => c.id === city.culture)!.traditions.find((t) => t.id === 'martial')!;
+      expect(entry.hold).toBe('Locked');
+      expect(entry.level).toBeGreaterThanOrEqual(0);
+      expect(townFx(sim, city).fight).toBeGreaterThan(1);
+      human.living.always = [];
+    });
   });
 });

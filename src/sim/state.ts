@@ -308,7 +308,9 @@ export interface Settlement {
    * dropped from them, by where it is and what it lives through. A joined village shares its town's.
    * 'add' entries have a level (−1 while taking root); progress runs toward the next change.
    */
-  local?: { id: string; change: 'add' | 'drop'; level: number; progress: number }[];
+  local?: { id: string; change: 'add' | 'drop'; level: number; progress: number; from?: string }[];
+  /** The culture it had last year (to see when it takes on another, keeping its old ways for a while). */
+  lastCulture?: string;
   /** Drawn toward another culture (a big neighbour's, or the many small ones round it): how far along (0–1). */
   cultureShift?: { to: string; progress: number };
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
