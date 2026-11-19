@@ -7,7 +7,7 @@ import type { Caravan, Settlement, SimState } from './state';
 import { allRail, knows, pathCells, pathSpeed, TRAIN_COAL_PER_100KM, WAYS } from './ways';
 import { AIR_PACE, nextWaypoint, routePlan, SHIP_PACE, type RoutePlan } from './routes';
 import { stepCost, traderWay } from './roads';
-import { cultureFx, note } from './culture';
+import { note, townFx } from './culture';
 import { acceptance, noteBetween } from './cultureChange';
 
 /**
@@ -161,7 +161,7 @@ export function willingness(c: TradeContext, a: Settlement, b: Settlement): numb
   if (a.species === b.species) w = Math.max(w, 0.8);
   if (a.culture && a.culture === b.culture) w = Math.min(1, w * 1.2);
   // Its culture: traders and the hospitable deal readily with other peoples; xenophobes and the closed hardly.
-  else w = Math.min(1, w * cultureFx(sim, a.culture).trade * (1 + 0.3 * acceptance(sim, a.culture, b.culture)));
+  else w = Math.min(1, w * townFx(sim, a).trade * (1 + 0.3 * acceptance(sim, a.culture, b.culture)));
   // Their realms: opinion, and a trade agreement.
   return Math.min(1, w * tradeFactor(sim, a.clan, b.clan));
 }
@@ -287,7 +287,8 @@ export function tradeMonth(c: TradeContext): void {
       } else if (winged && (aloft(a) || aloft(b))) [days, air] = [d / (speed * 1.5), true];
       if (!air && sails && coastal(c, b)) {
         const sp = seaPlanBetween(c, a, b);
-        const sd = sp.landKm / speed + sp.seaKm / (speed * SHIP_PACE);
+        // A seafaring town's ships go faster (its own version of its culture).
+        const sd = sp.landKm / speed + sp.seaKm / (speed * SHIP_PACE * townFx(sim, a).sail);
         if (sp.seaKm > 0 && sd < days) [days, ship] = [sd, true];
       }
       if (days > 25) continue;
@@ -435,7 +436,7 @@ export function caravansDay(c: TradeContext): void {
     if (k >= 0 && env.land[k]) sim.traffic[k] += (cv.people + cv.animals) / 10;
     const d = c.dist(cv.x, cv.y, goal.x, goal.y);
     // Faster along the way it is on (or under sail).
-    const step = cv.air ? cv.speed * AIR_PACE : cv.ship ? cv.speed * SHIP_PACE : cv.speed * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
+    const step = cv.air ? cv.speed * AIR_PACE : cv.ship ? cv.speed * SHIP_PACE * townFx(sim, home).sail : cv.speed * (k >= 0 ? WAYS[sim.way[k]].speed : 1);
     if (d > step && cv.air) {
       // Aloft: straight through the open air, over land and sea alike.
       let dx = goal.x - cv.x;

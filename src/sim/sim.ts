@@ -16,7 +16,7 @@ import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
-import { cultureFx, cultureOf, cultureYear, ensureCulture, note, pushes } from './culture';
+import { cultureFx, cultureOf, cultureYear, ensureCulture, localYear, note, pushes, townFx } from './culture';
 import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
 import { ensureRealm, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
@@ -708,7 +708,7 @@ function techContext(sim: SimState, env: Env, lib: Library): TechContext {
     log: (text, x, y) => log(sim, text, x, y),
     culture: (id) => cultureFx(sim, id),
     acceptance: (a, b) => acceptance(sim, a, b),
-    pushes: (cultureId, techId) => pushes(sim, lib, cultureId, techId),
+    pushes: (cultureId, techId, settlementId) => pushes(sim, lib, cultureId, techId, settlementId),
   };
 }
 /** What a settlement or clan may come to next, with yearly chances (for the Peoples tab). */
@@ -848,7 +848,7 @@ function raid(sim: SimState, env: Env, s: Sortie, st: Settlement, info: Info, li
   const has = (id: string) => knows(lib, st, id);
   const attack = s.strength * (ra?.might ?? 1) * armsMight((id) => clanKnows(lib, sim.clans.find((c) => c.id === s.clan), id)) * (home ? cultureFx(sim, home.culture).fight : 1) * (0.6 + 0.8 * rand(sim));
   // Defending their own homes, behind whatever they have built (walls, with fortification).
-  const defend = defenders * (rd?.might ?? 1) * armsMight(has) * wallsMight(has) * cultureFx(sim, st.culture).fight * 1.35 * (0.6 + 0.8 * rand(sim));
+  const defend = defenders * (rd?.might ?? 1) * armsMight(has) * wallsMight(has) * townFx(sim, st).fight * 1.35 * (0.6 + 0.8 * rand(sim));
   if (home) noteBetween(sim, home.culture, st.culture, 'fights');
   st.hardship = { famine: st.hardship?.famine ?? 0, war: (st.hardship?.war ?? 0) + 1 };
   const win = attack > defend;
@@ -1081,7 +1081,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
       const near = mine.length
         ? () => [...new Set([st, ...mine].flatMap((q) => cellsNear(env, q.x, q.y, R)))]
         : (x: number, y: number, r: number) => cellsNear(env, x, y, r);
-      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: cultureFx(sim, st.culture), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, landCell(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
+      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: townFx(sim, st), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, landCell(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
     }
     // On another layer: less from the land below, and what the layer itself grows (layers.ts).
     if (st.layer && !town) {
@@ -1093,7 +1093,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     if (st.fed < 0.6 && !sim.events.some((e) => e.text.startsWith(`Famine in ${st.name}`) && sim.day - e.day < DAYS_PER_YEAR)) log(sim, `Famine in ${st.name}: its stores are gone${st.economy?.harvest && st.economy.harvest.year < 0.8 ? ' after a bad harvest' : ''}.`, st.x, st.y);
     const f = Math.min(1.2, st.fed);
     const comfort = st.economy?.comfort ?? 1;
-    const scfx = cultureFx(sim, st.culture);
+    const scfx = townFx(sim, st);
     // Past what they can bear (attraction.ts), fewer are born and more die (walls and stores soften it a little).
     const hc = st.layer ? 1 : climateAt(env, ri, landCell(env, st.x, st.y));
     const births = (ri.births / 12) * 1.1 * Math.min(1, f) * (f >= 1 ? 1.3 : 1) * (0.85 + 0.15 * comfort) * scfx.births * hardBirths(hc);
@@ -1281,6 +1281,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     log: (text, x, y) => log(sim, text, x, y),
   });
   cultureYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
+  // Each town's own version of its culture: what it adds or drops by its life there (culture.ts).
+  localYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
   cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // Clean claims: holes filled, stray specks absorbed.

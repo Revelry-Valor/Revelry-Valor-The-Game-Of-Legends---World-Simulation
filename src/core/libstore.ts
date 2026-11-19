@@ -38,7 +38,7 @@ export function defaultLibrary(): Library {
       }),
     };
   });
-  return livingDefaults(cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS, techs: START_TECHS, behaviours: START_BEHAVIOURS, traditions: START_TRADITIONS, cultures: [], governments: START_GOVERNMENTS, tenets: START_TENETS, faiths: [], gods: [] }));
+  return cultureAdditions(livingDefaults(cloneLibrary({ format: LIBRARY_FORMAT, traits: START_TRAITS, resources: START_RESOURCES, species, beasts: START_BEASTS, techs: START_TECHS, behaviours: START_BEHAVIOURS, traditions: START_TRADITIONS, cultures: [], governments: START_GOVERNMENTS, tenets: START_TENETS, faiths: [], gods: [] })));
 }
 
 type Tol = Partial<Pick<RaceLiving, 'heat' | 'cold' | 'wet' | 'dry' | 'altitude'>>;
@@ -88,6 +88,18 @@ function livingDefaults(lib: Library): Library {
   return lib;
 }
 
+/** New traditions for regional versions of cultures (the Miners), added once to a library without them. */
+function cultureAdditions(lib: Library): Library {
+  const done = new Set(lib.applied ?? []);
+  if (done.has('cultures-1')) return lib;
+  for (const id of ['miners']) {
+    const t = START_TRADITIONS.find((q) => q.id === id);
+    if (t && !lib.traditions.some((q) => q.id === id)) lib.traditions.push(JSON.parse(JSON.stringify(t)));
+  }
+  lib.applied = [...(lib.applied ?? []), 'cultures-1'];
+  return lib;
+}
+
 /**
  * A saved library, brought up to date: parts it was saved without (an older library has no
  * technology or traditions yet) come from the starting library; parts it has are kept as they are.
@@ -101,6 +113,7 @@ export function upgradeLibrary(raw: unknown): Library {
   }
   // Where its peoples live (step 2 of "Where peoples live"), filled in once where still unset.
   livingDefaults(lib);
+  cultureAdditions(lib);
   // Cultures named their preferred government before there was a creator: link the name to the government.
   for (const c of lib.cultures) {
     if (c.government && !lib.governments.some((gv) => gv.id === c.government)) {

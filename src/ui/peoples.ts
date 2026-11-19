@@ -11,7 +11,7 @@ import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
 import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
 import { hasArchive, keepers } from '../sim/tech';
-import { cultureOf, MAX_TRADITIONS } from '../sim/culture';
+import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import type { Army, Battle, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
 import { kindName, total, UNIT_KINDS } from '../sim/battle';
@@ -1395,6 +1395,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       if (t) push('Tribe', `${t.name} (${clanOf(t.clan) ? realmName(lib(), clanOf(t.clan)!) : '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
       const st = t ? null : settlementAt(x, y, pxKm);
       if (st) push('Settlement', settlementLine(st));
+      if (st && !st.ruined) {
+        const cu = cultureOf(s, st.culture);
+        const here = localText(s, lib(), st);
+        if (cu) push('Culture', `${cu.name}${here ? ` (here: ${here})` : ''}`);
+      }
       // Living past what their race can bear: hard country (fewer births, more deaths).
       for (const g of [t, st]) {
         if (!g || (g as Settlement).layer) continue;
@@ -1795,9 +1800,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       }),
     ];
   };
-  const cultureLine = (id: string): HTMLElement | null => {
+  const cultureLine = (id: string, st?: Settlement): HTMLElement | null => {
     const cu = cultureOf(sim!, id);
-    return cu ? h('div', {}, `Culture: ${cu.name}${cu.source ? '' : ' (folk)'}`) : null;
+    // A town's own version of its culture: what it adds or drops by its life there.
+    const here = st ? localText(sim!, lib(), st) : '';
+    return cu ? h('div', {}, `Culture: ${cu.name}${cu.source ? '' : ' (folk)'}`, here ? h('span', { class: 'muted', title: 'This town’s own version of its culture: traditions it has taken up or let go by its life there (still the same culture).' }, ` (here: ${here})`) : null) : null;
   };
   /** How a culture sees the others it knows (acceptance). */
   const acceptancePart = (cu: LiveCulture): HTMLElement[] => {
@@ -2307,7 +2314,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           !st.ruined && s.started && st.loyalty !== undefined && clan?.realm?.capital !== st.id
             ? h('div', {}, `Loyalty: ${Math.round(st.loyalty * 100)}%${st.unrest ? `, discontented for ${st.unrest} year${st.unrest === 1 ? '' : 's'}` : ''}`)
             : null,
-          st.ruined ? null : cultureLine(st.culture),
+          st.ruined ? null : cultureLine(st.culture, st),
           st.ruined ? null : faithLine(st.faith, st.faithShift),
           !st.ruined && st.cultureShift ? h('div', { class: 'muted' }, `Being drawn into the ways of the ${cultureOf(s, st.cultureShift.to)?.name ?? '?'} (${Math.round(st.cultureShift.progress * 100)}%).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),

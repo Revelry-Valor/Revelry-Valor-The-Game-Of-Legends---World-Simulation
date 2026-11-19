@@ -1174,6 +1174,25 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Tolerances are now continuous,* so a culture part way adapted counts part way (and past 5, up to 7, for a people adapted beyond what its kind could ever bear).
 - On the 60-year test world (rainforest, where everyone is within their tolerances), 30 more years with the rifts held off grew settlements from 64 to 131 and people from about 12,300 to 27,300, and nobody needed to adapt.
 
+### Regional versions of a culture (agreed with the designer; option 3 after looking at Crusader Kings III)
+- *One culture, with regional versions.* A culture (say Roman) stays one culture: one name, colour and acceptance. Each town (with its joined villages) has its own small changes to it, earned from where it is and what it lives through: a coastal town **adds** Seafaring, a forest town Forest folk, a mountain town Highlanders, a mining town Miners, a frontier town often fought over Warrior ways, a big trade city Traders; a desert town **swaps** Tillers for Desert-wise (drops one, adds another). Earned and faded as traditions are (by living that way for generations); one to three changes a town, so it stays recognisably the culture. Its card reads "Roman (here: + Seafaring)".
+- *Effects follow the town's own version:* a seafaring town fishes better and trades further and cheaper by sea, and leans toward sailing and ship-building (ports and fleets as buildings come later).
+- *The core follows the majority:* when most of a culture's towns share a local way, it becomes a tradition of the culture itself, and the towns no longer need it as a change.
+- *Conquest:* a town taken by another culture becomes that culture slowly (rulers pressing it, the pull of big neighbours), but keeps its old traditions as local changes ("Roman (Celtic ways: + Clan loyalty, + Storytellers)"), which fade over generations unless its situation keeps them alive.
+- *Local ways feed what draws a people:* a seafaring town's families favour coasts, a mining town's hills.
+- *Race focus:* a race option "Always has": traditions every culture of that race always keeps, in every town.
+- *Sister cultures:* a region that drifts far enough for long enough (many local changes held for generations, far from the heartland) becomes a sister culture of the same family: shared heritage and language, high acceptance. Like Crusader Kings III's divergence, but earned by how the people live, not chosen by a ruler.
+- **Build steps:** (1) each town's version: local changes earned from its situation, their effects, shown on town cards and the hover; (2) conquest leaving old ways as fading local changes, the core following the majority, local ways feeding what draws a people, the "Always has" race option; (3) sister cultures from regions that have drifted far.
+
+**Built (step 1): each town's own version of its culture** (`sim/culture.ts`, local ways)
+- *Local ways:* each town (with its joined villages, which live by their town's version) earns changes to its culture by how it lives there: Seafaring, River folk, Highlanders, Forest folk, Desert wanderers, Tillers, Herders, Hunters, Miners (new), Artisans, Traders, and Warrior culture for a town often fought over (raided, besieged).
+  - **Adding:** a tradition its life calls for that its culture lacks is taken up, and deepens, as traditions are earned (about twenty years a degree).
+  - **Dropping:** a tradition of the land (sea, river, hills, forest, desert, farming, herding, hunting) that its land is wrong for is let go.
+  - A town has at most three changes, so it stays recognisably its culture. Changes fade the same way when its life changes.
+- *Effects follow the town's own version:* fishing, farming, herding and hunting yields, mines and quarries (Miners), fighting, trade, and how fast its ships sail (Seafaring). Its technology leanings too: a seafaring town leans toward sailing, navigation and ocean ships, a mining town toward metal-working and masonry, and so on.
+- *Shown:* on the town's card ("Culture: Toral (here: + Seafaring (Partial))") and in the hover; the chronicle notes each change ("Torgal has taken to Seafaring (still Toral: its own ways there)").
+- On the 60-year test world, 30 more years: coastal towns of the Toral culture took to Seafaring, others to Artisans and Tillers, all still their culture.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

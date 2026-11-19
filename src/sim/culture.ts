@@ -1,7 +1,7 @@
 import type { Library, Race, Species } from '../core/library';
 import { COVER_BRUSHES } from '../core/paint';
 import type { Env } from './env';
-import type { LiveCulture, SimState } from './state';
+import type { LiveCulture, Settlement, SimState, Tribe } from './state';
 import { clanKnows, knows } from './tech';
 import { acceptance } from './cultureChange';
 
@@ -129,12 +129,16 @@ export interface CultureFx {
   discover: number;
   forget: number;
   births: number;
+  /** Work at mines and quarries, and the pace of its ships. */
+  mine: number;
+  sail: number;
 }
-const NEUTRAL: CultureFx = { farm: 1, herd: 1, fish: 1, hunt: 1, craft: 1, spoil: 1, famine: 1, fight: 1, war: 1, raid: 1, otherRace: 1, trade: 1, learn: 1, discover: 1, forget: 1, births: 1 };
+const NEUTRAL: CultureFx = { farm: 1, herd: 1, fish: 1, hunt: 1, craft: 1, spoil: 1, famine: 1, fight: 1, war: 1, raid: 1, otherRace: 1, trade: 1, learn: 1, discover: 1, forget: 1, births: 1, mine: 1, sail: 1 };
 
 /** Each tradition's effect, by degree (1 for the mildest). */
 const TRADITION_FX: Record<string, (d: number, f: CultureFx) => void> = {
-  seafaring: (d, f) => { f.fish *= 1 + 0.15 * d; f.trade *= 1 + 0.05 * d; },
+  seafaring: (d, f) => { f.fish *= 1 + 0.15 * d; f.trade *= 1 + 0.05 * d; f.sail *= 1 + 0.15 * d; },
+  miners: (d, f) => { f.mine *= 1 + 0.2 * d; },
   'horse-lords': (d, f) => { f.fight *= 1 + 0.1 * d; f.herd *= 1 + 0.05 * d; },
   herders: (d, f) => { f.herd *= 1 + 0.12 * d; },
   hunters: (d, f) => { f.hunt *= 1 + 0.15 * d; },
@@ -190,10 +194,57 @@ export function cultureFx(sim: SimState, id: string): CultureFx {
   m.set(id, f);
   return f;
 }
+
+/** The local changes a settlement lives by (its own, or its town's for a joined village). */
+export function localOf(sim: SimState, st: Settlement): NonNullable<Settlement['local']> {
+  const town = st.partOf !== undefined ? sim.settlements.find((q) => q.id === st.partOf) : undefined;
+  return (town ?? st).local ?? [];
+}
+/** A settlement's own version of its culture: the culture's traditions (at their degree), with its local changes. */
+export function traditionsHere(sim: SimState, st: Settlement): { id: string; level: number }[] {
+  const c = cultureOf(sim, st.culture);
+  const local = localOf(sim, st).filter((q) => q.level >= 0);
+  const dropped = new Set(local.filter((q) => q.change === 'drop').map((q) => q.id));
+  const out = (c?.traditions ?? []).filter((t) => t.level >= 0 && !dropped.has(t.id)).map((t) => ({ id: t.id, level: t.level }));
+  for (const q of local) if (q.change === 'add' && !out.some((t) => t.id === q.id)) out.push({ id: q.id, level: q.level });
+  return out;
+}
+/** What a settlement's own version of its culture does (its culture's, with its local changes). */
+export function townFx(sim: SimState, st: Settlement): CultureFx {
+  const local = localOf(sim, st).filter((q) => q.level >= 0);
+  if (!local.length) return cultureFx(sim, st.culture);
+  let m = fxCache.get(sim);
+  if (!m) fxCache.set(sim, (m = new Map()));
+  const key = `${st.culture}|${local.map((q) => `${q.change}${q.id}${q.level}`).join(',')}`;
+  let f = m.get(key);
+  if (f) return f;
+  f = { ...NEUTRAL };
+  for (const t of traditionsHere(sim, st)) TRADITION_FX[t.id]?.(t.level + 1, f);
+  for (const b of cultureOf(sim, st.culture)?.behaviours ?? []) BEHAVIOUR_FX[b]?.(f);
+  m.set(key, f);
+  return f;
+}
+/** Technologies a way of life leans toward (traditions, as behaviours do). */
+const TRADITION_PUSHES: Record<string, string[]> = {
+  seafaring: ['sailing', 'navigation', 'ocean-ships', 'fishing'],
+  'river-folk': ['fishing', 'rafts', 'irrigation'],
+  miners: ['copper', 'bronze', 'iron', 'masonry', 'tunnels'],
+  highlanders: ['tunnels', 'terracing'],
+  tillers: ['plough', 'irrigation', 'crop-rotation'],
+  herders: ['breeding', 'riding'],
+  martial: ['fortification'],
+  traders: ['coinage', 'carts'],
+  artisans: ['pottery', 'weaving'],
+};
 /** Does a culture's way of life push a technology forward (its behaviours)? */
-export function pushes(sim: SimState, lib: Library, cultureId: string, techId: string): boolean {
+export function pushes(sim: SimState, lib: Library, cultureId: string, techId: string, settlementId?: number): boolean {
   const c = cultureOf(sim, cultureId);
-  return !!c && c.behaviours.some((b) => lib.behaviours.find((q) => q.id === b)?.pushesTech.includes(techId));
+  if (!c) return false;
+  if (c.behaviours.some((b) => lib.behaviours.find((q) => q.id === b)?.pushesTech.includes(techId))) return true;
+  // Its traditions (a settlement's own version of them).
+  const st = settlementId !== undefined ? sim.settlements.find((q) => q.id === settlementId) : undefined;
+  const trads = st ? traditionsHere(sim, st) : c.traditions.filter((t) => t.level >= 0);
+  return trads.some((t) => TRADITION_PUSHES[t.id]?.includes(techId));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -210,10 +261,13 @@ export interface CultureContext {
 
 /** How its people live, taken together (weighted by people), for the traditions it earns. */
 function profile(c: CultureContext, cult: LiveCulture) {
+  const { sim } = c;
+  return profileOf(c, sim.settlements.filter((s) => !s.ruined && s.culture === cult.id), sim.tribes.filter((t) => t.culture === cult.id));
+}
+/** How a set of places lives (a whole culture, or one town with its villages). */
+function profileOf(c: CultureContext, settlements: Settlement[], tribes: Tribe[]) {
   const { sim, env, lib } = c;
-  const settlements = sim.settlements.filter((s) => !s.ruined && s.culture === cult.id);
-  const tribes = sim.tribes.filter((t) => t.culture === cult.id);
-  const p = { pop: 0, coast: 0, fresh: 0, hills: 0, forest: 0, open: 0, desert: 0, farm: 0, herd: 0, hunt: 0, fish: 0, craft: 0, tribe: 0, caravans: 0, maxPop: 0, horses: 0, fed: 0, stored: 0 };
+  const p = { pop: 0, coast: 0, fresh: 0, hills: 0, forest: 0, open: 0, desert: 0, farm: 0, herd: 0, hunt: 0, fish: 0, craft: 0, mine: 0, tribe: 0, caravans: 0, maxPop: 0, horses: 0, fed: 0, stored: 0, war: 0 };
   const horse = env.beastInfo.find((b) => b.id === 'horse');
   const add = (x: number, y: number, pop: number, jobs: Record<string, number> | null) => {
     const k = cellAt(env, x, y);
@@ -230,6 +284,7 @@ function profile(c: CultureContext, cult: LiveCulture) {
       p.hunt += pop * share((key) => key === 'hunt');
       p.fish += pop * share((key) => key.startsWith('fish:'));
       p.craft += pop * share((key) => !key.includes(':') && key !== 'hunt' && key !== 'gather');
+      p.mine += pop * share((key) => { const src = env.resInfo.find((r) => r.id === key)?.source; return src === 'Mined' || src === 'Quarried'; });
     } else {
       p.hunt += pop * 0.5;
       p.tribe += pop;
@@ -239,6 +294,7 @@ function profile(c: CultureContext, cult: LiveCulture) {
     add(s.x, s.y, s.pop, s.economy?.jobs ?? {});
     p.caravans += s.economy?.traded?.caravans ?? 0;
     p.maxPop = Math.max(p.maxPop, s.pop);
+    p.war += s.pop * Math.min(1, (s.hardship?.war ?? 0) / 2.5);
     p.fed += s.pop * Math.min(1.2, s.fed);
   }
   for (const t of tribes) {
@@ -251,7 +307,7 @@ function profile(c: CultureContext, cult: LiveCulture) {
 }
 
 /** How strongly a culture's life calls for each tradition (0 none … 1 fully). */
-function traditionScore(c: CultureContext, cult: LiveCulture, id: string, pr: ReturnType<typeof profile>, others: LiveCulture[]): number {
+function traditionScore(c: CultureContext, cult: LiveCulture, id: string, pr: ReturnType<typeof profile>, others: LiveCulture[], local = false): number {
   const { p, share, anyKnows } = pr;
   const s = cult.stats ?? emptyStats();
   const per1000 = (n: number) => (p.pop > 0 ? (n * 1000) / p.pop : 0);
@@ -270,11 +326,13 @@ function traditionScore(c: CultureContext, cult: LiveCulture, id: string, pr: Re
     case 'xenophobia': return Math.min(1, c.sim.grudges.filter((g) => cult.races.includes(g.race)).length * 0.35 + per1000(s.fights) * 0.1);
     case 'hospitality': return Math.min(1, per1000(s.foreignTrade) * 0.5);
     case 'isolationism': return others.length === 0 && age > 30 ? 0.7 : 0;
-    case 'martial': return Math.min(1, per1000(s.fights) / 2);
+    // A town of its own: by how often it is fought over (raided, besieged).
+    case 'martial': return local ? share(p.war) : Math.min(1, per1000(s.fights) / 2);
     case 'raiders': return Math.min(1, per1000(s.raids) / 1.5);
     case 'honour-code': return has('feudal-oaths') || has('retainers') ? 0.7 : 0;
     case 'clan-loyalty': return Math.min(1, share(p.tribe) * 0.8 + (has('royal-court') ? 0 : 0.25));
     case 'artisans': return Math.min(1, share(p.craft) * 1.6);
+    case 'miners': return Math.min(1, share(p.mine) * 4);
     case 'traders': return Math.min(1, per1000(p.caravans) / 3);
     case 'monument-builders': return anyKnows('masonry') && p.maxPop > 1500 ? 0.7 : 0;
     case 'frugal': return Math.min(1, per1000(s.famines) * 0.3 + share(p.desert) * 0.4);
@@ -417,4 +475,104 @@ export function note(sim: SimState, cultureId: string, what: 'fights' | 'raids' 
   c.stats ??= emptyStats();
   c.stats[what]++;
   if (what === 'fights' || what === 'raids') c.stats.lastFight = sim.day;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Each town's own version of its culture (REDESIGN.md, "Regional versions of a culture", step 1)
+
+/** Traditions a town may add or drop by where it is and what it lives through. */
+export const LOCAL_WAYS = ['seafaring', 'river-folk', 'highlanders', 'woodland', 'desert-wanderers', 'tillers', 'herders', 'hunters', 'miners', 'artisans', 'traders', 'martial'];
+/** Of those, the ones that come from the land itself: a town where the land is wrong for them drops them. */
+const OF_THE_LAND = new Set(['seafaring', 'river-folk', 'highlanders', 'woodland', 'desert-wanderers', 'tillers', 'herders', 'hunters']);
+/** At most this many local changes a town (it stays recognisably its culture). */
+export const MAX_LOCAL = 3;
+
+/**
+ * Once a year: each town (with its joined villages) earns its own changes to its culture, by how
+ * it lives: a tradition its life calls for that its culture lacks is added (and deepens), one of
+ * the land its land is wrong for is dropped; both earned and faded as traditions are, about twenty
+ * years a degree. Most towns differ by one or two.
+ */
+export function localYear(c: CultureContext): void {
+  const { sim, lib } = c;
+  for (const st of sim.settlements) {
+    if (st.ruined || st.layer || st.partOf !== undefined) continue;
+    const cult = cultureOf(sim, st.culture);
+    if (!cult) continue;
+    const members = sim.settlements.filter((q) => q.partOf === st.id && !q.ruined);
+    const pr = profileOf(c, [st, ...members], []);
+    if (pr.p.pop <= 0) continue;
+    const local = (st.local ??= []);
+    const core = new Map(cult.traditions.filter((t) => t.level >= 0).map((t) => [t.id, t]));
+    const active = () => local.filter((q) => q.level >= 0).length;
+    for (const id of LOCAL_WAYS) {
+      const t = lib.traditions.find((q) => q.id === id);
+      if (!t) continue;
+      const score = traditionScore(c, cult, id, pr, [], true);
+      const levels = Math.max(1, t.levels.length);
+      const want = score < 0.3 ? -2 : Math.min(levels - 1, Math.floor(((score - 0.3) / 0.7) * levels));
+      const inCore = core.get(id);
+      let add = local.find((q) => q.id === id && q.change === 'add');
+      let drop = local.find((q) => q.id === id && q.change === 'drop');
+      if (!inCore || inCore.hold === 'Locked') {
+        // Not the culture's: a town whose life calls for it takes it up.
+        if (drop) local.splice(local.indexOf(drop), 1);
+        if (inCore) continue;
+        if (!add) {
+          if (want < 0) continue;
+          add = { id, change: 'add', level: -1, progress: 0 };
+          local.push(add);
+        }
+        if (want > add.level) {
+          if (add.level < 0 && active() >= MAX_LOCAL) continue;
+          add.progress += (0.5 + score) / YEARS_PER_DEGREE;
+        } else if (want < add.level) add.progress -= 1 / YEARS_PER_DEGREE;
+        else add.progress *= 0.8;
+        if (add.progress >= 1) {
+          add.level++;
+          add.progress = 0;
+          if (add.level === 0) c.log(`${st.name} has taken to ${t.name} (still ${cult.name}: its own ways there).`, st.x, st.y);
+        } else if (add.progress <= -1) {
+          add.level--;
+          add.progress = 0;
+        }
+        if (add.level < 0 && add.progress <= 0 && want < 0) local.splice(local.indexOf(add), 1);
+      } else {
+        // The culture's: a town where the land is wrong for it lets it go.
+        if (add) local.splice(local.indexOf(add), 1);
+        if (!OF_THE_LAND.has(id)) continue;
+        const wrong = score < 0.1;
+        if (!drop) {
+          if (!wrong) continue;
+          drop = { id, change: 'drop', level: -1, progress: 0 };
+          local.push(drop);
+        }
+        if (wrong && drop.level < 0) {
+          if (active() >= MAX_LOCAL) continue;
+          drop.progress += 1 / YEARS_PER_DEGREE;
+          if (drop.progress >= 1) {
+            drop.level = 0;
+            drop.progress = 0;
+            c.log(`${st.name} has let ${t.name} go (still ${cult.name}, but its land is not for it).`, st.x, st.y);
+          }
+        } else if (!wrong) {
+          drop.progress -= 1 / YEARS_PER_DEGREE;
+          if (drop.progress <= -1 || drop.level < 0) local.splice(local.indexOf(drop), 1);
+        }
+      }
+    }
+    // Joined villages live by their town's version.
+    for (const v of members) delete v.local;
+  }
+  fxCache.delete(sim);
+}
+
+/** A settlement's local changes, for its card and the hover ("+ Seafaring (Partial), − Tillers"), or ''. */
+export function localText(sim: SimState, lib: Library, st: Settlement): string {
+  const ways = localOf(sim, st).filter((q) => q.level >= 0);
+  if (!ways.length) return '';
+  return ways.map((q) => {
+    const t = lib.traditions.find((x) => x.id === q.id);
+    return q.change === 'add' ? `+ ${t?.name ?? q.id}${t && t.levels.length > 1 ? ` (${t.levels[q.level]?.name ?? ''})` : ''}` : `− ${t?.name ?? q.id}`;
+  }).join(', ');
 }

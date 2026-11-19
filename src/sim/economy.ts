@@ -271,7 +271,7 @@ export function economyMonth(c: MonthContext): number {
   let free = W - foodWorkers;
   // Hides, horn, feathers and furs come from the herds and the hunt, not from workers of their own.
   // Hides, horn and furs come from herds and hunts; what needs know-how waits for it; better tools work faster.
-  const rateOf = (r: ResInfo) => (r.source === 'Herded' || r.source === 'Hunted' || !workable(r) ? 0 : (RATE[r.source] ?? 0.5) * fx.craft * (cf?.craft ?? 1));
+  const rateOf = (r: ResInfo) => (r.source === 'Herded' || r.source === 'Hunted' || !workable(r) ? 0 : (RATE[r.source] ?? 0.5) * fx.craft * (cf?.craft ?? 1) * (r.source === 'Mined' || r.source === 'Quarried' ? cf?.mine ?? 1 : 1));
   for (const nd of NEEDS) {
     const want = nd.per * pop;
     const have = env.resInfo.filter((r) => !r.food && nd.match(r)).reduce((n, r) => n + (S[r.id] ?? 0), 0);
