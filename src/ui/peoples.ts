@@ -13,6 +13,7 @@ import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces,
 import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
+import { familyOf } from '../sim/sister';
 import type { Army, Battle, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
 import { kindName, total, UNIT_KINDS } from '../sim/battle';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
@@ -1847,6 +1848,15 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       h('summary', {}, h('span', { class: 'swatch', style: `background:${cultureColour(s, cu)}` }), h('strong', {}, cu.name), ` · ${Math.round(people).toLocaleString()} people`, h('span', { class: 'muted' }, ` · ${places} settlements, ${roaming} tribes`)),
       h('div', { class: 'tribe-card econ' },
         h('div', {}, cu.source ? 'From the Library.' : cu.blend ? `A blend of the ${cu.blend.map((id) => cultureOf(s, id)?.name ?? '?').join(' and the ')}, born year ${yearOf(cu.founded)}.` : cu.parent ? `Grew apart from the ${cultureOf(s, cu.parent)?.name ?? '?'} in year ${yearOf(cu.founded)}.` : 'A folk culture, grown from its homeland and way of life.'),
+        (() => {
+          if (cu.sister?.length) return h('div', {}, `A sister culture of the ${cultureOf(s, cu.parent)?.name ?? '?'}: its region lived its own way (${cu.sister.map((k) => `${k[0] === '+' ? '+' : '−'} ${trad(k.slice(1))?.name ?? k.slice(1)}`).join(', ')}).`);
+          return null;
+        })(),
+        (() => {
+          const fam = familyOf(s.cultures ?? [], cu);
+          if (!fam.kin.length) return null;
+          return h('div', {}, `Family of the ${fam.root.name}: ${fam.kin.map((q) => q.name).join(', ')}`);
+        })(),
         h('div', {}, `Heritage: ${cu.races.map(raceName).join(', ')}`),
         h('div', {}, `Ethos: ${cu.ethos || '—'} · Who fights: ${cu.martial || '—'} · Ways of life: ${cu.lifestyles.join(', ') || 'none settled on'}`),
         sample ? h('div', { class: 'muted' }, `Its sounds: ${sample}`) : null,

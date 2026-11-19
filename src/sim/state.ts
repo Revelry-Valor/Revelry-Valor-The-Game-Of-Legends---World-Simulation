@@ -311,6 +311,8 @@ export interface Settlement {
   local?: { id: string; change: 'add' | 'drop'; level: number; progress: number; from?: string }[];
   /** The culture it had last year (to see when it takes on another, keeping its old ways for a while). */
   lastCulture?: string;
+  /** Years this town has lived far from its culture's own ways (two or more local changes of its own), toward a sister culture (REDESIGN.md, regional cultures step 3). */
+  apart?: number;
   /** Drawn toward another culture (a big neighbour's, or the many small ones round it): how far along (0–1). */
   cultureShift?: { to: string; progress: number };
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
@@ -431,6 +433,8 @@ export interface LiveCulture {
   /** The culture it grew from, if any (or the two it blended from). */
   parent: string;
   blend?: string[];
+  /** A sister culture: the changes its region lived by that set it apart from its parent ("+seafaring", "-tillers"). */
+  sister?: string[];
   /** Its colour on the map of cultures. */
   colour?: string;
   /** This year's doings, for the traditions they earn. */

@@ -1,5 +1,6 @@
 import type { Library } from '../core/library';
 import { cultureFx, cultureOf, MAX_TRADITIONS } from './culture';
+import { sistersYear } from './sister';
 import type { LiveCulture, Settlement, SimState, Tribe } from './state';
 
 /**
@@ -209,6 +210,9 @@ export function cultureChangeYear(c: ChangeContext): void {
       c.log(`Far from their heartland, clan ${clan.name} of the ${cu.name} have grown into a people of their own: the ${nc.name}.`, cx, cy);
     }
   }
+
+  // ---- Sister cultures: a region of a culture's towns long living their own version of it.
+  sistersYear(c, (from, hint) => offshoot(c, from, hint));
 
   // ---- Hybrids: two cultures long side by side, close to each other, blend where they mix.
   for (let i = 0; i < cultures.length; i++) for (let j = i + 1; j < cultures.length; j++) {

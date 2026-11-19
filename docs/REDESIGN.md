@@ -1201,6 +1201,16 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Ways draw a people:* a culture's traditions add to how much a place draws its people: Seafaring the coast, River folk rivers, Highlanders and Miners hills, Forest folk forest, Herders and Horse lords open grass, Tillers rivers and open land, Desert wanderers dry country (more the deeper the tradition). This counts where families spread and settle in the wild, and where a town's people found new villages (by the town's own version).
 - *Always has* (race options, Library): traditions every culture of that race keeps, locked, whatever their land or history (a warlike race always Warrior culture).
 
+**Built (step 3): sister cultures** (`sim/sister.ts`)
+- *A town living apart:* a town with two or more local changes of its own (not ways kept from an old culture) counts its years apart; they wear off twice as fast once it no longer lives that way.
+- *A region:* towns of the same culture within about 250 km of one another that share at least two of those changes. Once every town in it has lived apart for 80 years, it becomes a sister culture. Three conditions apply:
+  - the region is at least two towns;
+  - the culture has towns outside the region;
+  - the region holds no more than half of the culture's people. A region that is most of the culture changes the culture itself instead (step 2).
+- *The sister culture:* a new name in its parent's sounds, its parent's ways with the region's shared changes made its own (they are no longer local changes), its joined villages with it. It is of the same family (its parent recorded), and kin cultures begin close (acceptance), which eases trade, learning and peace between them. The chronicle notes it ("The Toral of Torgal, Kesh and 2 more, long living their own way (+ Seafaring, + Traders), have become a people of their own: the Kador, a sister culture of the Toral").
+- *Shown:* the culture card says what set it apart and lists its family ("Family of the Toral: Kador, Vesh").
+- The older drift by clans far from the heartland (Phase 8 step 3) stays, for a people cut off; sister cultures come from regions that live differently, near or far.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.
