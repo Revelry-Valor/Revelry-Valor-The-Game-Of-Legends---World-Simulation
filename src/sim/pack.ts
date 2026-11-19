@@ -62,6 +62,8 @@ export interface PackedSim {
   beasts: Record<string, number[]>;
   /** Wilderness density by race: tenths of a person per point, as runs. */
   density?: Record<string, number[]>;
+  /** The wild folk of each province (pops). */
+  country?: SimState['country'];
 }
 
 function runs(values: ArrayLike<number>): number[] {
@@ -107,6 +109,7 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
   return {
     v: 1,
     density,
+    ...(sim.country ? { country: Object.fromEntries(Object.entries(sim.country).map(([k, ps]) => [k, ps.map((q) => ({ ...q, n: Math.round(q.n * 10) / 10 }))])) } : {}),
     day: sim.day,
     seed: sim.seed,
     started: sim.started,
@@ -248,6 +251,7 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     rivalUse,
     beasts,
     density,
+    ...(p.country ? { country: p.country } : {}),
     events: Array.isArray(p.events) ? p.events : [],
     setup: Array.isArray(p.setup) ? p.setup : [],
     ...prov,

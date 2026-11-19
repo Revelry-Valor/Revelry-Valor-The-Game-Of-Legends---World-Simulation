@@ -424,3 +424,10 @@ input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent);
 .measure-box[hidden] { display: none; }
 .map.hand { cursor: grab; }
 .map.hand.panning { cursor: grabbing; }
+
+/* A place's pops (who its people are). */
+.pops summary { cursor: pointer; }
+.pops-table { width: 100%; border-collapse: collapse; font-size: 0.85em; margin-top: 4px; }
+.pops-table th, .pops-table td { text-align: left; padding: 2px 6px 2px 0; border-bottom: 1px solid var(--line, rgba(127, 127, 127, 0.25)); white-space: nowrap; }
+.pops-table th { font-weight: 600; opacity: 0.75; }
+.pops { overflow-x: auto; }

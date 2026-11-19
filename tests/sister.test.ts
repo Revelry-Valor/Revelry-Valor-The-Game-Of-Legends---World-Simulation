@@ -28,7 +28,7 @@ const ctx = (sim: SimState): ChangeContext => ({ sim, lib, rand: () => 0.5, dist
 const humanId = () => lib.species.find((s) => s.name === 'Human')!.races[0].id;
 const town = (sim: SimState, city: Settlement, k: number, pop: number): Settlement => {
   const p = at(k);
-  const st: Settlement = { id: sim.nextId++, name: `T${sim.nextId}`, kind: 'town', clan: city.clan, species: city.species, race: city.race, culture: city.culture, x: p.x, y: p.y, pop, fed: 1, warband: 50, holyTo: [], ruined: false, founded: 0, ruinedOn: -1, economy: newEconomy(pop, 1, 3), techs: [] };
+  const st: Settlement = { id: sim.nextId++, name: `T${sim.nextId}`, kind: 'village', clan: city.clan, species: city.species, race: city.race, culture: city.culture, x: p.x, y: p.y, pop, fed: 1, warband: 50, holyTo: [], ruined: false, founded: 0, ruinedOn: -1, economy: newEconomy(pop, 1, 3), techs: [] };
   sim.settlements.push(st);
   return st;
 };

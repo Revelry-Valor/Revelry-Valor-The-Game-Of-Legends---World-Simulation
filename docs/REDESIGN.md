@@ -1211,6 +1211,34 @@ This reworks a large part of the simulation. Where it disagrees with the older s
 - *Shown:* the culture card says what set it apart and lists its family ("Family of the Toral: Kador, Vesh").
 - The older drift by clans far from the heartland (Phase 8 step 3) stays, for a people cut off; sister cultures come from regions that live differently, near or far.
 
+### Cultures as peoples (agreed with the designer; from the designer's doc "Culture System Design — Province-Based Simulation")
+
+The simulation follows people, not places: each province holds groups of people (pops), and its culture is what that mix adds up to. Settlements speed up and steer how pops change. Culture is a bundle of traits (language, religion, customs, material culture, law, values), each changing at its own speed: dress and pottery in decades, language over centuries. This replaces the town-level system of the regional-culture steps above (local ways become regional traits; the core following its towns becomes conformity; sister cultures become splits by core distance).
+
+**Decided**
+- Three tree levels: group (family) → culture → subculture. Families come from the parent links.
+- Culture moves every 5 years; people are counted every year.
+- Religion is the existing faith system, used as the religion trait for now, with its own redesign later.
+
+**Build order**
+1. *Pops:* who the people of each place are (below).
+2. *Culture as a trait bundle:* trait speeds; core (identity) and regional (way of life) traits; the parent tree; similarity between cultures from tree distance and shared traits.
+3. *The culture tick:* settlements send out influence by their prestige along province links (roads and rivers carry it well; mountains, deserts and language barriers cut it); pops move a slice at a time toward it (city folk more readily than villagers, elites more than commoners), with conformity as an S-curve; language mostly at births.
+4. *Drift and splits:* random drift scaled by isolation, and the land's pull, against contact with the core; the drift stages (0.15, 0.30, 0.50) and subculture nodes; blends; cohesion (asabiya).
+5. *Languages:* their own lineage, dialects splitting into languages, names in a language's sounds.
+6. *National identity, grievance and stance* (assimilate, integrate, separate, marginalized); unrest along cultural lines. Ruler tools come later with nations.
+7. *The history timeline view:* cultures, languages and races as lines over time.
+
+**Built (step 1): pops** (`sim/pops.ts`)
+- *A pop* is a group of people in one place sharing race, culture, language (its own field: a pop can keep its old tongue under a new culture), faith and class (elite, middle, commoner), with its size.
+- *Town pops:* each settlement keeps its pops; its number of people stays its count, and its pops are brought in line with it whenever it changes: births shared out by size, losses (famine, war, plague) falling hardest on commoners and least on elites. Where something gives a town another culture or faith as a whole (rulers, a big neighbour, a split), its main people take it; for now all of them at once, a slice at a time from step 3.
+- *Classes* move toward what a town's life calls for, a tenth of the gap a year: elites 1% of a village, 3% of a town, 5% of a city or dawn city (one point more for a province's seat); the middle class from its hands off the food jobs (crafts, mines, trade), up to 40%; commoners the rest.
+- *Moves carry pops:* people moving to the seat, families going out to the wild, villages founded on other layers, tribes splitting, settling down or joining kin, ruins rebuilt: a slice of each pop goes (elites seldom), so migrants bring their culture, language and faith.
+- *Country pops:* the families in the wild (the density, by race and point) are kept by province as who they are: "of the 3,000 humans here, 70% Celtic, 30% Roman". Each year they are brought in line with the families living there, and 5% of each neighbouring province's make-up mixes in as families spread. A race newly spread to a province takes its neighbours' make-up, else its nearest kin town's. Families leaving a town join its province's wild folk.
+- *Drawn to the towns:* each year a fed town (past village size) draws in 1% of the wild folk within two days' walk, of its own race and any race that can live beside it, up to 3% of its own people; they bring their culture, so towns become mixed. Villages founded by families in the wild take their province's wild folk as their people, and their culture and faith from them.
+- *Kept small:* a pop under 2% of its place (or 20 people) merges into the most alike pop of its own class; a class is never folded away while it has people.
+- *Shown:* a town's card lists its people (people, race, culture, language, faith, class); a province's hover shows its peoples ("70% Celtic, 30% Roman"); the population heat map (View) has a *Cultures* choice colouring each province by its cultures, blended by their shares.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

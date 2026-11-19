@@ -15,6 +15,7 @@ import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
 import type { Army, Battle, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
+import type { Pop } from '../sim/pops';
 import { kindName, total, UNIT_KINDS } from '../sim/battle';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
 import { opinionWord, PACT_NAMES } from '../sim/politics';
@@ -154,6 +155,41 @@ function provincePopulation(s: SimState, e: Env, which: string): Float32Array {
   }
   for (let p = 0; p < P.count; p++) people[p] = P.area[p] > 0 ? (people[p] / P.area[p]) * SQ_KM_PER_SQ_MI : 0;
   return people;
+}
+/** Who lives in each province, by culture: its wild folk and the pops of its settlements and tribes (people). */
+function provinceCultures(s: SimState, e: Env): Map<number, Map<string, number>> {
+  const out = new Map<number, Map<string, number>>();
+  const add = (p: number, culture: string, n: number) => {
+    if (p < 0 || n <= 0 || !culture) return;
+    let m = out.get(p);
+    if (!m) out.set(p, (m = new Map()));
+    m.set(culture, (m.get(culture) ?? 0) + n);
+  };
+  const P = e.prov;
+  for (let p = 0; p < P.count; p++) for (const q of s.country?.[String(P.ids[p])] ?? []) add(p, q.culture, q.n);
+  const holder = (x: number, y: number, culture: string, pop: number, pops?: Pop[]) => {
+    const p = provAt(e, x, y);
+    if (pops?.length) for (const q of pops) add(p, q.culture, q.n);
+    else add(p, culture, pop);
+  };
+  for (const st of s.settlements) if (!st.ruined && !st.layer) holder(st.x, st.y, st.culture, st.pop, st.pops);
+  for (const t of s.tribes) holder(t.x, t.y, t.culture, t.pop, t.pops);
+  return out;
+}
+/** A province's colour on the map of cultures: its cultures' colours blended by their shares (null: nobody). */
+function cultureFill(s: SimState, by: Map<string, number> | undefined): string | null {
+  if (!by) return null;
+  let all = 0;
+  const rgb = [0, 0, 0];
+  for (const [id, n] of by) {
+    const cu = cultureOf(s, id);
+    if (!cu) continue;
+    const hex = cultureColour(s, cu).replace('#', '');
+    for (let i = 0; i < 3; i++) rgb[i] += parseInt(hex.slice(i * 2, i * 2 + 2), 16) * n;
+    all += n;
+  }
+  if (all <= 0) return null;
+  return `rgba(${rgb.map((v) => Math.round(v / all)).join(',')},0.6)`;
 }
 /** The wilderness density as a picture over the climate grid (for a world without provinces yet). */
 function drawDensity(s: SimState, e: Env, which: string): HTMLCanvasElement {
@@ -592,8 +628,13 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       if (dShow !== 'off' && dpm && e.prov.real && e.prov.count === dpm.rings.length) {
         const key = `${dShow}|${s.day}|${s.settlements.length}`;
         if (key !== densityKey || !densityFills.length) {
-          const per = provincePopulation(s, e, dShow);
-          densityFills = Array.from(per, (v, p) => (e.prov.kind[p] === PK.land ? densityColour(v) : null));
+          if (dShow === 'culture') {
+            const by = provinceCultures(s, e);
+            densityFills = Array.from({ length: e.prov.count }, (_, p) => (e.prov.kind[p] === PK.land ? cultureFill(s, by.get(p)) : null));
+          } else {
+            const per = provincePopulation(s, e, dShow);
+            densityFills = Array.from(per, (v, p) => (e.prov.kind[p] === PK.land ? densityColour(v) : null));
+          }
           densityKey = key;
         }
         if (densityPathsFor !== dpm) {
@@ -1801,6 +1842,26 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       }),
     ];
   };
+  /** Who a place's people are: its pops, biggest first. */
+  const popsTable = (pops: Pop[]): HTMLElement => {
+    const s = sim!;
+    const CLS: Record<string, string> = { elite: 'Elite', middle: 'Middle', commoner: 'Commoner' };
+    const all = pops.reduce((n, q) => n + q.n, 0) || 1;
+    return h('details', { class: 'pops' },
+      h('summary', {}, `Its people: ${pops.length} group${pops.length === 1 ? '' : 's'}`),
+      h('table', { class: 'pops-table' },
+        h('tr', {}, ...['People', 'Race', 'Culture', 'Speaks', 'Faith', 'Class'].map((t) => h('th', {}, t))),
+        ...[...pops].sort((a, b) => b.n - a.n).map((q) => h('tr', {},
+          h('td', {}, `${Math.round(q.n).toLocaleString()} (${Math.round((q.n / all) * 100)}%)`),
+          h('td', {}, raceName(q.race)),
+          h('td', {}, cultureOf(s, q.culture)?.name ?? '—'),
+          h('td', {}, q.language || '—'),
+          h('td', {}, faithOf(s, q.faith)?.name ?? '—'),
+          h('td', {}, CLS[q.cls]),
+        )),
+      ),
+    );
+  };
   const cultureLine = (id: string, st?: Settlement): HTMLElement | null => {
     const cu = cultureOf(sim!, id);
     // A town's own version of its culture: what it adds or drops by its life there.
@@ -2328,6 +2389,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           st.ruined ? null : faithLine(st.faith, st.faithShift),
           !st.ruined && st.cultureShift ? h('div', { class: 'muted' }, `Being drawn into the ways of the ${cultureOf(s, st.cultureShift.to)?.name ?? '?'} (${Math.round(st.cultureShift.progress * 100)}%).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
+          !st.ruined && st.pops?.length ? popsTable(st.pops) : null,
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,
         ),
@@ -2510,6 +2572,13 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const per = provincePopulation(s, env, 'total')[index];
         const sqmi = env.prov.area[index] / SQ_KM_PER_SQ_MI;
         if (per > 0) out.push({ label: 'People', value: `about ${Math.round(per * sqmi).toLocaleString()} (${perSqMi(per)} per sq mi): in the wild, villages, towns and tribes` });
+        const by = provinceCultures(s, env).get(index);
+        if (by?.size) {
+          const all = [...by.values()].reduce((a, b) => a + b, 0);
+          const list = [...by].sort((a, b) => b[1] - a[1]);
+          const shown = list.slice(0, 4).map(([id, n]) => `${Math.round((n / all) * 100)}% ${cultureOf(s, id)?.name ?? '?'}`);
+          out.push({ label: 'Peoples', value: shown.join(', ') + (list.length > 4 ? ', and others' : '') });
+        }
       }
       if ((s.provRival?.[index] ?? -1) >= 0 && (s.provRivalUse?.[index] ?? 0) > 0) {
         const rc = clanOf(s.provRival![index]);

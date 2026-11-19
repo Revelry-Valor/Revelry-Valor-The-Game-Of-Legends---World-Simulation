@@ -2,7 +2,7 @@ import { COVER_BRUSHES } from '../core/paint';
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { hordesDay, monstersMonth } from './monsters';
 import { holdLayersYear } from './layerprovs';
-import { densityMonth, seedDensity, type DensityRace } from './density';
+import { canLiveTogether, densityMonth, seedDensity, type DensityRace } from './density';
 import { digYear, driftYear, layerFood, layerRoom, layerSpot, layerWays, LAYER_NAMES, type LayerContext, type LayerLand, type LayerWays } from './layers';
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
@@ -23,6 +23,7 @@ import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics'
 import { championMight, faithHostility, faithYear } from './faith';
 import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
+import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
@@ -1111,8 +1112,9 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
       st.techs = [];
       st.ruinedOn = sim.day;
       const kin = sim.tribes.find((q) => q.clan === st.clan && dist(env, q.x, q.y, st.x, st.y) < 400);
-      if (kin) kin.pop += st.pop;
+      if (kin) movePeople(sim, st, kin, st.pop);
       st.pop = 0;
+      st.pops = [];
       st.warband = 0;
       log(sim, `${st.kind === 'dawn' ? 'The dawn city ' : ''}${st.name} has fallen to ruin${st.holyTo.length ? '; it is holy still' : ''}.`, st.x, st.y);
     }
@@ -1127,7 +1129,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     // (they stay its people's kin in the wild; they are not bands, which are warbands and come home).
     const past = st.pop > (st.kind === 'dawn' ? 900 : st.seat ? 450 : 300);
     const out = st.pop * (past ? WILD_TRICKLE_FULL : WILD_TRICKLE);
-    st.pop -= out;
+    toCountry(sim, env, provAt(env, st.x, st.y), takePops(sim, st, out));
     seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, settleRange(ri, st) * (past ? 3 : 2.5)), out);
   }
   // Round a town (its pooled stores and market) life in the wild is easier: the families grow faster.
@@ -1146,7 +1148,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     if (t.pop >= 15) continue;
     const kin = sim.tribes.filter((q) => q !== t && q.clan === t.clan).sort((a, b) => dist(env, a.x, a.y, t.x, t.y) - dist(env, b.x, b.y, t.x, t.y))[0];
     if (kin && dist(env, kin.x, kin.y, t.x, t.y) < 400) {
-      kin.pop += t.pop;
+      movePeople(sim, t, kin, t.pop);
       log(sim, `${t.name} was too few to go on and joined ${kin.name}.`, t.x, t.y);
     } else log(sim, `${t.name} died out.`, t.x, t.y);
     sim.tribes = sim.tribes.filter((q) => q !== t);
@@ -1214,7 +1216,7 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     if (t.pop > 400 && t.fed >= 0.85) {
       const share = 0.35 + 0.1 * rand(sim);
       const n = Math.round(t.pop * share);
-      t.pop -= n;
+      const going = takePops(sim, t, n);
       const clan = sim.clans.find((c) => c.id === t.clan)!;
       const kinTribes = sim.tribes.filter((q) => q.clan === clan.id);
       // Far from kin, or a big clan: the new tribe may start a clan of its own.
@@ -1229,6 +1231,7 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
       }
       const nt: Tribe = { ...t, id: sim.nextId++, name: makeName(sim, lib, t.culture), clan: clanId, pop: n, warband: 0, away: 0, founded: sim.day, target: null, summer: { ...t.summer }, winter: { ...t.winter } };
       nt.warband = Math.round(n * ri.warShare);
+      startPops(sim, nt, going);
       // Off to new land a little way away.
       const a = rand(sim) * Math.PI * 2;
       const d = ri.range * (3 + rand(sim) * 4);
@@ -1245,6 +1248,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // Villages from the wild, and villages joining towns (REDESIGN.md 8.0).
   villagesFromWild(sim, env, lib, info);
   joinVillages(sim, env, lib);
+  // Who the people are (pops.ts): classes in the towns, wild folk drawn to the towns, the wild folk's make-up.
+  popsYear(sim, env, lib, info);
   // The other layers: drifting islands carry their towns; tunnelers join their towns underground.
   if (env.layers) {
     const lc = layerContext(sim, env, lib);
@@ -1333,6 +1338,53 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   }
 }
 
+/** A year's share of the wild folk within two days' walk that a growing town draws in, and at most this share of its own people a year. */
+export const DRAW_WILD = 0.01;
+export const DRAW_MAX = 0.03;
+
+/**
+ * Pops over the year (REDESIGN.md, "Cultures as peoples", step 1): each settlement's classes move
+ * toward what its life calls for; growing towns draw in families from the wild round them (any
+ * race that can live beside theirs), who bring their culture; and each province's wild folk are
+ * brought in line with the families living there.
+ */
+function popsYear(sim: SimState, env: Env, lib: Library, info: Info): void {
+  for (const st of sim.settlements) {
+    if (st.ruined) continue;
+    const tier = settlementTier(st);
+    popsOf(sim, st, classShares(st, tier));
+    classYear(sim, st, tier);
+  }
+  for (const t of sim.tribes) popsOf(sim, t);
+  // Drawn to the towns: the fed, growing ones that are more than villages.
+  const races = Object.keys(sim.density ?? {});
+  for (const st of sim.settlements) {
+    if (st.ruined || st.layer || st.partOf !== undefined || st.fed < 0.9 || settlementTier(st) === 'Village') continue;
+    const home = densityRace(sim, env, lib, info, st.race);
+    if (!home) continue;
+    const cells = cellsNear(env, st.x, st.y, DAY_WALK * 2).filter((k) => env.land[k]);
+    const p = provAt(env, st.x, st.y);
+    let room = st.pop * DRAW_MAX;
+    for (const race of races) {
+      if (room <= 1) break;
+      const other = race === st.race ? home : densityRace(sim, env, lib, info, race);
+      if (!other || (race !== st.race && !canLiveTogether(home, st.race, other, race))) continue;
+      const D = sim.density![race];
+      const wild = cells.reduce((n, k) => n + D[k], 0);
+      const n = Math.min(room, wild * DRAW_WILD);
+      if (n < 1) continue;
+      for (const k of cells) D[k] -= (D[k] * n) / wild;
+      joinPops(sim, st, fromCountry(sim, env, p, race, n, st.race === race ? st : null).map((q) => (q.culture ? q : { ...q, culture: st.culture, language: tongueOf(sim, st.culture) })));
+      room -= n;
+    }
+  }
+  countryYear(sim, env, (race, x, y) => {
+    let kin: Settlement | null = null;
+    for (const s of sim.settlements) if (!s.ruined && s.race === race && !s.layer && (!kin || dist(env, s.x, s.y, x, y) < dist(env, kin.x, kin.y, x, y))) kin = s;
+    return kin;
+  });
+}
+
 /**
  * A tribe settling down (Phase 7; technology adds its own needs in Phase 8): settled peoples soon,
  * on good ground; semi-nomadic ones where their land is crowded or rich; nomads rarely, and only
@@ -1357,12 +1409,13 @@ function trySettle(sim: SimState, env: Env, lib: Library, t: Tribe, ri: RaceInfo
   if (rand(sim) >= p) return false;
   const at = landPoint(env, t.winter.x, t.winter.y);
   const v: Settlement = { id: sim.nextId++, name: t.name, kind: 'village', clan: t.clan, species: t.species, race: t.race, culture: t.culture, x: at.x, y: at.y, pop: t.pop, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(t.pop, ri.need, foundingMonths(env, t.winter.x, t.winter.y, sim.day)), techs: [...(clan?.techs ?? [])] };
+  startPops(sim, v, popsOf(sim, t));
   sim.settlements.push(v);
   sim.tribes = sim.tribes.filter((q) => q !== t);
   sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
   // Some of its families stay out on the land round the new village: the wilderness starts here.
   const families = Math.round(t.pop * 0.15);
-  v.pop -= families;
+  toCountry(sim, env, provAt(env, v.x, v.y), takePops(sim, v, families));
   seedDensity(sim, env, t.race, cellsNear(env, v.x, v.y, ri.range * 2.5), families);
   log(sim, `${t.name} settled down at its winter grounds (clan ${sim.clans.find((c) => c.id === t.clan)?.name ?? '?'}).`, v.x, v.y);
   return true;
@@ -1385,9 +1438,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     // A village beside its province's seat stays a village: past that its people move to the seat.
     const seat = seatOf.get(provAt(env, st.x, st.y));
     if (!st.seat && seat && seat.clan === st.clan && st.pop > VILLAGE_MAX) {
-      const go = st.pop - VILLAGE_MAX;
-      st.pop -= go;
-      seat.pop += go;
+      movePeople(sim, st, seat, st.pop - VILLAGE_MAX);
     }
     // A town on another layer is full sooner where there is little room (layers.ts).
     const room = layerRoom(lc, st);
@@ -1435,8 +1486,9 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       const home = alt && ((alt.layer === 'underdark' && lw.under) || (alt.layer === 'canopy' && lw.trees) || (alt.layer.startsWith('sky') && lw.sky));
       // Others go where it suits them about as well as the land at hand (the layers score lower than the open land).
       if (alt && alt.s > 0 && (home || st.layer || !spot || alt.s >= spot.s * 0.5)) {
-        st.pop -= n;
+        const going = takePops(sim, st, n);
         const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, st.culture), kind: 'village', clan: st.clan, species: st.species, race: st.race, culture: st.culture, x: alt.x, y: alt.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, alt.x, alt.y, sim.day)), techs: [...(st.techs ?? [])], layer: alt.layer, ...(alt.island ? { island: alt.island } : {}) };
+        startPops(sim, v, going);
         sim.settlements.push(v);
         if (alt.dug) (sim.dug ??= []).push({ x: st.x, y: st.y, clan: st.clan, day: sim.day });
         if (lw.digs && alt.layer === 'underdark') (sim.tunnels ??= []).push({ a: st.id, b: v.id, ax: st.x, ay: st.y, bx: v.x, by: v.y, clan: st.clan, day: sim.day });
@@ -1449,7 +1501,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     if (settledGrowth) continue;
     // Hungry or crowded: families leave for the land round it, to live in the wild (density.ts);
     // where they gather thick enough, villages form of themselves (villagesFromWild).
-    st.pop -= n;
+    toCountry(sim, env, provAt(env, st.x, st.y), takePops(sim, st, n));
     seedDensity(sim, env, st.race, cellsNear(env, st.x, st.y, R * 3), n);
   }
   // Ruins rebuilt.
@@ -1461,6 +1513,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
       const p = st.holyTo.includes(t.race) ? 0.35 : ri.lifestyle === 'Settled' ? 0.12 : 0.04;
       if (rand(sim) >= p) continue;
       Object.assign(st, { ruined: false, pop: t.pop, clan: t.clan, species: t.species, race: t.race, culture: t.culture, fed: t.fed, warband: Math.round(t.pop * ri.warShare * 0.6), economy: newEconomy(t.pop, ri.need, foundingMonths(env, st.x, st.y, sim.day)), techs: [...(sim.clans.find((q) => q.id === t.clan)?.techs ?? [])] });
+      startPops(sim, st, popsOf(sim, t));
       sim.tribes = sim.tribes.filter((q) => q !== t);
       sim.sorties = sim.sorties.filter((s) => s.tribe !== t.id);
       log(sim, `${t.name} settled in the ruins of ${st.name} and built it again.`, st.x, st.y);
@@ -1539,11 +1592,16 @@ function villagesFromWild(sim: SimState, env: Env, lib: Library, info: Info): vo
       }
       pop = Math.round(pop);
       const at = landPoint(env, xOfCell(env, spot), yOf(env, spot));
-      const culture = kin?.culture ?? startCulture(lib, ri.species, ri.race);
+      // Who they are: the wild folk of the province (their cultures and faiths), else their kin town's.
+      const folk = fromCountry(sim, env, provAt(env, at.x, at.y), race, pop, kin);
+      const culture = mainOf(folk.filter((q) => q.culture), 'culture') || kin?.culture || startCulture(lib, ri.species, ri.race);
+      const faith = mainOf(folk.filter((q) => q.faith), 'faith') || kin?.faith || '';
+      for (const q of folk) if (!q.culture) Object.assign(q, { culture, language: tongueOf(sim, culture) });
       // Whose land it is: theirs. Nobody's: on its own.
       const owner = sim.owner[spot];
       const clanId = owner >= 0 && sim.clans.some((q) => q.id === owner) ? owner : newClan(sim, lib, ri.species.id, race, culture).id;
-      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, culture), kind: 'village', clan: clanId, species: ri.species.id, race, culture, x: at.x, y: at.y, pop, fed: 1, warband: Math.round(pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(pop, ri.need, foundingMonths(env, at.x, at.y, sim.day)), techs: [...(kin?.techs ?? [])], ...(kin?.faith ? { faith: kin.faith } : {}) };
+      const v: Settlement = { id: sim.nextId++, name: makeName(sim, lib, culture), kind: 'village', clan: clanId, species: ri.species.id, race, culture, x: at.x, y: at.y, pop, fed: 1, warband: Math.round(pop * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(pop, ri.need, foundingMonths(env, at.x, at.y, sim.day)), techs: [...(kin?.techs ?? [])], ...(faith ? { faith } : {}) };
+      startPops(sim, v, folk);
       sim.settlements.push(v);
       claimAround(sim, env, v.x, v.y, ri.range, clanId);
       made++;

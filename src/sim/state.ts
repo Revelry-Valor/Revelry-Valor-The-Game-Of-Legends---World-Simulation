@@ -1,3 +1,4 @@
+import type { Pop } from './pops';
 import type { Horde, Tide } from './monsters';
 import type { Rift } from './rifts';
 
@@ -44,6 +45,8 @@ export interface Tribe {
   founded: number;
   /** Its faith (a live faith id). */
   faith?: string;
+  /** Who its people are (pops.ts); their sum is `pop`. */
+  pops?: Pop[];
 }
 
 export interface Clan {
@@ -311,6 +314,8 @@ export interface Settlement {
   local?: { id: string; change: 'add' | 'drop'; level: number; progress: number; from?: string }[];
   /** The culture it had last year (to see when it takes on another, keeping its old ways for a while). */
   lastCulture?: string;
+  /** Who its people are: groups by race, culture, language, faith and class (pops.ts); their sum is `pop`. */
+  pops?: Pop[];
   /** Years this town has lived far from its culture's own ways (two or more local changes of its own), toward a sister culture (REDESIGN.md, regional cultures step 3). */
   apart?: number;
   /** Drawn toward another culture (a big neighbour's, or the many small ones round it): how far along (0–1). */
@@ -618,6 +623,8 @@ export interface SimState {
   beasts: Record<string, Float32Array>;
   /** Wilderness density (REDESIGN.md 8.0): families living out in the wild, people per point, by race. */
   density?: Record<string, Float32Array>;
+  /** The wild folk of each province (by its kept id): who the families living in the wild are (pops.ts). */
+  country?: Record<string, Pop[]>;
   events: SimEvent[];
   /** The races taking part and how many starting tribes each (for placing again). */
   setup: SetupRow[];
