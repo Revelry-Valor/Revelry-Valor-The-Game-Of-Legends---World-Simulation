@@ -17,7 +17,8 @@ import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
 import { cultureFx, cultureOf, cultureYear, ensureCulture, leanAt, leansOf, localYear, note, pushes, townFx, traditionsHere, type Leans } from './culture';
-import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
+import { acceptance, cultureChangeYear, noteBetween, offshoot } from './cultureChange';
+import { driftTick } from './drift';
 import { ensureRealm, LAND_ENFORCE, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
 import { championMight, faithHostility, faithYear } from './faith';
@@ -1254,7 +1255,9 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   popsYear(sim, env, lib, info);
   // Every five years, the culture tick: pressure from the settlements, pops changing a slice at a time (culturetick.ts).
   if (Math.round(sim.day / DAYS_PER_YEAR) % CULTURE_TICK === 0) {
-    cultureTick({
+    const tierOf = (st: Settlement) => settlementTier(st);
+    const capitalOf = (st: Settlement) => sim.clans.some((q) => q.id === st.clan && q.realm?.capital === st.id);
+    const press = cultureTick({
       sim, env, lib,
       provAt: (x, y) => provAt(env, x, y),
       tier: (st) => settlementTier(st),
@@ -1264,6 +1267,17 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
         return clan?.realm ? LAND_ENFORCE[gov?.land ?? ''] ?? 0.4 : 0;
       },
       capital: (st) => sim.clans.some((q) => q.id === st.clan && q.realm?.capital === st.id),
+      log: (text, x, y) => log(sim, text, x, y),
+    });
+    // Drift, splits, blends and cohesion (drift.ts).
+    const change = { sim, lib, rand: () => rand(sim), dist: (ax: number, ay: number, bx: number, by: number) => dist(env, ax, ay, bx, by), log: (text: string, x?: number, y?: number) => log(sim, text, x, y) };
+    driftTick({
+      sim, env, lib, press,
+      provAt: (x, y) => provAt(env, x, y),
+      tier: tierOf,
+      capital: capitalOf,
+      make: (from, hint) => offshoot(change, from, hint),
+      acceptance: (a, b) => acceptance(sim, a, b),
       log: (text, x, y) => log(sim, text, x, y),
     });
   }

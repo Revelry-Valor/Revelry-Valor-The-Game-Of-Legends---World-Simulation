@@ -1,6 +1,5 @@
 import type { Library } from '../core/library';
 import { cultureFx, cultureOf, MAX_TRADITIONS } from './culture';
-import { sistersYear } from './sister';
 import { similarity } from './traits';
 import type { LiveCulture, Settlement, SimState, Tribe } from './state';
 
@@ -70,7 +69,7 @@ type Member = Settlement | Tribe;
 const membersOf = (sim: SimState, id: string): Member[] => [...sim.settlements.filter((s) => !s.ruined && s.culture === id), ...sim.tribes.filter((t) => t.culture === id)];
 
 /** A new culture grown from (or blended of) others: their ways, a new name in their sounds. */
-function offshoot(c: ChangeContext, from: LiveCulture[], idHint: string): LiveCulture {
+export function offshoot(c: ChangeContext, from: LiveCulture[], idHint: string): LiveCulture {
   const { sim, rand } = c;
   const sounds = from.map((f) => f.sounds).join(' ').split(/\s+/).filter(Boolean);
   const pre = sounds.filter((p) => p.endsWith('-')).map((p) => p.slice(0, -1));
@@ -151,57 +150,5 @@ export function cultureChangeYear(c: ChangeContext): void {
     if (top && top[0] && top[0] !== clan.culture) clan.culture = top[0];
   }
 
-  // ---- Divergence: clans far from their culture's heartland, with no ties back.
-  for (const cu of cultures) {
-    const ms = members.get(cu.id) ?? [];
-    if (ms.length < 2) continue;
-    // The heartland: its biggest settlement, or where most of its people roam.
-    const heart = [...ms].sort((a, b) => b.pop - a.pop)[0];
-    const byClan = new Map<number, Member[]>();
-    for (const m of ms) byClan.set(m.clan, [...(byClan.get(m.clan) ?? []), m]);
-    for (const [clanId, list] of byClan) {
-      const clan = sim.clans.find((q) => q.id === clanId);
-      if (!clan || list.includes(heart)) continue;
-      const pop = list.reduce((n, m) => n + m.pop, 0);
-      const cx = list.reduce((n, m) => n + m.x * m.pop, 0) / pop;
-      const cy = list.reduce((n, m) => n + m.y * m.pop, 0) / pop;
-      const far = c.dist(cx, cy, heart.x, heart.y) > 500;
-      const ties = sim.routes.some((r) => {
-        const a = live.find((s) => s.id === r.a);
-        const b = live.find((s) => s.id === r.b);
-        return !!a && !!b && ((a.clan === clanId && b.culture === cu.id && b.clan !== clanId) || (b.clan === clanId && a.culture === cu.id && a.clan !== clanId));
-      });
-      clan.drift = far && !ties ? (clan.drift ?? 0) + 1 : Math.max(0, (clan.drift ?? 0) - 2);
-      // Sixty years apart, from a culture old enough to have a heartland.
-      if ((clan.drift ?? 0) < 60 || pop < 150 || sim.day - cu.founded < 360 * 60) continue;
-      const nc = offshoot(c, [cu], 'drift');
-      for (const m of list) m.culture = nc.id;
-      clan.culture = nc.id;
-      clan.drift = 0;
-      c.log(`Far from their heartland, clan ${clan.name} of the ${cu.name} have grown into a people of their own: the ${nc.name}.`, cx, cy);
-    }
-  }
-
-  // ---- Sister cultures: a region of a culture's towns long living their own version of it.
-  sistersYear(c, (from, hint) => offshoot(c, from, hint));
-
-  // ---- Hybrids: two cultures long side by side, close to each other, blend where they mix.
-  for (let i = 0; i < cultures.length; i++) for (let j = i + 1; j < cultures.length; j++) {
-    const A = cultures[i];
-    const B = cultures[j];
-    const rel = sim.relations?.[key(A.id, B.id)];
-    if (!rel || rel.acc < 0.6 || rel.together < 40) continue;
-    const mA = members.get(A.id) ?? [];
-    const mB = members.get(B.id) ?? [];
-    const mixed = [...mA.filter((p) => mB.some((q) => c.dist(p.x, p.y, q.x, q.y) < 150)), ...mB.filter((p) => mA.some((q) => c.dist(p.x, p.y, q.x, q.y) < 150))];
-    if (mixed.length < 2) continue;
-    const popA = mA.reduce((n, m) => n + m.pop, 0);
-    const popB = mB.reduce((n, m) => n + m.pop, 0);
-    const hy = offshoot(c, popA >= popB ? [A, B] : [B, A], 'blend');
-    for (const m of mixed) m.culture = hy.id;
-    rel.together = 0;
-    const at = mixed[0];
-    c.log(`The ${A.name} and the ${B.name}, long living side by side, have blended into one people: the ${hy.name}.`, at.x, at.y);
-  }
+  // (Divergence, sister cultures and blends are the culture tick's drift now: drift.ts.)
 }
-

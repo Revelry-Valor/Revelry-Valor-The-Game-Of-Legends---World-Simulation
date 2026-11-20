@@ -14,6 +14,7 @@ import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
+import { coreDistanceOf, stageOf } from '../sim/drift';
 import { bundleOf, familyName, levelOf, similarity, TRAITS, treeNearness } from '../sim/traits';
 import type { Army, Battle, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
 import type { Pop } from '../sim/pops';
@@ -2418,6 +2419,15 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             : null,
           st.ruined ? null : cultureLine(st.culture, st),
           st.ruined ? null : faithLine(st.faith, st.faithShift),
+          !st.ruined && env && st.partOf === undefined
+            ? (() => {
+                const e = env!;
+                const d = coreDistanceOf(s, e, st, (x, y) => provAt(e, x, y));
+                const cu = cultureOf(s, st.culture);
+                if (d === null || !cu) return null;
+                return h('div', { class: 'muted' }, `Its region, ${Math.round(d * 100) / 100} from the ${cu.name} heartland: ${stageOf(d)}.${st.cohesion ? ` Cohesion ${Math.round(st.cohesion * 100)}%${st.cohesion >= 0.4 ? ' (a frontier people, hard to win over)' : ''}.` : ''}`);
+              })()
+            : null,
           !st.ruined && st.pull && cultureOf(s, st.pull.to) ? h('div', { class: 'muted' }, `Drawn toward the ways of the ${cultureOf(s, st.pull.to)!.name}: ${st.pull.share >= 0.5 ? 'strongly' : st.pull.share >= 0.2 ? 'somewhat' : 'a little'} (${Math.round(st.pull.share * 100)}% of the pull on it).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
           !st.ruined && st.pops?.length ? popsTable(st.pops) : null,

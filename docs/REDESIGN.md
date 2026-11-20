@@ -1276,6 +1276,19 @@ The simulation follows people, not places: each province holds groups of people 
 - *Shown:* a town's card says the strongest outside pull on it ("Drawn toward the ways of the Toral: somewhat (34% of the pull on it)"); its people table shows whose goods and homes each group lives by.
 - On the 60-year saved world, the cultures, living apart, kept their ways; where they meet, goods and homes began to spread first (six towns), as the design calls for.
 
+**Built (step 4): drift, splits, blends and cohesion** (`sim/drift.ts`), with the culture tick
+- *Core distance:* each region of a culture (its people in a province) closes a tenth of the gap each tick (about fifty years to settle) toward a balance: push ÷ (push + 3 × contact).
+  - *Push:* 0.1 always (random drift), +0.1 for each local way its towns live by (up to three: the land's pull), +0.4 × the share of the pressure there from other cultures (foreign pull), +0.2 for a city of its own there other than the heartland (a regional centre).
+  - *Contact:* the heartland's reach (its capital, else its biggest town, else its biggest tribe): 1 there, fading with distance (to 1/e in 150 km of open lowland; rough ground further, roads nearer). The heartland's own province does not drift.
+  - So a region near its heartland or tied to it by roads stays close (about 0.04 a day's ride away), one far off drifts toward 1.
+- *Stages:* under 0.15 an accent and local dishes; 0.15–0.30 a strong dialect and its own customs; 0.30–0.50 a regional identity; past 0.50 a people of its own.
+- *Splits:* connected provinces of a culture past 0.50, outside its heartland, with at least 200 of its people, become a subculture of it: a new name in its sounds, its traditions, the same tongue for now (a dialect first; languages of their own in step 5); its people there (towns, tribes, the wild) are of the new culture, keeping their goods and homes. "Long apart from their heartland, the Toral of Isish have become a people of their own: the Kador, of the Toral family."
+- *Blends:* two cultures each 30–70% of a province's people (at least 200 there), with acceptance of at least 0.3, for twelve ticks (sixty years) blend there into a new culture with both as parents.
+- *Cohesion* (asabiya, 0–1, per settlement): +0.08 a tick where at least 15% of the pressure on it and its neighbouring provinces is from very different cultures (under 0.3 alike) or it is at war; −0.04 in a safe town (under 2% such pressure); −0.01 otherwise. It makes its fighters stronger (up to +30%), its people slower to take up another culture or tongue (up to half as fast), and its pull on others stronger (up to +50% prestige).
+- *Replaced:* sister cultures from shared local ways, clans drifting from their heartland, and the old blending are all this now (the local ways feed the push).
+- *Shown:* a town's card gives its region's core distance and stage ("Its region, 0.22 from the Toral heartland: a strong dialect and its own customs") and its cohesion.
+- On the saved world over 100 years: distances rose slowly (the farthest past 0.5 after about sixty years), three regions split off as subcultures (four cultures to seven), and about ten frontier towns became cohesive.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

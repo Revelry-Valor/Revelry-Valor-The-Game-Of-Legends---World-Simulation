@@ -211,6 +211,12 @@ export function traditionsHere(sim: SimState, st: Settlement): { id: string; lev
 }
 /** What a settlement's own version of its culture does (its culture's, with its local changes). */
 export function townFx(sim: SimState, st: Settlement): CultureFx {
+  const f = baseTownFx(sim, st);
+  // A cohesive people fights harder (drift.ts).
+  const co = st.cohesion ?? 0;
+  return co > 0.01 ? { ...f, fight: f.fight * (1 + 0.3 * co) } : f;
+}
+function baseTownFx(sim: SimState, st: Settlement): CultureFx {
   const local = localOf(sim, st).filter((q) => q.level >= 0);
   if (!local.length) return cultureFx(sim, st.culture);
   let m = fxCache.get(sim);

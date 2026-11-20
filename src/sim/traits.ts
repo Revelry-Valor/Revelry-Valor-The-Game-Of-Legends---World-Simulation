@@ -211,7 +211,7 @@ export function rootOf(cultures: LiveCulture[], cu: LiveCulture): LiveCulture {
   return r;
 }
 /** Its level in the tree: a subculture (a region grown apart from its parent) or a culture. */
-export const levelOf = (cu: LiveCulture): 'subculture' | 'culture' => (cu.sister?.length ? 'subculture' : 'culture');
+export const levelOf = (cu: LiveCulture): 'subculture' | 'culture' => (cu.level === 'subculture' || cu.sister?.length ? 'subculture' : 'culture');
 /** The family's name ("the Toral family"), from its root. */
 export const familyName = (cultures: LiveCulture[], cu: LiveCulture) => `the ${rootOf(cultures, cu).name} family`;
 

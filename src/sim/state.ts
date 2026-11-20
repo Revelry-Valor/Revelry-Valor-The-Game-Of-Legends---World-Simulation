@@ -322,6 +322,8 @@ export interface Settlement {
   cultureShift?: { to: string; progress: number };
   /** The strongest outside culture pressing on it, and its share of all the pressure there (the culture tick, culturetick.ts). */
   pull?: { to: string; share: number };
+  /** Cohesion (asabiya, 0–1): high on frontiers facing very different peoples or war, low in safe crowded heartlands (drift.ts). */
+  cohesion?: number;
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
   control?: number;
   /** Its loyalty to its realm (0–1), and the years it has been discontented. */
@@ -445,6 +447,8 @@ export interface LiveCulture {
   faith?: string;
   law?: string;
   kinship?: string;
+  /** A subculture: a region grown apart from its parent (drift.ts). */
+  level?: 'subculture';
   /** A sister culture: the changes its region lived by that set it apart from its parent ("+seafaring", "-tillers"). */
   sister?: string[];
   /** Its colour on the map of cultures. */
@@ -632,6 +636,10 @@ export interface SimState {
   density?: Record<string, Float32Array>;
   /** The wild folk of each province (by its kept id): who the families living in the wild are (pops.ts). */
   country?: Record<string, Pop[]>;
+  /** Each region's core distance from its culture's heartland, by culture and province id (drift.ts). */
+  coreDist?: Record<string, number>;
+  /** Culture ticks two cultures have shared a province as a good part of it each (toward a blend). */
+  mixed?: Record<string, number>;
   events: SimEvent[];
   /** The races taking part and how many starting tribes each (for placing again). */
   setup: SetupRow[];

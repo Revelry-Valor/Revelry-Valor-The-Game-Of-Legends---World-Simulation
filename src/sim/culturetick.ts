@@ -75,12 +75,14 @@ export function prestige(c: TickContext, st: Settlement, routes: Map<number, num
   if (st.seat) m += 0.3;
   m += Math.min(0.5, (routes.get(st.id) ?? 0) * 0.1);
   if (st.holyTo.length) m += 0.3;
+  // A cohesive people draws its neighbours more (drift.ts).
+  m *= 1 + 0.5 * (st.cohesion ?? 0);
   if (tier === 'Village') p *= 0.5;
   return p * m;
 }
 
 type Press = Map<string, number>;
-interface ProvPress {
+export interface ProvPress {
   culture: Press;
   language: Press;
 }
@@ -184,8 +186,10 @@ export function pressures(c: TickContext): Map<number, ProvPress> {
 }
 
 /** One pop's slices toward the strongest outside pulls (material culture, culture, tongue). */
-function shiftPop(q: Pop, place: Place, press: ProvPress, local: { culture: Press; language: Press; material: Press; all: number }, alike: (a: string, b: string) => number, out: Pop[]): void {
+function shiftPop(q: Pop, place: Place, hold: number, press: ProvPress, local: { culture: Press; language: Press; material: Press; all: number }, alike: (a: string, b: string) => number, out: Pop[]): void {
   const r = RECEPTIVE[q.cls] * PLACE[place];
+  // A cohesive people holds to its own culture and tongue (its goods change as readily).
+  const firm = 1 - 0.5 * hold;
   const pull = (m: Press, own: string): { v: string; d: number } | null => {
     let best = '';
     let bv = 0;
@@ -205,9 +209,9 @@ function shiftPop(q: Pop, place: Place, press: ProvPress, local: { culture: Pres
   const mat = pull(press.culture, materialOf(q));
   if (mat) moves.push({ key: 'material', v: mat.v, f: (CULTURE_TICK / YEARS.material) * r * mat.d * conformity(share(local.material, mat.v, press.culture, pc)) });
   const cul = pull(press.culture, q.culture);
-  if (cul) moves.push({ key: 'culture', v: cul.v, f: (CULTURE_TICK / YEARS.culture) * r * cul.d * conformity(share(local.culture, cul.v, press.culture, pc)) * (0.5 + 0.5 * alike(q.culture, cul.v)) });
+  if (cul) moves.push({ key: 'culture', v: cul.v, f: (CULTURE_TICK / YEARS.culture) * r * cul.d * conformity(share(local.culture, cul.v, press.culture, pc)) * (0.5 + 0.5 * alike(q.culture, cul.v)) * firm });
   const lang = q.language ? pull(press.language, q.language) : null;
-  if (lang) moves.push({ key: 'language', v: lang.v, f: (CULTURE_TICK / YEARS.language) * r * lang.d * conformity(share(local.language, lang.v, press.language, pl, LANGUAGE_HOME)) });
+  if (lang) moves.push({ key: 'language', v: lang.v, f: (CULTURE_TICK / YEARS.language) * r * lang.d * conformity(share(local.language, lang.v, press.language, pl, LANGUAGE_HOME)) * firm });
   for (const m of moves) {
     const f = Math.max(0, Math.min(0.5, m.f));
     const t = q.n * f;
@@ -239,7 +243,7 @@ function localOf(pops: readonly Pop[]) {
 }
 
 /** Every five years: pressure, then each pop's slices; settlements count themselves of their people's main culture. */
-export function cultureTick(c: TickContext): void {
+export function cultureTick(c: TickContext): Map<number, ProvPress> {
   const { sim, env, lib } = c;
   const press = pressures(c);
   const cultures = sim.cultures ?? [];
@@ -256,13 +260,13 @@ export function cultureTick(c: TickContext): void {
     }
     return v;
   };
-  const shiftAll = (pops: Pop[] | undefined, p: number, place: Place, localPops?: readonly Pop[]): Pop[] | undefined => {
+  const shiftAll = (pops: Pop[] | undefined, p: number, place: Place, hold = 0): Pop[] | undefined => {
     if (!pops?.length || p < 0) return pops;
     const pr = press.get(p);
     if (!pr) return pops;
-    const local = localOf(localPops ?? pops);
+    const local = localOf(pops);
     const out: Pop[] = [];
-    for (const q of pops) shiftPop(q, place, pr, local, alike, out);
+    for (const q of pops) shiftPop(q, place, hold, pr, local, alike, out);
     const next: Pop[] = [];
     for (const q of out) addPop(next, q);
     return tidy(next);
@@ -274,7 +278,7 @@ export function cultureTick(c: TickContext): void {
   for (const st of sim.settlements) {
     if (st.ruined || !st.pops?.length) continue;
     const before = st.culture;
-    st.pops = shiftAll(st.pops, c.provAt(st.x, st.y), placeOf(st));
+    st.pops = shiftAll(st.pops, c.provAt(st.x, st.y), placeOf(st), st.cohesion ?? 0);
     // The strongest outside pull on it, for its card.
     const pr = press.get(c.provAt(st.x, st.y));
     let to = '';
@@ -305,6 +309,7 @@ export function cultureTick(c: TickContext): void {
     const cp = sim.country?.[key];
     if (cp?.length) sim.country![key] = shiftAll(cp, p, 'wild') ?? cp;
   }
+  return press;
 }
 
 /** The culture a pop's goods, houses and dress come from (for its card). */

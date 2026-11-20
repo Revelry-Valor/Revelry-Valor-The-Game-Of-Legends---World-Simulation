@@ -585,44 +585,7 @@ describe('culture change', () => {
     expect(acceptance(sim, a.culture, b.culture)).toBeLessThan(traded - 0.2);
   }, 120000);
   // (A small settlement drawn into a big neighbour's culture: the culture tick now, tests/culturetick.test.ts.)
-  it('lets a clan far from its heartland, with no ties back, grow a culture of its own', () => {
-    const sim = newSim(env, 205);
-    const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 800, farming)!;
-    const far = addTribe(sim, env, lib, humanId(), 6000, yAt(-20), -1, 300)!;
-    expect(far.culture).toBe(city.culture);
-    const parent = city.culture;
-    for (let y = 0; y < 75; y++) {
-      for (const t of sim.tribes) if (t.clan === far.clan) {
-        t.summer = { x: 6000, y: yAt(-20) };
-        t.winter = { x: 6000, y: yAt(-20) };
-        t.pop = Math.max(t.pop, 200);
-      }
-      const clan = sim.clans.find((c) => c.id === far.clan);
-      if (clan) clan.techs = [];
-      stepDays(sim, env, lib, DAYS_PER_YEAR);
-    }
-    const kin = sim.tribes.filter((t) => t.clan === far.clan);
-    expect(kin.length).toBeGreaterThan(0);
-    const now = sim.cultures!.find((c) => c.id === kin[0].culture)!;
-    expect(now.id).not.toBe(parent);
-    expect(now.parent).toBe(parent);
-  }, 180000);
-  it('blends two cultures long living side by side and close to each other', () => {
-    const sim = newSim(env, 207);
-    const a = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 600, farming)!;
-    const b = addDawnCity(sim, env, lib, elfId(), 6080, yAt(-12), 600, farming)!;
-    const before = [a.culture, b.culture];
-    for (let y = 0; y < 50; y++) {
-      // They come to hold each other close.
-      for (let i = 0; i < 10; i++) noteBetween(sim, a.culture, b.culture, 'trades');
-      stepDays(sim, env, lib, DAYS_PER_YEAR);
-      if (sim.cultures!.some((c) => c.blend)) break;
-    }
-    const blend = sim.cultures!.find((c) => c.blend);
-    expect(blend).toBeDefined();
-    expect(blend!.blend!.sort()).toEqual([...before].sort());
-    expect([a.culture, b.culture]).toContain(blend!.id);
-  }, 180000);
+  // (A people far from its heartland growing apart, and two cultures blending: drift now, tests/drift.test.ts.)
 });
 
 describe('realms', () => {
