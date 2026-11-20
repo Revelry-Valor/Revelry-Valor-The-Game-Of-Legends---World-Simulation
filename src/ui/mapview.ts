@@ -106,6 +106,8 @@ export interface MapView {
   el: HTMLElement;
   redraw(): void;
   fit(): void;
+  /** Add a button to the map's controls (top right, before Hand, Measure and Fit). */
+  addControl(el: HTMLElement): void;
   /** The strokes changed inside these bounds (km); null for everywhere. */
   surfaceChanged(bounds: [number, number, number, number] | null): void;
   /** A new climate is ready. */
@@ -1844,11 +1846,12 @@ export function createMapView(o: MapViewOptions): MapView {
   const scheme = matchMedia('(prefers-color-scheme: dark)');
   scheme.addEventListener('change', schedule);
 
+  const controls = h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, handBtn, measureBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit'));
   const el = h(
     'div',
     { class: 'stage' },
     canvas,
-    h('div', { class: 'stage-controls' }, busy, cancelBtn, finishBtn, handBtn, measureBtn, h('button', { type: 'button', class: 'ghost', onclick: fit }, 'Fit')),
+    controls,
     measureBox,
   );
   requestAnimationFrame(fit);
@@ -1857,6 +1860,9 @@ export function createMapView(o: MapViewOptions): MapView {
     el,
     redraw: schedule,
     fit,
+    addControl(b) {
+      controls.insertBefore(b, handBtn);
+    },
     surfaceChanged(bounds) {
       cache.setSurface(o.world().surface, bounds);
       schedule();

@@ -995,6 +995,8 @@ export function showWorld(app: App, start: World): () => void {
     },
   });
   map.el.append(peoples.bar);
+  // The history of peoples, from the map's controls (top right).
+  map.addControl(h('button', { type: 'button', class: 'ghost', title: 'The history of peoples: cultures, languages and races over time', onclick: () => peoples?.openHistory() }, 'History'));
   // The Provinces tab: the province generator.
   provinces = createProvinces({
     world: () => world,

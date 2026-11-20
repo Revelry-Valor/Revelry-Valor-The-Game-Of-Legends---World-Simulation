@@ -86,6 +86,8 @@ export interface PeoplesDeps {
 
 export interface Peoples {
   panel: HTMLElement;
+  /** Open the history of peoples (the timeline panel). */
+  openHistory(): void;
   bar: HTMLElement;
   overlay: MapOverlay;
   /** Whether the Peoples tab is open (the map's presses go to the peoples then). */
@@ -2380,7 +2382,6 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     if (living.length)
       parts.push(
         h('h3', {}, 'Cultures'),
-        h('button', { type: 'button', class: 'ghost small', onclick: () => openTimeline({ sim: () => sim, lib, cultureColour: (cu) => cultureColour(sim!, cu), scrub: (day) => { historyDay = day; if (day !== null) d.showCultures?.(); d.redraw(); } }) }, 'History of peoples…'),
         ...living.map((cu) => cultureCard(cu)),
       );
     if (sim?.languages?.length) parts.push(h('h3', {}, 'Languages'), languagesCard());
@@ -2589,6 +2590,13 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     panel,
     bar,
     overlay,
+    openHistory() {
+      if (!sim?.history?.snaps.length) {
+        toast(sim?.started ? 'No history yet: it is kept every five years as the peoples run.' : 'Start the peoples (Peoples tab) to begin their history.');
+        return;
+      }
+      openTimeline({ sim: () => sim, lib, cultureColour: (cu) => cultureColour(sim!, cu), scrub: (day) => { historyDay = day; if (day !== null) d.showCultures?.(); d.redraw(); } });
+    },
     setActive(on) {
       active = on;
       if (on) render();
