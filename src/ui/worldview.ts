@@ -602,9 +602,10 @@ export function showWorld(app: App, start: World): () => void {
         h('option', { value: 'off' }, 'Hidden'),
         h('option', { value: 'total' }, 'Everyone'),
         h('option', { value: 'culture' }, 'Cultures'),
+        h('option', { value: 'food' }, 'Food capacity'),
         ...races.map((r) => h('option', { value: r.id }, r.name)),
       );
-      if (look.density !== 'off' && look.density !== 'total' && look.density !== 'culture' && !races.some((r) => r.id === look.density)) look.density = 'off';
+      if (look.density !== 'off' && look.density !== 'total' && look.density !== 'culture' && look.density !== 'food' && !races.some((r) => r.id === look.density)) look.density = 'off';
       sel.value = look.density;
     };
     fill();
@@ -614,7 +615,7 @@ export function showWorld(app: App, start: World): () => void {
       look.density = sel.value;
       map.redraw();
     });
-    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Population heat map'), sel, h('span', { class: 'muted small hint' }, 'People per square mile in each province (families in the wild, villages, towns and tribes): everyone, or one race. Cultures: each province in its cultures’ colours, blended by how many of each live there. The peoples’ simulation must be running.'));
+    return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Population heat map'), sel, h('span', { class: 'muted small hint' }, 'People per square mile in each province (families in the wild, villages, towns and tribes): everyone, or one race. Cultures: each province in its cultures’ colours, blended by how many of each live there. Food capacity: how many people per square mile each province’s land could feed, fully farmed (farms, herds and fish). The peoples’ simulation must be running.'));
   }
   const lookPanel = h(
     'section',

@@ -10,7 +10,8 @@ import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
 import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
-import { hasArchive, keepers } from '../sim/tech';
+import { clanKnows, hasArchive, keepers } from '../sim/tech';
+import { ALL_FOOD_TECH, foodTechFrom, provinceFood, provinceLand } from '../sim/food';
 import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
@@ -142,6 +143,17 @@ function densityColour(per: number): string | null {
   const f = sc - i;
   const c = ramp[i].map((x, q) => Math.round(x + (ramp[i + 1][q] - x) * f));
   return `rgba(${c[0]},${c[1]},${c[2]},${((110 + 130 * t) / 255).toFixed(3)})`;
+}
+/** The food map's colour for so many people a square mile the land could feed: brown (poor) through yellow to deep green (rich), to about 155 a square mile (60 a km²). */
+function foodColour(perSqMi: number): string | null {
+  if (perSqMi < 0.5) return null;
+  const ramp = [[150, 100, 60], [225, 200, 90], [140, 190, 80], [30, 110, 50]];
+  const t = Math.max(0, Math.min(0.999, perSqMi / 155));
+  const sc = t * (ramp.length - 1);
+  const i = Math.floor(sc);
+  const f = sc - i;
+  const c = ramp[i].map((x, q) => Math.round(x + (ramp[i + 1][q] - x) * f));
+  return `rgba(${c[0]},${c[1]},${c[2]},0.72)`;
 }
 /**
  * The population of each province, per square mile: the families living in the wild there, and
@@ -640,7 +652,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       if (dShow !== 'off' && dpm && e.prov.real && e.prov.count === dpm.rings.length) {
         const key = `${dShow}|${s.day}|${s.settlements.length}|${historyDay}`;
         if (key !== densityKey || !densityFills.length) {
-          if (dShow === 'culture' && historyDay !== null) {
+          if (dShow === 'food') {
+            // What each province's land can feed, fully farmed (people per square mile).
+            const land = provinceLand(e);
+            densityFills = Array.from({ length: e.prov.count }, (_, p) => (e.prov.kind[p] === PK.land && e.prov.area[p] > 0 ? foodColour((provinceFood(land[p], ALL_FOOD_TECH).total / e.prov.area[p]) * SQ_KM_PER_SQ_MI) : null));
+          } else if (dShow === 'culture' && historyDay !== null) {
             // As it was on the day scrubbed in the history of peoples.
             const snap = snapshotAt(s, historyDay);
             const byId = new Map<number, string>();
@@ -1451,6 +1467,18 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           if (dz.total >= 0.5) {
             const per = (v: number) => (v / env!.cellArea) * SQ_KM_PER_SQ_MI;
             push('Wild folk', `about ${perSqMi(per(dz.total))} per sq mi (${Math.round(dz.total).toLocaleString()} here)${dz.byRace.length > 1 || dz.byRace[0]?.[0] ? ': ' + dz.byRace.map(([id, v]) => `${raceName(id)} ${Math.round((v / dz.total) * 100)}%`).join(', ') : ''}`);
+          }
+        }
+      }
+      // Its province: its people, their cultures, and what its land can feed.
+      if (env?.prov.real) {
+        const pi = provAt(env, x, y);
+        if (pi >= 0) {
+          const seen = new Set<string>();
+          for (const it of api.provinceInfo(pi)) {
+            if (!['People', 'Peoples', 'Farmland', 'Can feed'].includes(it.label) || seen.has(it.label)) continue;
+            seen.add(it.label);
+            out.push({ label: it.label === 'People' ? 'Province people' : it.label, value: it.value });
           }
         }
       }
@@ -2586,7 +2614,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   }
   render();
 
-  return {
+  const api: Peoples = {
     panel,
     bar,
     overlay,
@@ -2674,6 +2702,19 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         const per = provincePopulation(s, env, 'total')[index];
         const sqmi = env.prov.area[index] / SQ_KM_PER_SQ_MI;
         if (per > 0) out.push({ label: 'People', value: `about ${Math.round(per * sqmi).toLocaleString()} (${perSqMi(per)} per sq mi): in the wild, villages, towns and tribes` });
+        // What its land can feed (food.ts): fully farmed, and with what its holders know.
+        {
+          const land = provinceLand(env)[index];
+          const full = provinceFood(land, ALL_FOOD_TECH);
+          if (full.total > 0) {
+            const sqmiP = env.prov.area[index] / SQ_KM_PER_SQ_MI;
+            const holder = (s.provOwner?.[index] ?? -1) >= 0 ? clanOf(s.provOwner![index]) : undefined;
+            const known = holder ? provinceFood(land, foodTechFrom((id) => clanKnows(lib(), holder, id))) : null;
+            const n = (v: number) => Math.round(v).toLocaleString();
+            out.push({ label: 'Farmland', value: `${n(land.arableHa / 100)} km² of ${n(env.prov.area[index])} (${Math.round((land.arableHa / 100 / Math.max(1, env.prov.area[index])) * 100)}%), fertility ${Math.round(land.fertility * 100)}%` });
+            out.push({ label: 'Can feed', value: `about ${n(full.total)} people fully farmed (${n(full.total / sqmiP)} per sq mi: farms ${n(full.farms)}, herds ${n(full.herds)}, fish ${n(full.fish)})${known ? `; ${n(known.total)} with what its holders know` : ''}` });
+          }
+        }
         const by = provinceCultures(s, env).get(index);
         if (by?.size) {
           const all = [...by.values()].reduce((a, b) => a + b, 0);
@@ -2725,4 +2766,5 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       clearTimeout(panelTimer);
     },
   };
+  return api;
 }

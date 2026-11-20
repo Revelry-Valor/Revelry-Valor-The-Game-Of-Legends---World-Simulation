@@ -1323,6 +1323,32 @@ The simulation follows people, not places: each province holds groups of people 
   - Scrub a date (the slider) to mark it on the timeline; with *Show the map's cultures at this date* ticked, the map shows the Cultures view as it was then.
 - In the browser on the saved world over 80 years: four cultures and one subculture; four language families with seven dialects and a young language; the races; a line clicked shows its story, and scrubbing recolours the map.
 
+### Settlements and population (agreed with the designer; from the designer's doc "Settlement & Population Design — Province-Based Simulation")
+
+Food sets how many people the land can hold, and transport how far food can travel; together they decide how big settlements get and how far apart they sit. Hard spacing rules (a footprint, and an exclusion radius against the same or a higher tier) stop absurd clumping; food competition between settlements makes realistic density. Six tiers: hamlet (20–100), village (100–500), market town (500–2,000), large town (2,000–10,000), city (10,000–100,000), great city (100,000+); a settlement drops a tier at 80% of what it needed to rise.
+
+**Decided**
+- *Villages are aggregated:* hamlets and villages live inside their province as its rural people, but each village is a lasting *village site* (its spot, name, share of the rural people, when it began), drawn on the map at the spacing the land allows. A site's spot (water, a crossing, a harbour, high ground) and what passes it (trade routes, roads, crossroads, a market near) draw people to it, so a village on a busy route grows, and one that outgrows village size becomes a real settlement on the same spot, keeping its name and story ("a village since year 70, a market town from year 140"); a town that dwindles goes back to being a village site. Only market towns and up are settlements with their own economy, pops and card.
+- *Peoples who don't farm* (tribes, foragers) keep the wild-family model until they take up farming.
+- *Races:* rations and land per person scale with a race's size (what it already eats).
+
+**Build order**
+1. *Province food capacity* (below).
+2. *Rural people and village sites:* the rural people fill each province toward its food; village count and size from the spacing formula; sites drawn on the map; hungry provinces send migrants.
+3. *Tiers and spacing:* the six tiers with hysteresis, footprints and exclusion radii, market towns founded from surplus (none within 10 km) at the best site, sites growing into towns; the one-seat-per-province rule and the 600 cap retired.
+4. *Catchments and food competition:* towns draw surplus by land (about 15 km), river (75–150 km) or sea; overlapping catchments split it by how cheaply each reaches it; shortage raises prices, stalls growth, sends people away, then shrinks a town; cities grow from rural migrants; caps emerge (about 10–15 thousand by land, 50–100 thousand by river, more by sea with imported grain).
+5. *Rings round a city:* the land nearest farmed harder (1.5× yield), villages packed tighter there.
+6. *Tuning* and the doc's open questions.
+
+**Built (step 1): what the land can feed** (`sim/food.ts`)
+- *Arable share* of each climate point by ground cover (grassland 0.55, steppe and savanna 0.4, forest 0.35 once cleared, jungle and scrub 0.2, taiga 0.15, marsh 0.1, badlands and beach 0.05, tundra 0.03, desert 0.02, ice and salt none) times relief (hills ½, highlands ⅓, high mountains ⅐, peaks none); a river's or lake's floodplain at least 0.6.
+- *Fertility* by the warm season: warmth (none under 4 °C, full from 16 °C, down to 40% past 42 °C) times water (the season's rain; by a river or lake at least 0.6, 0.95 with irrigation) times the soil (rainforest soils, leached, ½; taiga 0.65 and tundra ½, thin; marsh 0.8, waterlogged).
+- *Food* = arable ha × 2.5 × fertility × (the plough: 1, without 0.8) × (1 − 0.25 seed) × (1 − fallow: ½ with two fields, ⅓ with crop rotation). At fertility 1 with the plough and rotation a hectare feeds 1.25 people (each farmer feeds themselves and a quarter of another); with two fields, 0.94. Nothing without agriculture.
+- *Herds* (animal husbandry) on the land not farmed, by its grazing (grass and steppe best): up to 0.1 people a hectare by its quality. *Fish* (fishing): 150 people a year per km of sea or lake shore.
+- *Surplus* = food − what the rural people eat; it is what towns can draw on, and its share of the food the urban share it allows.
+- *Shown:* a province's hover gives its farmland (km² and share, fertility) and how many it can feed fully farmed (by farms, herds and fish) and with what its holders know; the population heat map has a *Food capacity* choice (people per square mile each province could feed, brown through yellow to deep green at about 155 a square mile); the cursor's panel gives the province's people, peoples, farmland and what it can feed.
+- On the saved world: 18% of the land arable; fully farmed it could feed about 128 million, 22 people a km² on average (a typical province 25, the richest 56; England around 1300 about 35).
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

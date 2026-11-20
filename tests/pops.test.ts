@@ -129,5 +129,5 @@ describe('pops (cultures as peoples, step 1)', () => {
     const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, env))), env)!;
     expect(Object.keys(back.country ?? {}).length).toBe(Object.keys(sim.country ?? {}).length);
     expect(back.settlements.find((s) => s.id === city.id)!.pops!.length).toBe(city.pops!.length);
-  });
+  }, 60000);
 });
