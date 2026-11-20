@@ -1299,6 +1299,18 @@ The simulation follows people, not places: each province holds groups of people 
 - *Shown:* the Peoples tab lists every tongue as family trees, with dialects and daughter languages under their parents, speakers, and ended ones dimmed; a town's card says what it speaks ("Isish Toral, a dialect of Toral"); its people table names each group's tongue; the culture card names its language and what it grew from.
 - On the saved world over 100 years: four languages, seven dialects by year 100, and three new languages grown from them (one, Neaeen, already from a young language, Aeven, itself grown from Ouven).
 
+**Built (step 6): national identity, grievance and stance** (`sim/identity.ts`), yearly
+- *Accepted cultures:* a realm counts as its own its culture and those it holds close (acceptance 0.5 or more); shown on the realm's card. Their people share its privileges.
+- *Grievance* (0–1, each pop under a realm), closing a fifth of the gap each year toward: hunger +0.3; forced customs, for a people not accepted, +0.3 × how firmly the realm enforces its ways × its control there; a faith it persecutes (up to +0.3); war on its doorstep +0.1; a strong realm's weight away from the capital +0.1 × centralization; for the elites of a people not accepted, kept from office, +0.2.
+- *National identity* (0–1), closing a twentieth of the gap each year toward: 0.2 + 0.4 × control + time in the realm (up to +0.2 over a century) + 0.3 for the realm's own culture (0.15 for one accepted) + 0.1 at war (a shared enemy) − 0.3 × its region's core distance − 0.4 × its grievance − 0.2 where a neighbouring realm of its own culture lies within 300 km. So a region can be different and loyal, or alike and resentful.
+- *Stance*, for a people not of the realm's culture: tolerance (1 if accepted, else 0.5 + acceptance − 0.5 × enforcement × control) against its own strength there (its share, half the town's cohesion, +0.3 where it is the town's main culture): tolerated and weak, it *assimilates*; tolerated and strong, it *integrates*; untolerated and strong, it *keeps apart*; untolerated and weak, it is *marginalized*.
+- *Effects:*
+  - how readily a people takes up another culture and tongue (the culture tick): assimilating ×1.5, integrating ×1, keeping apart ×0.4, marginalized ×0.3;
+  - a town's loyalty: + 0.3 × (its people's identity − 0.5) − 0.3 × their grievance − 0.2 × its share marginalized − 0.2 × twice its share keeping apart with little identity (so unrest builds where peoples are marginalized or large minorities hold apart);
+  - discontented towns rise together only with towns of their own culture: revolts follow cultural lines, and a town that breaks away takes its culture as its realm's.
+- *Shown:* a town's card sums up its people ("Belonging to the realm 64%, grievance 20%; 30% Celtic marginalized"); its people table gives each group's stance; the realm's card its accepted cultures.
+- On the saved world over 100 years (its cultures living apart): belonging rose to about 0.9 on average, grievance stayed near 0.06, a few hundred people of other cultures integrating or keeping apart, four restless towns of 293 and no risings.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

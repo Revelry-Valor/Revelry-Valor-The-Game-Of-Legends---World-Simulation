@@ -1,6 +1,7 @@
 import type { Government } from '../core/library';
 import { splitByNearest, transferAll } from './land';
 import { cultureOf } from './culture';
+import { peopleLoyalty } from './identity';
 import { acceptance } from './cultureChange';
 import { govOf, realmName, rulerTitle, tribalRule, type NationContext } from './nations';
 import type { Claimant, Clan, Pact, Realm, RealmRelation, Royal, Ruler, Settlement, SimState, Spy } from './state';
@@ -231,6 +232,8 @@ function loyaltyOf(sim: SimState, lib: NationContext['lib'], clan: Clan, st: Set
   v -= 0.15 * rival;
   // Of another faith than its ruler's (persecuted under an intolerant one).
   v -= faithLoyalty(sim, clan, st);
+  // Its people: their belonging and grievances, its marginalized and its separated minorities (identity.ts).
+  v += peopleLoyalty(st);
   // Ruled for the realm by a high prince of its old line: held fast while the prince is content.
   if (st.prince) v += 0.1;
   // Great lords grow ambitious in a big realm (a feudal one most of all).
@@ -239,14 +242,14 @@ function loyaltyOf(sim: SimState, lib: NationContext['lib'], clan: Clan, st: Set
   return clamp(v, 0, 1);
 }
 
-/** Discontented towns near one another (chains within 150 km). */
+/** Discontented towns near one another (chains within 150 km) of one culture: risings follow cultural lines. */
 function factions(c: NationContext, towns: Settlement[]): Settlement[][] {
   const left = towns.filter((s) => (s.unrest ?? 0) > 0);
   const out: Settlement[][] = [];
   while (left.length) {
     const group = [left.pop()!];
     for (let i = 0; i < group.length; i++) {
-      for (let j = left.length - 1; j >= 0; j--) if (c.dist(group[i].x, group[i].y, left[j].x, left[j].y) < 150) group.push(...left.splice(j, 1));
+      for (let j = left.length - 1; j >= 0; j--) if (left[j].culture === group[0].culture && c.dist(group[i].x, group[i].y, left[j].x, left[j].y) < 150) group.push(...left.splice(j, 1));
     }
     out.push(group);
   }

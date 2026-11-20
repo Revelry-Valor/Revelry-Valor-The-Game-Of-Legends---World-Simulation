@@ -15,6 +15,7 @@ import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
 import { coreDistanceOf, stageOf } from '../sim/drift';
+import { identitySummary, STANCE_WORDS } from '../sim/identity';
 import { langName, languageOf, speakers, speechOf } from '../sim/languages';
 import { bundleOf, familyName, levelOf, similarity, TRAITS, treeNearness } from '../sim/traits';
 import type { Army, Battle, Clan, LiveCulture, LiveFaith, LiveLanguage, War } from '../sim/state';
@@ -1626,6 +1627,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       g ? h('div', { class: 'econ-head' }, `Government: ${g.name}${r ? ` (since year ${yearOf(r.since)})` : ''}`) : null,
       g ? h('ul', { class: 'econ-list' }, part('Head', g.head), part('Ruling class', g.ruling), part('Land held by', g.land), part('Succession', g.succession), part('Legitimacy', g.legitimacy), part('Army', g.army), part('Law', g.law)) : null,
       h('div', { class: 'muted' }, pg ? `Its culture prefers: ${pg.name}${pref.hold ? ` (${pref.hold.toLowerCase()})` : ' (free to change)'}.` : 'Its culture has no preferred government: its conditions lead it (size, way of life, trade, the ways of rule it has learned).'),
+      r && cultureOf(sim!, cn.culture) ? h('div', {}, `Its culture: the ${cultureOf(sim!, cn.culture)!.name}${r.accepted?.length ? `; also counts as its own the ${r.accepted.map((id) => cultureOf(sim!, id)?.name ?? '?').join(', the ')}` : ''}`, h('span', { class: 'muted' }, ' — accepted peoples share its privileges, so their elites have reason to take up its ways.')) : null,
       r ? h('div', {}, `Centralization: ${pct(r.centralization)}`, h('span', { class: 'muted' }, ' — how far its orders are felt; raised by writing, records, taxes, riders and roads.')) : null,
       towns.length > 1 ? h('div', { class: 'econ-head' }, 'How firmly it holds its towns') : null,
       towns.length > 1 ? h('ul', { class: 'econ-list' }, ...towns.slice(0, 12).map((q) => h('li', { class: 'clickable', onclick: () => { selected = q.id; selectedRealm = null; render(); d.redraw(); } }, h('span', {}, q.name, q.id === r?.capital ? h('span', { class: 'muted' }, ' (capital)') : null, q.culture !== cn.culture && cultureOf(s, q.culture) ? h('span', { class: 'muted' }, ` · ${cultureOf(s, q.culture)!.name}`) : null), h('span', { class: 'num' }, pct(q.control ?? 0))))) : null,
@@ -1853,7 +1855,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     return h('details', { class: 'pops' },
       h('summary', {}, `Its people: ${pops.filter((q) => q.n >= 1).length} group${pops.filter((q) => q.n >= 1).length === 1 ? '' : 's'}`),
       h('table', { class: 'pops-table' },
-        h('tr', {}, ...['People', 'Race', 'Culture', 'Speaks', 'Goods and homes', 'Faith', 'Class'].map((t) => h('th', {}, t))),
+        h('tr', {}, ...['People', 'Race', 'Culture', 'Speaks', 'Goods and homes', 'Faith', 'Class', 'Stance'].map((t) => h('th', {}, t))),
         ...[...pops].filter((q) => q.n >= 1).sort((a, b) => b.n - a.n).map((q) => h('tr', {},
           h('td', {}, `${Math.round(q.n).toLocaleString()} (${Math.round((q.n / all) * 100)}%)`),
           h('td', {}, raceName(q.race)),
@@ -1862,6 +1864,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           h('td', {}, cultureOf(s, q.material || q.culture)?.name ?? '—'),
           h('td', {}, faithOf(s, q.faith)?.name ?? '—'),
           h('td', {}, CLS[q.cls]),
+          h('td', {}, q.stance ? STANCE_WORDS[q.stance] : ''),
         )),
       ),
     );
@@ -2459,6 +2462,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           !st.ruined && st.pull && cultureOf(s, st.pull.to) ? h('div', { class: 'muted' }, `Drawn toward the ways of the ${cultureOf(s, st.pull.to)!.name}: ${st.pull.share >= 0.5 ? 'strongly' : st.pull.share >= 0.2 ? 'somewhat' : 'a little'} (${Math.round(st.pull.share * 100)}% of the pull on it).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
           !st.ruined && st.pops?.length ? h('div', {}, h('span', { class: 'muted' }, 'Speaks: '), speechOf(s, st)) : null,
+          !st.ruined && identitySummary(st, (id) => cultureOf(s, id)?.name ?? '?') ? h('div', {}, identitySummary(st, (id) => cultureOf(s, id)?.name ?? '?')) : null,
           !st.ruined && st.pops?.length ? popsTable(st.pops) : null,
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,

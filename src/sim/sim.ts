@@ -18,11 +18,12 @@ import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
 import { cultureFx, cultureOf, cultureYear, ensureCulture, leanAt, leansOf, localYear, note, pushes, townFx, traditionsHere, type Leans } from './culture';
 import { acceptance, cultureChangeYear, noteBetween, offshoot } from './cultureChange';
-import { driftTick } from './drift';
+import { coreDistanceOf, driftTick } from './drift';
+import { identityYear } from './identity';
 import { ensureLanguages, languagesTick, soundsFor } from './languages';
 import { ensureRealm, LAND_ENFORCE, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
-import { championMight, faithHostility, faithYear } from './faith';
+import { championMight, faithHostility, faithLoyalty, faithYear } from './faith';
 import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { traitsYear } from './traits';
@@ -1257,6 +1258,20 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   // Who the people are (pops.ts): classes in the towns, wild folk drawn to the towns, the wild folk's make-up.
   popsYear(sim, env, lib, info);
   ensureLanguages(sim);
+  // Each realm's people: national identity, grievance, stance (identity.ts).
+  identityYear({
+    sim,
+    enforce: (id) => {
+      const clan = sim.clans.find((q) => q.id === id);
+      const gov = clan?.realm ? lib.governments.find((g) => g.id === clan.realm!.gov) : undefined;
+      return clan?.realm ? LAND_ENFORCE[gov?.land ?? ''] ?? 0.4 : 0;
+    },
+    acceptance: (a, b) => acceptance(sim, a, b),
+    faithAgainst: (clan, st) => faithLoyalty(sim, clan, st),
+    coreDistance: (st) => coreDistanceOf(sim, env, st, (x, y) => provAt(env, x, y)) ?? 0,
+    atWar: (id) => !!sim.wars?.some((w) => w.ended === undefined && (w.attackers.includes(id) || w.defenders.includes(id))),
+    dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+  });
   // Every five years, the culture tick: pressure from the settlements, pops changing a slice at a time (culturetick.ts).
   if (Math.round(sim.day / DAYS_PER_YEAR) % CULTURE_TICK === 0) {
     const tierOf = (st: Settlement) => settlementTier(st);

@@ -3,6 +3,7 @@ import type { Env } from './env';
 import { addPop, mainOf, materialOf, tidy, total, type Pop } from './pops';
 import type { LiveCulture, Settlement, SimState } from './state';
 import { similarity } from './traits';
+import { STANCE_RECEPTIVE } from './identity';
 import { barrier, relatedness } from './languages';
 
 /**
@@ -188,7 +189,7 @@ export function pressures(c: TickContext): Map<number, ProvPress> {
 function shiftPop(q: Pop, place: Place, hold: number, press: ProvPress, local: { culture: Press; language: Press; material: Press; all: number }, alike: (a: string, b: string) => number, out: Pop[]): void {
   const r = RECEPTIVE[q.cls] * PLACE[place];
   // A cohesive people holds to its own culture and tongue (its goods change as readily).
-  const firm = 1 - 0.5 * hold;
+  const firm = (1 - 0.5 * hold) * (q.stance ? STANCE_RECEPTIVE[q.stance] : 1);
   const pull = (m: Press, own: string): { v: string; d: number } | null => {
     let best = '';
     let bv = 0;

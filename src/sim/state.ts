@@ -99,6 +99,8 @@ export interface Realm {
   heroes?: Hero[];
   /** Houses of realms it conquered that rule their old lands for it as high princes. */
   highPrinces?: { house: string; name: string; since: number; was: string }[];
+  /** Cultures it counts as its own besides its culture (identity.ts): those it holds close. */
+  accepted?: string[];
 }
 
 /** Fighters by kind. */
@@ -324,6 +326,8 @@ export interface Settlement {
   pull?: { to: string; share: number };
   /** Cohesion (asabiya, 0–1): high on frontiers facing very different peoples or war, low in safe crowded heartlands (drift.ts). */
   cohesion?: number;
+  /** Which clan holds it, and since when (for its people's time inside the realm, identity.ts). */
+  heldBy?: { clan: number; since: number };
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
   control?: number;
   /** Its loyalty to its realm (0–1), and the years it has been discontented. */

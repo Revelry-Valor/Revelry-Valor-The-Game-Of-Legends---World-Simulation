@@ -33,6 +33,10 @@ export interface Pop {
   material?: string;
   cls: PopClass;
   n: number;
+  /** Under a realm (identity.ts): its stance if not of the realm's culture, its national identity and its grievance (0–1). */
+  stance?: 'assimilate' | 'integrate' | 'separate' | 'marginalized';
+  identity?: number;
+  grievance?: number;
 }
 
 /** Something that holds people: a settlement or a tribe. */
@@ -70,13 +74,25 @@ export function tongueOf(sim: SimState, culture: string): string {
 export function addPop(pops: Pop[], p: Pop): void {
   if (p.n <= 0) return;
   const o = pops.find((q) => same(q, p));
-  if (o) o.n += p.n;
+  if (o) {
+    mergeIdentity(o, p);
+    o.n += p.n;
+  }
   else {
     const q = { ...p };
     // Its own culture's material culture needs no mark.
     if (q.material === q.culture) delete q.material;
     pops.push(q);
   }
+}
+
+/** A pop's identity, grievance and stance merged with another's (a weighted mean; the bigger one's stance). */
+function mergeIdentity(into: Pop, from: Pop): void {
+  const n = into.n + from.n;
+  if (n <= 0) return;
+  if (into.identity !== undefined || from.identity !== undefined) into.identity = ((into.identity ?? from.identity ?? 0) * into.n + (from.identity ?? into.identity ?? 0) * from.n) / n;
+  if (into.grievance !== undefined || from.grievance !== undefined) into.grievance = ((into.grievance ?? 0) * into.n + (from.grievance ?? 0) * from.n) / n;
+  if (from.n > into.n && from.stance) into.stance = from.stance;
 }
 
 /** Merge pops alike in every way, drop the empty, and fold the small into the most alike. */
@@ -106,6 +122,7 @@ export function tidy(pops: Pop[]): Pop[] {
       i++;
       continue;
     }
+    mergeIdentity(best, p);
     best.n += p.n;
     out.splice(i, 1);
   }
@@ -115,6 +132,7 @@ export function tidy(pops: Pop[]): Pop[] {
     let best: Pop | null = null;
     for (const q of out) if (q !== p && (!best || likeness(p, q) + (q.cls === p.cls ? 4 : 0) > likeness(p, best) + (best.cls === p.cls ? 4 : 0))) best = q;
     if (!best) break;
+    mergeIdentity(best, p);
     best.n += p.n;
     out.shift();
   }
