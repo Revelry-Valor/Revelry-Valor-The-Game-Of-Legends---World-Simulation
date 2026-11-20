@@ -584,14 +584,7 @@ describe('culture change', () => {
     }
     expect(acceptance(sim, a.culture, b.culture)).toBeLessThan(traded - 0.2);
   }, 120000);
-  it('draws a small settlement into the culture of the big one beside it', () => {
-    const sim = newSim(env, 203);
-    const big = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 2500, farming)!;
-    const small = addDawnCity(sim, env, lib, elfId(), 6070, yAt(-12), 90, farming)!;
-    for (let y = 0; y < 40 && small.culture !== big.culture; y++) stepDays(sim, env, lib, DAYS_PER_YEAR);
-    expect(small.ruined || small.culture === big.culture).toBe(true);
-    if (!small.ruined) expect(sim.events.some((e) => e.text.includes(`${small.name} has taken on the ways`))).toBe(true);
-  }, 120000);
+  // (A small settlement drawn into a big neighbour's culture: the culture tick now, tests/culturetick.test.ts.)
   it('lets a clan far from its heartland, with no ties back, grow a culture of its own', () => {
     const sim = newSim(env, 205);
     const city = addDawnCity(sim, env, lib, humanId(), 6000, yAt(-12), 800, farming)!;
@@ -704,30 +697,7 @@ describe('realms', () => {
     expect(far.control!).toBeGreaterThan(before * 1.3);
   });
 
-  it('presses its culture on the towns it holds (an empire hard, a band of clans hardly at all)', () => {
-    const L = structuredClone(lib);
-    const cu = newCulture('imperial', 'Imperial');
-    cu.races = [humanId()];
-    cu.government = 'empire';
-    cu.governmentHold = 'Locked';
-    L.cultures.push(cu);
-    const sim = newSim(env, 307);
-    const city = addDawnCity(sim, env, L, humanId(), 6000, yAt(-12), 1500, farming)!;
-    const elves = addDawnCity(sim, env, L, elfId(), 6000, yAt(-14), 200, farming)!;
-    stepDays(sim, env, L, 1);
-    learn(sim, city.culture, ['oral-law', 'tribal-council', 'royal-court', 'taxation']);
-    // The elf town is taken into the human realm.
-    elves.clan = city.clan;
-    elves.holyTo = [];
-    const was = elves.culture;
-    for (let y = 0; y < 150 && elves.culture === was; y++) {
-      nationsYear(ctx(sim, L));
-      sim.day += DAYS_PER_YEAR;
-    }
-    expect(sim.clans.find((c) => c.id === city.clan)!.realm!.gov).toBe('empire');
-    expect(elves.culture).toBe(city.culture);
-    expect(sim.events.some((e) => e.text.includes(`${elves.name} has taken on the ways`))).toBe(true);
-  });
+  // (A realm pressing its culture on its towns: the culture tick now, tests/culturetick.test.ts.)
 
   it('draws a small kindred clan nearby into a settled realm', () => {
     const sim = newSim(env, 309);

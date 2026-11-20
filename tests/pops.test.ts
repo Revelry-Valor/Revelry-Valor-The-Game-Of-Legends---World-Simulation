@@ -69,7 +69,7 @@ describe('pops (cultures as peoples, step 1)', () => {
     expect(total(b.pops!)).toBeCloseTo(b.pop, 3);
     expect(b.pops!.some((q) => q.culture === 'b')).toBe(true);
     expect(a.pops!.find((q) => q.cls === 'elite')!.n).toBeGreaterThan(45);
-    const t = tidy([pop({ n: 990 }), pop({ cls: 'middle', n: 5 }), pop({ culture: 'z', n: 5 })]);
+    const t = tidy([pop({ n: 994.6 }), pop({ cls: 'middle', n: 5 }), pop({ culture: 'z', n: 0.4 })]);
     // The stray of another culture joins the commoners; the few middle-class are kept as such.
     expect(t.map((q) => q.cls).sort()).toEqual(['commoner', 'middle']);
     expect(total(t)).toBeCloseTo(1000, 5);

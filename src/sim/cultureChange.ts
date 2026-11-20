@@ -10,9 +10,8 @@ import type { LiveCulture, Settlement, SimState, Tribe } from './state';
  * - Acceptance between two cultures grows with contact, trade and shared heritage and shrinks with
  *   fights, raids and grudges; it eases or sharpens how readily they fight, trade and learn from
  *   each other.
- * - Big settlement pull: a small settlement beside a big one of another culture is drawn into the
- *   big one's culture, unless the small ones round it are together stronger, when the big one is
- *   drawn toward theirs; faster where acceptance is high.
+ * - (A small settlement beside a big one of another culture is drawn to it by the culture tick's
+ *   pressure now: culturetick.ts.)
  * - Divergence: a clan living far from its culture's heartland for generations, with no ties back,
  *   grows a culture of its own (a single city can).
  * - Hybrids: two cultures living side by side with high acceptance for decades blend into a new
@@ -141,40 +140,8 @@ export function cultureChangeYear(c: ChangeContext): void {
     rel.trades = 0;
   }
 
-  // ---- Big settlement pull.
+  // (The pull of big settlements on small ones round them is now the culture tick's pressure, culturetick.ts.)
   const live = sim.settlements.filter((s) => !s.ruined);
-  // A town counts with its joined villages (REDESIGN.md 8.0): they are part of it.
-  const whole = new Map<number, number>();
-  for (const s of live) whole.set(s.id, (whole.get(s.id) ?? 0) + s.pop);
-  for (const s of live) if (s.partOf !== undefined && whole.has(s.partOf)) whole.set(s.partOf, whole.get(s.partOf)! + s.pop);
-  const size = (s: Settlement) => (s.partOf !== undefined ? s.pop : whole.get(s.id) ?? s.pop);
-  for (const small of live) {
-    const big = live.filter((b) => b !== small && b.culture !== small.culture && size(b) > size(small) * 3 && c.dist(b.x, b.y, small.x, small.y) < 120).sort((a, b) => size(b) - size(a))[0];
-    if (!big) {
-      if (small.cultureShift) small.cultureShift.progress = Math.max(0, small.cultureShift.progress - 0.05);
-      if (small.cultureShift && small.cultureShift.progress <= 0) delete small.cultureShift;
-      continue;
-    }
-    // The small ones round the big one, of the small one's culture: together, are they the stronger?
-    const ours = live.filter((s) => s.culture === small.culture && c.dist(s.x, s.y, big.x, big.y) < 120).reduce((n, s) => n + s.pop, 0);
-    const theirs = live.filter((s) => s.culture === big.culture && c.dist(s.x, s.y, big.x, big.y) < 120).reduce((n, s) => n + s.pop, 0);
-    const acc = acceptance(sim, small.culture, big.culture);
-    const pace = 0.04 * (0.5 + Math.max(0, acc));
-    const [who, to] = ours > theirs ? [big, small.culture] : [small, big.culture];
-    if (who.cultureShift && who.cultureShift.to !== to) {
-      // Already drawn another way (by its realm, or another neighbour): that is undone first.
-      who.cultureShift.progress -= pace;
-      if (who.cultureShift.progress > 0) continue;
-    }
-    if (!who.cultureShift || who.cultureShift.to !== to) who.cultureShift = { to, progress: 0 };
-    who.cultureShift.progress += pace;
-    if (who.cultureShift.progress >= 1) {
-      const from = cultureOf(sim, who.culture)?.name ?? '?';
-      who.culture = to;
-      delete who.cultureShift;
-      c.log(`${who.name} has taken on the ways of the ${cultureOf(sim, to)?.name ?? '?'} (once ${from}).`, who.x, who.y);
-    }
-  }
 
   // ---- A clan's culture follows most of its people.
   for (const clan of sim.clans) {

@@ -1262,6 +1262,20 @@ The simulation follows people, not places: each province holds groups of people 
 - *Acceptance* between two cultures now starts from how alike they are (up to 0.6 for two alike in everything), or their shared race or species where that is more.
 - *Shown:* the culture card lists its family and level, its core traits and its way of life, how fast each changes, and the three living cultures most like it ("Kador 72% (a sister), Vesh 41%").
 
+**Built (step 3): the culture tick** (`sim/culturetick.ts`), every five years
+- *Prestige:* each settlement's is its size (people in thousands, to the power 0.8), doubled for a realm's capital, more for a province's seat (+30%), its trade routes (+10% each, up to +50%) and holy ground (+30%); halved for a village.
+- *Pressure:* each settlement sends its prestige out for its culture and its tongue, province to province, fading with distance (to about a third in 100 km of open lowland). Rough country and mountains count as further, roads (by 1.25 for a trail, 1.6 for a road) and a river shared by both provinces as nearer; a province where another tongue is spoken cuts it to 60%. A realm presses its culture on each place it rules: 0.8 × how firmly its government enforces its ways (governors 1, temples and the state 0.8, lords 0.6, clans and free cities 0.3) × the place's control × the place's prestige.
+- *Pops change, a slice at a time,* toward the strongest outside pull in their province, three traits each at its speed (years under full pressure): material culture 20, culture (customs, law, values, ways) 50, tongue 90. A pop's slice that changes culture keeps its old goods and houses, and its tongue, until those change too. How readily:
+  - by class: elites 1.6, the middle class 1, commoners 0.7; by place: a city 1.4, a town 1.1, a village 0.8, a tribe 0.6, the wild 0.5;
+  - by the pull's strength against its own (the pull's share of the two);
+  - for a culture, by how alike the two are (half, plus half the similarity): the unlike come together slowly;
+  - conformity, an S-curve on the share round them already holding it (half their own place, half who lives near; for a tongue four-fifths their own place, as children learn it at home): slow while rare, quick past a fifth or so, and half again once most hold it.
+- *A settlement counts itself of whatever culture most of its people are* ("Most of the people of Alesia now count themselves Roman (once Celtic)"); a tribe likewise.
+- *Replaced:* the big settlement's pull on small ones beside it, and a realm pressing its culture on its towns, which switched whole towns at once, are this pressure now.
+- *Kept small:* a pop under a thousandth of its class there (or half a person) merges into the most alike, so a slow trickle of change still adds up; at most 24 pops a place.
+- *Shown:* a town's card says the strongest outside pull on it ("Drawn toward the ways of the Toral: somewhat (34% of the pull on it)"); its people table shows whose goods and homes each group lives by.
+- On the 60-year saved world, the cultures, living apart, kept their ways; where they meet, goods and homes began to spread first (six towns), as the design calls for.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

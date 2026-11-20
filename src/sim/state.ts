@@ -320,6 +320,8 @@ export interface Settlement {
   apart?: number;
   /** Drawn toward another culture (a big neighbour's, or the many small ones round it): how far along (0–1). */
   cultureShift?: { to: string; progress: number };
+  /** The strongest outside culture pressing on it, and its share of all the pressure there (the culture tick, culturetick.ts). */
+  pull?: { to: string; share: number };
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
   control?: number;
   /** Its loyalty to its realm (0–1), and the years it has been discontented. */

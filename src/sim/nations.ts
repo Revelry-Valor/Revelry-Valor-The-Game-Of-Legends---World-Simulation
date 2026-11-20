@@ -52,7 +52,7 @@ const LAND_CENTRAL: Record<string, number> = {
   'The state directly': 0.55,
 };
 /** How hard each kind of government presses its culture on those it rules (by who holds the land). */
-const LAND_ENFORCE: Record<string, number> = {
+export const LAND_ENFORCE: Record<string, number> = {
   'Clans and tribes': 0.3,
   'Great lords with vassals (feudal)': 0.6,
   'Free cities': 0.3,
@@ -344,27 +344,7 @@ export function nationsYear(c: NationContext): { royalRoads: [number, number][] 
       }
       st.control = Math.round(controlAt(realm.centralization, orderDays(c, capital, st, f.riders)) * 100) / 100;
     }
-    // Pressing the realm's culture on its places: strongest where its orders reach.
-    const enforce = LAND_ENFORCE[g?.land ?? ''] ?? 0.4;
-    for (const st of f.towns) {
-      if (!clan.culture || st.culture === clan.culture) continue;
-      const pace = 0.08 * enforce * (st.control ?? 0) * (0.6 + 0.4 * Math.max(0, acceptance(sim, st.culture, clan.culture)));
-      if (pace <= 0.001) continue;
-      const sh = st.cultureShift;
-      if (sh && sh.to !== clan.culture) {
-        // Another pull is at work: the realm holds it back first.
-        sh.progress -= pace;
-        if (sh.progress <= 0) st.cultureShift = { to: clan.culture, progress: 0 };
-        continue;
-      }
-      st.cultureShift = { to: clan.culture, progress: (sh?.progress ?? 0) + pace };
-      if (st.cultureShift.progress >= 1) {
-        const from = cultureOf(sim, st.culture)?.name ?? '?';
-        st.culture = clan.culture;
-        delete st.cultureShift;
-        c.log(`Under ${realmName(lib, clan)}, ${st.name} has taken on the ways of the ${cultureOf(sim, clan.culture)?.name ?? '?'} (once ${from}).`, st.x, st.y);
-      }
-    }
+    // (Pressing the realm's culture on its places is the culture tick's now, culturetick.ts: as strong as its orders reach.)
     // Royal roads: a realm settled under lords, governors or the state ties its towns to the capital.
     if (capital && g && g.land !== 'Clans and tribes') {
       const towns = f.towns.filter((s) => s !== capital && s.pop >= 150).sort((a, b) => c.dist(a.x, a.y, capital!.x, capital!.y) - c.dist(b.x, b.y, capital!.x, capital!.y)).slice(0, 6);

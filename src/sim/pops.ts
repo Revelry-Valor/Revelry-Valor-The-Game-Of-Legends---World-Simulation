@@ -15,7 +15,8 @@ import type { Settlement, SimState, Tribe } from './state';
  * the density still says how many and where. Their make-up mixes a little with the neighbouring
  * provinces each year as families spread, and takes in those who leave the towns.
  *
- * Kept small: a pop under 2% of its place (or 20 people) merges into the most alike one.
+ * Kept small: a pop under a thousandth of its class there (or half a person) merges into the most
+ * alike one, and a place keeps at most 24 pops (a slow trickle of change still adds up).
  */
 
 export type PopClass = 'elite' | 'middle' | 'commoner';
@@ -28,6 +29,8 @@ export interface Pop {
   language: string;
   /** Its faith (a live faith id, '' none). */
   faith: string;
+  /** Whose material culture it lives by (building, dress, food: a culture id); unset: its own culture's. */
+  material?: string;
   cls: PopClass;
   n: number;
 }
@@ -36,8 +39,10 @@ export interface Pop {
 export type Holder = Pick<Settlement | Tribe, 'race' | 'culture' | 'faith' | 'pop'> & { pops?: Pop[] };
 
 /** Smallest pop kept: a share of its place, or a count. */
-export const MIN_SHARE = 0.02;
-export const MIN_PEOPLE = 20;
+export const MIN_SHARE = 0.001;
+export const MIN_PEOPLE = 0.5;
+/** At most this many pops a place (the smallest folded into the most alike past it). */
+export const MAX_POPS = 24;
 /** Who bears losses: commoners most, elites least. */
 const LOSS: Record<PopClass, number> = { elite: 0.5, middle: 1, commoner: 1.2 };
 /** Who leaves with migrants: elites seldom. */
@@ -47,9 +52,11 @@ export const COUNTRY_MIX = 0.05;
 /** Classes move toward what a place's life calls for by this share of the gap a year. */
 const CLASS_PACE = 0.1;
 
-const same = (a: Pop, b: Pop) => a.race === b.race && a.culture === b.culture && a.language === b.language && a.faith === b.faith && a.cls === b.cls;
+/** Whose material culture a pop lives by. */
+export const materialOf = (p: Pop) => p.material || p.culture;
+const same = (a: Pop, b: Pop) => a.race === b.race && a.culture === b.culture && a.language === b.language && a.faith === b.faith && a.cls === b.cls && materialOf(a) === materialOf(b);
 /** How alike two pops are (to merge the small into the most alike). */
-const likeness = (a: Pop, b: Pop) => (a.race === b.race ? 8 : 0) + (a.culture === b.culture ? 4 : 0) + (a.cls === b.cls ? 2 : 0) + (a.language === b.language ? 1 : 0) + (a.faith === b.faith ? 1 : 0);
+const likeness = (a: Pop, b: Pop) => (a.race === b.race ? 8 : 0) + (a.culture === b.culture ? 4 : 0) + (a.cls === b.cls ? 2 : 0) + (a.language === b.language ? 1 : 0) + (a.faith === b.faith ? 1 : 0) + (materialOf(a) === materialOf(b) ? 1 : 0);
 
 export const total = (pops: readonly Pop[]) => pops.reduce((n, p) => n + p.n, 0);
 
@@ -64,16 +71,25 @@ export function addPop(pops: Pop[], p: Pop): void {
   if (p.n <= 0) return;
   const o = pops.find((q) => same(q, p));
   if (o) o.n += p.n;
-  else pops.push({ ...p });
+  else {
+    const q = { ...p };
+    // Its own culture's material culture needs no mark.
+    if (q.material === q.culture) delete q.material;
+    pops.push(q);
+  }
 }
 
 /** Merge pops alike in every way, drop the empty, and fold the small into the most alike. */
 export function tidy(pops: Pop[]): Pop[] {
   const out: Pop[] = [];
   for (const p of pops) if (p.n > 0.01) addPop(out, p);
-  const all = total(out);
-  const floor = Math.min(MIN_PEOPLE, all * 0.25);
-  const small = (p: Pop) => p.n < Math.max(floor, all * MIN_SHARE);
+  // Small by its own class (a town's few elites are many of its elites).
+  const byCls = new Map<string, number>();
+  for (const p of out) byCls.set(p.cls, (byCls.get(p.cls) ?? 0) + p.n);
+  const small = (p: Pop) => {
+    const all = byCls.get(p.cls) ?? 0;
+    return p.n < Math.max(Math.min(MIN_PEOPLE, all * 0.25), all * MIN_SHARE);
+  };
   out.sort((a, b) => a.n - b.n);
   for (let i = 0; i < out.length && out.length > 1; ) {
     const p = out[i];
@@ -92,6 +108,15 @@ export function tidy(pops: Pop[]): Pop[] {
     }
     best.n += p.n;
     out.splice(i, 1);
+  }
+  // Too many: the smallest folded into the most alike (of its class where there is one).
+  while (out.length > MAX_POPS) {
+    const p = out[0];
+    let best: Pop | null = null;
+    for (const q of out) if (q !== p && (!best || likeness(p, q) + (q.cls === p.cls ? 4 : 0) > likeness(p, best) + (best.cls === p.cls ? 4 : 0))) best = q;
+    if (!best) break;
+    best.n += p.n;
+    out.shift();
   }
   return out.sort((a, b) => b.n - a.n);
 }

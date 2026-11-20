@@ -18,12 +18,13 @@ import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
 import { cultureFx, cultureOf, cultureYear, ensureCulture, leanAt, leansOf, localYear, note, pushes, townFx, traditionsHere, type Leans } from './culture';
 import { acceptance, cultureChangeYear, noteBetween } from './cultureChange';
-import { ensureRealm, nationsYear, tribalRule } from './nations';
+import { ensureRealm, LAND_ENFORCE, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
 import { championMight, faithHostility, faithYear } from './faith';
 import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { traitsYear } from './traits';
+import { CULTURE_TICK, cultureTick } from './culturetick';
 import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
@@ -1251,6 +1252,21 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   joinVillages(sim, env, lib);
   // Who the people are (pops.ts): classes in the towns, wild folk drawn to the towns, the wild folk's make-up.
   popsYear(sim, env, lib, info);
+  // Every five years, the culture tick: pressure from the settlements, pops changing a slice at a time (culturetick.ts).
+  if (Math.round(sim.day / DAYS_PER_YEAR) % CULTURE_TICK === 0) {
+    cultureTick({
+      sim, env, lib,
+      provAt: (x, y) => provAt(env, x, y),
+      tier: (st) => settlementTier(st),
+      enforce: (id) => {
+        const clan = sim.clans.find((q) => q.id === id);
+        const gov = clan?.realm ? lib.governments.find((g) => g.id === clan.realm!.gov) : undefined;
+        return clan?.realm ? LAND_ENFORCE[gov?.land ?? ''] ?? 0.4 : 0;
+      },
+      capital: (st) => sim.clans.some((q) => q.id === st.clan && q.realm?.capital === st.id),
+      log: (text, x, y) => log(sim, text, x, y),
+    });
+  }
   // The other layers: drifting islands carry their towns; tunnelers join their towns underground.
   if (env.layers) {
     const lc = layerContext(sim, env, lib);
