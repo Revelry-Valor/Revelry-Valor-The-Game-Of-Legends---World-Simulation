@@ -12,6 +12,7 @@ import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
 import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
 import { clanKnows, hasArchive, keepers } from '../sim/tech';
 import { ALL_FOOD_TECH, foodTechFrom, provinceFood, provinceLand } from '../sim/food';
+import { villagesOf } from '../sim/rural';
 import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
@@ -1178,6 +1179,40 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             g.strokeRect(sx - 3.5, sy - 3.5, 7, 7);
           }
         }
+        // Village sites (rural.ts): small dots once zoomed in enough to tell them apart, named closer in.
+        if (scale >= 1.2 && s.sites) {
+          const holderColour = (pid: string) => {
+            const p = e.prov.ids.indexOf(Number(pid));
+            const o = p >= 0 ? s.provOwner?.[p] ?? -1 : -1;
+            return (o >= 0 ? clanOf(o)?.colour : null) ?? '#9a7b4f';
+          };
+          g.save();
+          g.font = '11px system-ui, sans-serif';
+          for (const [pid, sites] of Object.entries(s.sites)) {
+            const col = holderColour(pid);
+            for (const v of sites) {
+              const [sx, sy] = at(v.x, v.y, c);
+              if (sx < -20 || sy < -20 || sx > g.canvas.width + 20 || sy > g.canvas.height + 20) continue;
+              // A hamlet small, a village bigger, one outgrowing village size bigger still.
+              const r = Math.max(3, Math.min(5, 2.5 + v.pop / 150));
+              g.beginPath();
+              g.arc(sx, sy, r, 0, Math.PI * 2);
+              g.fillStyle = col;
+              g.fill();
+              g.lineWidth = 1.2;
+              g.strokeStyle = 'rgba(255,248,230,0.9)';
+              g.stroke();
+              if (scale >= 4) {
+                g.lineWidth = 3;
+                g.strokeStyle = 'rgba(255,248,230,0.85)';
+                g.strokeText(v.name, sx + r + 2, sy + 3);
+                g.fillStyle = 'rgba(30,20,8,0.95)';
+                g.fillText(v.name, sx + r + 2, sy + 3);
+              }
+            }
+          }
+          g.restore();
+        }
         // Joined villages: a faint line to the town they are part of.
         g.save();
         g.setLineDash([3, 3]);
@@ -1476,11 +1511,17 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         if (pi >= 0) {
           const seen = new Set<string>();
           for (const it of api.provinceInfo(pi)) {
-            if (!['People', 'Peoples', 'Farmland', 'Can feed'].includes(it.label) || seen.has(it.label)) continue;
+            if (!['People', 'Peoples', 'Farmland', 'Village sites', 'Can feed'].includes(it.label) || seen.has(it.label)) continue;
             seen.add(it.label);
             out.push({ label: it.label === 'People' ? 'Province people' : it.label, value: it.value });
           }
         }
+      }
+      // A village site under the cursor (rural.ts).
+      if (env?.prov.real && s.sites) {
+        const pi = provAt(env, x, y);
+        const v = pi >= 0 ? (s.sites[String(env.prov.ids[pi])] ?? []).find((q) => Math.hypot(q.x - x, q.y - y) < Math.max(1, 6 * pxKm)) : undefined;
+        if (v) push('Village', `${v.name}: about ${Math.round(v.pop)} people${cultureOf(s, v.culture) ? `, ${cultureOf(s, v.culture)!.name}` : ''}, since year ${yearOf(v.founded)}${(s.traffic?.[cellOf(v.x, v.y)] ?? 0) >= 20 ? '; on a busy way' : ''}${v.pop >= 500 ? ' (outgrowing a village)' : v.pop < 100 ? ' (a hamlet)' : ''}`);
       }
       const t = tribeAt(x, y, pxKm);
       if (t) push('Tribe', `${t.name} (${clanOf(t.clan) ? realmName(lib(), clanOf(t.clan)!) : '?'}): ${Math.round(t.pop)} people, ${Math.round(Math.min(1, t.fed) * 100)}% fed`);
@@ -2712,7 +2753,9 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             const known = holder ? provinceFood(land, foodTechFrom((id) => clanKnows(lib(), holder, id))) : null;
             const n = (v: number) => Math.round(v).toLocaleString();
             out.push({ label: 'Farmland', value: `${n(land.arableHa / 100)} km² of ${n(env.prov.area[index])} (${Math.round((land.arableHa / 100 / Math.max(1, env.prov.area[index])) * 100)}%), fertility ${Math.round(land.fertility * 100)}%` });
-            out.push({ label: 'Can feed', value: `about ${n(full.total)} people fully farmed (${n(full.total / sqmiP)} per sq mi: farms ${n(full.farms)}, herds ${n(full.herds)}, fish ${n(full.fish)})${known ? `; ${n(known.total)} with what its holders know` : ''}` });
+            const vs = villagesOf(s, env, index);
+          if (vs.sites.length) out.push({ label: 'Village sites', value: `${vs.sites.length} (about ${n(vs.villagers)} people; the biggest ${[...vs.sites].sort((a, b) => b.pop - a.pop).slice(0, 3).map((q) => q.name).join(', ')})` });
+          out.push({ label: 'Can feed', value: `about ${n(full.total)} people fully farmed (${n(full.total / sqmiP)} per sq mi: farms ${n(full.farms)}, herds ${n(full.herds)}, fish ${n(full.fish)})${known ? `; ${n(known.total)} with what its holders know` : ''}` });
           }
         }
         const by = provinceCultures(s, env).get(index);

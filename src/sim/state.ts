@@ -1,5 +1,6 @@
 import type { Pop } from './pops';
 import type { History } from './history';
+import type { VillageSite } from './rural';
 import type { Horde, Tide } from './monsters';
 import type { Rift } from './rifts';
 
@@ -662,6 +663,8 @@ export interface SimState {
   density?: Record<string, Float32Array>;
   /** The wild folk of each province (by its kept id): who the families living in the wild are (pops.ts). */
   country?: Record<string, Pop[]>;
+  /** Each farmed province's village sites (by province id; rural.ts). */
+  sites?: Record<string, VillageSite[]>;
   /** Every tongue spoken or once spoken (languages.ts). */
   languages?: LiveLanguage[];
   /** Snapshots and lineage events of cultures, languages and races, for the timeline (history.ts). */

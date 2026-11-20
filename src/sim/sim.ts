@@ -28,6 +28,7 @@ import { championMight, faithHostility, faithLoyalty, faithYear } from './faith'
 import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { traitsYear } from './traits';
+import { addFarmFood, farmLayer, farmYear, isFarmed, sitesYear, type RuralContext } from './rural';
 import { CULTURE_TICK, cultureTick } from './culturetick';
 import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
@@ -168,7 +169,7 @@ function makeName(sim: SimState, lib: Library, cultureId: string): string {
     return Array.from({ length: n }, () => pick(SYLLABLES)).join('');
   };
   // Not one already taken by a town or realm (a few tries; then a longer name).
-  const taken = new Set([...sim.settlements.map((s) => s.name), ...sim.clans.map((c) => c.name)].map((n) => n.toLowerCase()));
+  const taken = new Set([...sim.settlements.map((s) => s.name), ...sim.clans.map((c) => c.name), ...Object.values(sim.sites ?? {}).flatMap((ss) => ss.map((q) => q.name))].map((n) => n.toLowerCase()));
   let name = one();
   for (let i = 0; i < 8 && taken.has(name.toLowerCase()); i++) name = i < 5 ? one() : one() + (suf.length ? pick(suf) : pick(SYLLABLES));
   return name.charAt(0).toUpperCase() + name.slice(1);
@@ -1146,6 +1147,9 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     if (st.ruined || st.layer || st.partOf !== undefined || settlementTier(st) === 'Village') continue;
     for (const k of cellsNear(env, st.x, st.y, (knows(lib, st, 'riding') ? DAY_RIDE : DAY_WALK) * 2)) boost[k] = 1;
   }
+  // Farmed provinces: their land's food for the rural people living there (rural.ts).
+  if (!farmLayer(sim)) farmYear(ruralContext(sim, env, lib, info));
+  addFarmFood(sim, left);
   densityMonth({ sim, env, left, race: (id) => densityRace(sim, env, lib, info, id), boost });
   sim.grudges = sim.grudges.filter((g) => g.until > sim.day);
   // Markets and caravans (trade.ts).
@@ -1414,7 +1418,46 @@ export const DRAW_MAX = 0.03;
  * race that can live beside theirs), who bring their culture; and each province's wild folk are
  * brought in line with the families living there.
  */
+/** Share of a fed farming settlement's people a year who go out to farm the land round it while its province has room. */
+export const FARMERS_OUT = 0.015;
+
+/** What the rural step needs (rural.ts). */
+function ruralContext(sim: SimState, env: Env, lib: Library, info: Info): RuralContext {
+  return {
+    sim, env, lib,
+    knows: (clan, id) => clanKnows(lib, clan, id),
+    eats: (st) => st.pop * (info(st)?.need ?? 1),
+    provAt: (x, y) => provAt(env, x, y),
+    name: (culture) => makeName(sim, lib, culture),
+  };
+}
+
 function popsYear(sim: SimState, env: Env, lib: Library, info: Info): void {
+  // Farmed provinces and their village sites (rural.ts).
+  const rc = ruralContext(sim, env, lib, info);
+  const farms = farmYear(rc);
+  // Farming settlements send people out to farm the land round them while it has room (the rural fill).
+  {
+    const P = env.prov;
+    const ruralNow = new Float32Array(P.count);
+    for (const D of Object.values(sim.density ?? {})) for (let k = 0; k < D.length; k++) if (D[k] > 0 && P.of[k] >= 0) ruralNow[P.of[k]] += D[k];
+    for (const st of sim.settlements) {
+      if (st.ruined || st.layer || st.fed < 0.9 || st.pop < 60) continue;
+      const p = provAt(env, st.x, st.y);
+      if (p < 0 || farms.rural[p] <= 0) continue;
+      const ri = info(st);
+      const room = farms.rural[p] / (ri?.need ?? 1) - ruralNow[p];
+      if (room < 10) continue;
+      const n = Math.min(st.pop * FARMERS_OUT, room * 0.2);
+      if (n < 1) continue;
+      const near = [...P.cells.subarray(P.start[p], P.start[p + 1])].filter((k) => env.land[k] && farms.farmed[k] && Math.hypot(env.x0 + (k % env.w) * env.step - st.x, env.y0 + Math.floor(k / env.w) * env.step - st.y) <= env.step * 3);
+      if (!near.length) continue;
+      toCountry(sim, env, p, takePops(sim, st, n));
+      seedDensity(sim, env, st.race, near, n);
+      ruralNow[p] += n;
+    }
+  }
+  sitesYear(rc);
   for (const st of sim.settlements) {
     if (st.ruined) continue;
     const tier = settlementTier(st);
@@ -1617,7 +1660,8 @@ function villagesFromWild(sim: SimState, env: Env, lib: Library, info: Info): vo
     const ri = info({ race, culture: '' });
     if (!ri) continue;
     const cand: number[] = [];
-    for (let k = 0; k < env.n; k++) if (D[k] >= 4) cand.push(k);
+    // (Not on farmed land: its people live in village sites there, rural.ts.)
+    for (let k = 0; k < env.n; k++) if (D[k] >= 4 && !isFarmed(sim, k)) cand.push(k);
     cand.sort((a, b) => D[b] - D[a]);
     let made = 0;
     for (const k of cand) {

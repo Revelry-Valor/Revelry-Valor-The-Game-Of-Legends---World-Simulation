@@ -206,7 +206,8 @@ describe('dawn cities', () => {
     const city = sim.settlements.find((s) => s.kind === 'dawn')!;
     expect(city.ruined).toBe(false);
     expect(city.pop).toBeGreaterThan(300);
-    expect(sim.settlements.length + sim.tribes.length).toBeGreaterThan(2);
+    // (On farmed land its villages are village sites now, rural.ts.)
+    expect(sim.settlements.length + sim.tribes.length + Object.values(sim.sites ?? {}).flat().length).toBeGreaterThan(2);
   }, 60000);
   it('is never raided by its own race; others who raid it earn the race’s grudge', () => {
     const sim = newSim(env, 35);
