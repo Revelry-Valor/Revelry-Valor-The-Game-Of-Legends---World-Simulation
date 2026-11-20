@@ -19,6 +19,7 @@ import { markThinned, thinned } from './thinned';
 import { cultureFx, cultureOf, cultureYear, ensureCulture, leanAt, leansOf, localYear, note, pushes, townFx, traditionsHere, type Leans } from './culture';
 import { acceptance, cultureChangeYear, noteBetween, offshoot } from './cultureChange';
 import { driftTick } from './drift';
+import { ensureLanguages, languagesTick, soundsFor } from './languages';
 import { ensureRealm, LAND_ENFORCE, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
 import { championMight, faithHostility, faithYear } from './faith';
@@ -152,7 +153,9 @@ const SYLLABLES = ['ka', 'ra', 'mo', 'te', 'lu', 'an', 'or', 'vel', 'si', 'do', 
 
 /** A name in a culture's sounds (word parts with a dash join: "ka-", "-dor"), or plain syllables. */
 function makeName(sim: SimState, lib: Library, cultureId: string): string {
-  const sounds = (sim.cultures?.find((c) => c.id === cultureId) ?? lib.cultures.find((c) => c.id === cultureId))?.sounds ?? '';
+  const live = sim.cultures?.find((c) => c.id === cultureId);
+  // Names in its tongue's sounds (languages.ts), else its own.
+  const sounds = (live ? soundsFor(sim, live) : lib.cultures.find((c) => c.id === cultureId)?.sounds) ?? '';
   const parts = sounds.split(/[\s,;]+/).filter(Boolean);
   const pre = parts.filter((p) => p.endsWith('-')).map((p) => p.slice(0, -1));
   const suf = parts.filter((p) => p.startsWith('-')).map((p) => p.slice(1));
@@ -1253,6 +1256,7 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   joinVillages(sim, env, lib);
   // Who the people are (pops.ts): classes in the towns, wild folk drawn to the towns, the wild folk's make-up.
   popsYear(sim, env, lib, info);
+  ensureLanguages(sim);
   // Every five years, the culture tick: pressure from the settlements, pops changing a slice at a time (culturetick.ts).
   if (Math.round(sim.day / DAYS_PER_YEAR) % CULTURE_TICK === 0) {
     const tierOf = (st: Settlement) => settlementTier(st);
@@ -1280,6 +1284,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
       acceptance: (a, b) => acceptance(sim, a, b),
       log: (text, x, y) => log(sim, text, x, y),
     });
+    // Dialects, new languages and creoles (languages.ts).
+    languagesTick({ sim, env, provAt: (x, y) => provAt(env, x, y), rand: () => rand(sim), log: (text, x, y) => log(sim, text, x, y) });
   }
   // The other layers: drifting islands carry their towns; tunnelers join their towns underground.
   if (env.layers) {

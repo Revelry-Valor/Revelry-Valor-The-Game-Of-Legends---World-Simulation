@@ -231,16 +231,17 @@ const jaccard = (a: string[], b: string[]) => {
 };
 
 /** How many of their traits two cultures share (0–1), the core ones weighing most. */
-export function traitOverlap(lib: Library, a: LiveCulture, b: LiveCulture): number {
+export function traitOverlap(lib: Library, a: LiveCulture, b: LiveCulture, rel?: (x: string, y: string) => number): number {
   const A = bundleOf(lib, a);
   const B = bundleOf(lib, b);
   const eq = (x: string, y: string) => (x && x === y ? 1 : 0);
   const mat = (eq(A.material.building, B.material.building) + eq(A.material.dress, B.material.dress) + eq(A.material.food, B.material.food)) / 3;
-  return 0.25 * eq(A.language, B.language) + 0.15 * eq(A.religion, B.religion) + 0.1 * eq(A.values, B.values) + 0.1 * eq(A.law, B.law) + 0.05 * eq(A.kinship, B.kinship) + 0.15 * jaccard(A.customs, B.customs) + 0.05 * jaccard(A.ways, B.ways) + 0.15 * mat;
+  return 0.25 * (rel ? rel(A.language, B.language) : eq(A.language, B.language)) + 0.15 * eq(A.religion, B.religion) + 0.1 * eq(A.values, B.values) + 0.1 * eq(A.law, B.law) + 0.05 * eq(A.kinship, B.kinship) + 0.15 * jaccard(A.customs, B.customs) + 0.05 * jaccard(A.ways, B.ways) + 0.15 * mat;
 }
 
 /** How alike two cultures are (0–1): a third from the tree, two thirds from their traits. */
-export function similarity(lib: Library, cultures: LiveCulture[], a: LiveCulture, b: LiveCulture): number {
+/** (`rel`: how near two tongues are, languages.ts; without it, only the same tongue counts.) */
+export function similarity(lib: Library, cultures: LiveCulture[], a: LiveCulture, b: LiveCulture, rel?: (x: string, y: string) => number): number {
   if (a.id === b.id) return 1;
-  return 0.35 * treeNearness(cultures, a, b) + 0.65 * traitOverlap(lib, a, b);
+  return 0.35 * treeNearness(cultures, a, b) + 0.65 * traitOverlap(lib, a, b, rel);
 }

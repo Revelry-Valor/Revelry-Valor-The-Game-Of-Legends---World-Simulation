@@ -3,6 +3,7 @@ import type { Env } from './env';
 import { addPop, total, type Pop } from './pops';
 import type { LiveCulture, Settlement, SimState } from './state';
 import { similarity } from './traits';
+import { relatedness } from './languages';
 
 /**
  * Drift, splits, blends and cohesion (REDESIGN.md, "Cultures as peoples", step 4), with the
@@ -241,7 +242,7 @@ export function driftTick(c: DriftContext): void {
   const alike = (a: string, b: string) => {
     const A = byId.get(a);
     const B = byId.get(b);
-    return A && B ? similarity(lib, cultures, A, B) : 0;
+    return A && B ? similarity(lib, cultures, A, B, (x, y) => relatedness(sim, x, y)) : 0;
   };
   for (const st of sim.settlements) {
     if (st.ruined) continue;

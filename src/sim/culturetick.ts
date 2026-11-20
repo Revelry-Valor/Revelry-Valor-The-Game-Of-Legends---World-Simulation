@@ -3,6 +3,7 @@ import type { Env } from './env';
 import { addPop, mainOf, materialOf, tidy, total, type Pop } from './pops';
 import type { LiveCulture, Settlement, SimState } from './state';
 import { similarity } from './traits';
+import { barrier, relatedness } from './languages';
 
 /**
  * The culture tick (REDESIGN.md, "Cultures as peoples", step 3), every five years.
@@ -33,8 +34,6 @@ export const YEARS: Record<'material' | 'culture' | 'language', number> = { mate
 export const REACH_KM = 100;
 const MAX_STEPS = 80;
 const FLOOR = 0.03;
-/** A border of tongues cuts influence by this. */
-const LANGUAGE_BARRIER = 0.6;
 /** How strongly a realm presses its culture on a place it fully controls (to the place's own pull). */
 export const RULE_PRESS = 0.8;
 /** Children learn their tongue mostly at home: the weight of their own place's speech (the rest, who lives near). */
@@ -160,7 +159,7 @@ export function pressures(c: TickContext): Map<number, ProvPress> {
         for (let i = P.nbStart[p]; i < P.nbStart[p + 1]; i++) {
           const q = P.nb[i];
           let w = v * Math.exp(-far(p, q) / REACH_KM);
-          if (tongue && tongueOf(q) && tongueOf(q) !== tongue) w *= LANGUAGE_BARRIER;
+          if (tongue && tongueOf(q) && tongueOf(q) !== tongue) w *= barrier(sim, tongue, tongueOf(q));
           if (w < E * FLOOR || w <= (got.get(q) ?? 0)) continue;
           got.set(q, w);
           next.push(q);
@@ -255,7 +254,7 @@ export function cultureTick(c: TickContext): Map<number, ProvPress> {
     if (v === undefined) {
       const A = byId.get(a);
       const B = byId.get(b);
-      v = A && B ? similarity(lib, cultures, A, B) : 0;
+      v = A && B ? similarity(lib, cultures, A, B, (x, y) => relatedness(sim, x, y)) : 0;
       simCache.set(k, v);
     }
     return v;

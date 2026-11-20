@@ -1,6 +1,7 @@
 import type { Library } from '../core/library';
 import { cultureFx, cultureOf, MAX_TRADITIONS } from './culture';
 import { similarity } from './traits';
+import { relatedness } from './languages';
 import type { LiveCulture, Settlement, SimState, Tribe } from './state';
 
 /**
@@ -50,7 +51,7 @@ function baseAcceptance(sim: SimState, a: string, b: string, lib?: Library): num
   const B = cultureOf(sim, b);
   if (!A || !B) return 0;
   const heritage = A.races.some((r) => B.races.includes(r)) ? 0.3 : A.species.some((s) => B.species.includes(s)) ? 0.15 : 0;
-  const alike = lib ? 0.6 * similarity(lib, sim.cultures ?? [], A, B) : A.parent === B.id || B.parent === A.id || A.blend?.includes(B.id) || B.blend?.includes(A.id) ? 0.45 : 0;
+  const alike = lib ? 0.6 * similarity(lib, sim.cultures ?? [], A, B, (x, y) => relatedness(sim, x, y)) : A.parent === B.id || B.parent === A.id || A.blend?.includes(B.id) || B.blend?.includes(A.id) ? 0.45 : 0;
   return Math.max(heritage, alike);
 }
 /** Acceptance between two cultures (−1 hostile … 1 close); a culture fully accepts itself. */

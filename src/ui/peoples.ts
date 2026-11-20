@@ -15,8 +15,9 @@ import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
 import { coreDistanceOf, stageOf } from '../sim/drift';
+import { langName, languageOf, speakers, speechOf } from '../sim/languages';
 import { bundleOf, familyName, levelOf, similarity, TRAITS, treeNearness } from '../sim/traits';
-import type { Army, Battle, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
+import type { Army, Battle, Clan, LiveCulture, LiveFaith, LiveLanguage, War } from '../sim/state';
 import type { Pop } from '../sim/pops';
 import { kindName, total, UNIT_KINDS } from '../sim/battle';
 import { govOf, preferredGov, realmName, rulerTitle } from '../sim/nations';
@@ -1857,7 +1858,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           h('td', {}, `${Math.round(q.n).toLocaleString()} (${Math.round((q.n / all) * 100)}%)`),
           h('td', {}, raceName(q.race)),
           h('td', {}, cultureOf(s, q.culture)?.name ?? '—'),
-          h('td', {}, q.language || '—'),
+          h('td', {}, q.language ? langName(s, q.language) : '—'),
           h('td', {}, cultureOf(s, q.material || q.culture)?.name ?? '—'),
           h('td', {}, faithOf(s, q.faith)?.name ?? '—'),
           h('td', {}, CLS[q.cls]),
@@ -1911,7 +1912,11 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     return [
       h('div', {}, `${levelOf(cu) === 'subculture' ? 'A subculture' : 'A culture'} of ${familyName(all, cu)}.`),
       h('div', { class: 'econ-head' }, 'Core traits (who they are)'),
-      row('Language', b.language),
+      row('Language', (() => {
+        const l = languageOf(s, b.language);
+        const up = l?.parent ? languageOf(s, l.parent) : undefined;
+        return `${langName(s, b.language)}${up ? ` (grown from ${up.name})` : ''}`;
+      })()),
       row('Religion', faithOf(s, b.religion)?.name ?? ''),
       row('Values', `${b.values || '—'}; ${b.fighting ? b.fighting.toLowerCase() : 'who fights unsettled'}`),
       row('Law', b.law),
@@ -1925,6 +1930,28 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       h('div', { class: 'muted small' }, `How fast each changes: ${TRAITS.map((t) => `${t.name.toLowerCase()} ${t.speed}`).join('; ')}.`),
       near.length ? h('div', {}, h('span', { class: 'muted' }, 'Most alike: '), near.map(({ q, v }) => `${q.name} ${Math.round(v * 100)}%${tie(q) ? ` (${tie(q)})` : ''}`).join(', ')) : null,
     ];
+  };
+  /** Every tongue, as family trees: languages, their dialects and daughters, with their speakers; ended ones dimmed. */
+  const languagesCard = (): HTMLElement => {
+    const s = sim!;
+    const langs = s.languages ?? [];
+    const spk = speakers(s);
+    const kids = (id: string) => langs.filter((l) => l.parent === id);
+    const line = (l: LiveLanguage, depth: number): HTMLElement[] => {
+      const n = Math.round(spk.get(l.id) ?? 0);
+      const what = l.kind === 'dialect' ? 'dialect' : l.parents && l.parents.length > 1 ? `creole of ${l.parents.map((id) => langName(s, id)).join(' and ')}` : depth ? 'language' : 'language family';
+      const row = h('div', { class: l.ended !== undefined ? 'muted' : '', style: `padding-left:${depth * 14}px` },
+        `${depth ? '└ ' : ''}${l.name}`,
+        h('span', { class: 'muted' }, ` · ${what}${l.ended !== undefined ? `, no longer spoken (since year ${yearOf(l.ended)})` : ` · ${n.toLocaleString()} speakers`}${depth ? ` · since year ${yearOf(l.founded)}` : ''}`),
+      );
+      return [row, ...kids(l.id).flatMap((k) => line(k, depth + 1))];
+    };
+    const roots = langs.filter((l) => !l.parent || !langs.some((q) => q.id === l.parent));
+    return h('details', { class: 'culture-card small' },
+      h('summary', {}, `${langs.filter((l) => l.ended === undefined).length} tongues spoken · ${roots.length} famil${roots.length === 1 ? 'y' : 'ies'}`),
+      h('div', { class: 'tribe-card econ' }, ...roots.flatMap((r) => line(r, 0)),
+        h('div', { class: 'muted small' }, 'A region far from its heartland comes to speak a dialect; a people grown apart makes it a language of its own; peoples blending make a creole. Children take up the tongue most spoken round them.')),
+    );
   };
   const cultureCard = (cu: LiveCulture): HTMLElement => {
     const L = lib();
@@ -2333,6 +2360,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
     // Cultures: each with its pillars, traditions, behaviours and people.
     const living = (s.cultures ?? []).filter((cu) => s.settlements.some((q) => !q.ruined && q.culture === cu.id) || s.tribes.some((t) => t.culture === cu.id));
     if (living.length) parts.push(h('h3', {}, 'Cultures'), ...living.map((cu) => cultureCard(cu)));
+    if (sim?.languages?.length) parts.push(h('h3', {}, 'Languages'), languagesCard());
 
     // Faiths and the gods.
     const believed = (s.faiths ?? []).filter((f) => s.settlements.some((q) => !q.ruined && q.faith === f.id) || s.tribes.some((t) => t.faith === f.id));
@@ -2430,6 +2458,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             : null,
           !st.ruined && st.pull && cultureOf(s, st.pull.to) ? h('div', { class: 'muted' }, `Drawn toward the ways of the ${cultureOf(s, st.pull.to)!.name}: ${st.pull.share >= 0.5 ? 'strongly' : st.pull.share >= 0.2 ? 'somewhat' : 'a little'} (${Math.round(st.pull.share * 100)}% of the pull on it).`) : null,
           st.ruined ? null : h('div', {}, `${Math.round(st.pop)} people · ${Math.round(st.warband)} to guard it`),
+          !st.ruined && st.pops?.length ? h('div', {}, h('span', { class: 'muted' }, 'Speaks: '), speechOf(s, st)) : null,
           !st.ruined && st.pops?.length ? popsTable(st.pops) : null,
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,

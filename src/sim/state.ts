@@ -420,6 +420,25 @@ export interface Route {
  * a certain way for generations and fade when that life ends; its learned behaviours spread by
  * practice, need and contact.
  */
+/** A tongue (languages.ts): a language or a dialect, its sounds, and where it came from. */
+export interface LiveLanguage {
+  id: string;
+  name: string;
+  /** Word beginnings and endings, for names ("ka-", "-dor"). */
+  sounds: string;
+  /** The tongue it grew from ('' none), and both for a creole. */
+  parent: string;
+  parents?: string[];
+  kind: 'language' | 'dialect';
+  founded: number;
+  /** The day no one spoke it any more. */
+  ended?: number;
+  /** The culture whose it is. */
+  culture?: string;
+  /** A dialect's provinces (ids). */
+  region?: number[];
+}
+
 export interface LiveCulture {
   id: string;
   name: string;
@@ -636,6 +655,8 @@ export interface SimState {
   density?: Record<string, Float32Array>;
   /** The wild folk of each province (by its kept id): who the families living in the wild are (pops.ts). */
   country?: Record<string, Pop[]>;
+  /** Every tongue spoken or once spoken (languages.ts). */
+  languages?: LiveLanguage[];
   /** Each region's core distance from its culture's heartland, by culture and province id (drift.ts). */
   coreDist?: Record<string, number>;
   /** Culture ticks two cultures have shared a province as a good part of it each (toward a blend). */

@@ -1289,6 +1289,16 @@ The simulation follows people, not places: each province holds groups of people 
 - *Shown:* a town's card gives its region's core distance and stage ("Its region, 0.22 from the Toral heartland: a strong dialect and its own customs") and its cohesion.
 - On the saved world over 100 years: distances rose slowly (the farthest past 0.5 after about sixty years), three regions split off as subcultures (four cultures to seven), and about ten frontier towns became cohesive.
 
+**Built (step 5): languages** (`sim/languages.ts`), with the culture tick
+- *A lineage of tongues:* every tongue spoken is a language or a dialect, with its sounds (word beginnings and endings, which names are made from), its parent (both, for a creole), when it began and, once no one speaks it, when it ended (kept for the history). Tongues spoken before languages were kept are carried over by name.
+- *Dialects:* a region of a culture past 0.2 core distance speaks a dialect of the culture's tongue, named for its main town there, else the nearest settlement ("Isish Toral"); neighbouring provinces drifting the same way share it. Its sounds drift a little from its parent's. "The Toral round Isish have come to speak a dialect of their own: Isish Toral."
+- *Languages of their own:* when a region splits off as a people of its own (step 4), the dialect most of its people speak becomes a language, named for the new people, its sounds drifting further; with no dialect, a new language grows from the parent tongue. "Isish Toral, the speech of the Kador, has grown into a language of its own: Kador."
+- *Creoles:* two peoples blended (step 4) make a creole of their two tongues, which their people there speak.
+- *Names:* towns, clans and peoples are named in their culture's tongue's sounds, so a new language's places sound different from its parent's.
+- *How near tongues are:* the same 1; a dialect and its language, or a language and the one it grew from, 0.7; sisters 0.6; one family 0.35; otherwise none. Influence crossing into a province of another tongue keeps 0.6 + 0.4 × nearness of it (a dialect border hardly slows it), and the language part of how alike two cultures are counts by nearness.
+- *Shown:* the Peoples tab lists every tongue as family trees, with dialects and daughter languages under their parents, speakers, and ended ones dimmed; a town's card says what it speaks ("Isish Toral, a dialect of Toral"); its people table names each group's tongue; the culture card names its language and what it grew from.
+- On the saved world over 100 years: four languages, seven dialects by year 100, and three new languages grown from them (one, Neaeen, already from a young language, Aeven, itself grown from Ouven).
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

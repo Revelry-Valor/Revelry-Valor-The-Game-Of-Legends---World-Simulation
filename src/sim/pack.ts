@@ -25,6 +25,7 @@ export interface PackedSim {
   cultures?: SimState['cultures'];
   relations?: SimState['relations'];
   coreDist?: SimState['coreDist'];
+  languages?: SimState['languages'];
   mixed?: SimState['mixed'];
   way?: number[];
   wayKeeper?: number[];
@@ -127,6 +128,7 @@ export function packSim(sim: SimState, env: Env | null): PackedSim {
     relations: sim.relations ?? {},
     ...(sim.coreDist ? { coreDist: Object.fromEntries(Object.entries(sim.coreDist).map(([k, v]) => [k, Math.round(v * 1000) / 1000])) } : {}),
     ...(sim.mixed ? { mixed: sim.mixed } : {}),
+    ...(sim.languages ? { languages: sim.languages } : {}),
     routes: sim.routes,
     traffic: runs(Float32Array.from(sim.traffic, (v) => Math.round(v * 10) / 10)),
     way: runs(sim.way),
@@ -221,6 +223,7 @@ export function unpackSim(p: PackedSim, env: Env): SimState | null {
     relations: p.relations && typeof p.relations === 'object' ? p.relations : {},
     ...(p.coreDist && typeof p.coreDist === 'object' ? { coreDist: p.coreDist } : {}),
     ...(p.mixed && typeof p.mixed === 'object' ? { mixed: p.mixed } : {}),
+    ...(Array.isArray(p.languages) ? { languages: p.languages } : {}),
     routes: Array.isArray(p.routes) ? p.routes : [],
     traffic,
     way,
