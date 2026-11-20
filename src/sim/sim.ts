@@ -23,6 +23,7 @@ import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics'
 import { championMight, faithHostility, faithYear } from './faith';
 import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
+import { traitsYear } from './traits';
 import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
@@ -1292,6 +1293,17 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
   cultureYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // Each town's own version of its culture: what it adds or drops by its life there (culture.ts).
   localYear({ sim, env, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
+  // Each culture's traits as its people live now (traits.ts).
+  traitsYear({
+    sim, env, lib,
+    cellOf: (x, y) => landCell(env, x, y),
+    knows: (st, id) => knows(lib, st, id),
+    lawOfClan: (id) => {
+      const gov = sim.clans.find((q) => q.id === id)?.realm?.gov;
+      return (gov && lib.governments.find((g) => g.id === gov)?.law) || '';
+    },
+    isTown: (st) => settlementTier(st) !== 'Village',
+  });
   // How cultures change one another: acceptance, the pull of big settlements, divergence, blending (cultureChange.ts).
   cultureChangeYear({ sim, lib, rand: () => rand(sim), dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by), log: (text, x, y) => log(sim, text, x, y) });
   // Clean claims: holes filled, stray specks absorbed.

@@ -1,6 +1,7 @@
 import type { Library } from '../core/library';
 import { cultureFx, cultureOf, MAX_TRADITIONS } from './culture';
 import { sistersYear } from './sister';
+import { similarity } from './traits';
 import type { LiveCulture, Settlement, SimState, Tribe } from './state';
 
 /**
@@ -35,21 +36,24 @@ export function cultureColour(sim: SimState, cu: LiveCulture): string {
 }
 
 const key = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
-function relation(sim: SimState, a: string, b: string) {
+function relation(sim: SimState, a: string, b: string, lib?: Library) {
   const rel = (sim.relations ??= {});
   const k = key(a, b);
-  if (!rel[k]) rel[k] = { acc: baseAcceptance(sim, a, b), fights: 0, trades: 0, together: 0 };
+  if (!rel[k]) rel[k] = { acc: baseAcceptance(sim, a, b, lib), fights: 0, trades: 0, together: 0 };
   return rel[k];
 }
-/** Shared heritage eases acceptance: the same race, the same species, a parent culture. */
-function baseAcceptance(sim: SimState, a: string, b: string): number {
+/**
+ * Shared heritage eases acceptance: the same race, the same species; and how alike the two
+ * cultures are (traits.ts: near in the tree, sharing language, faith, values, customs, ways and
+ * goods), up to 0.6 for two alike in everything.
+ */
+function baseAcceptance(sim: SimState, a: string, b: string, lib?: Library): number {
   const A = cultureOf(sim, a);
   const B = cultureOf(sim, b);
   if (!A || !B) return 0;
-  if (A.parent === B.id || B.parent === A.id || A.blend?.includes(B.id) || B.blend?.includes(A.id)) return 0.45;
-  if (A.races.some((r) => B.races.includes(r))) return 0.3;
-  if (A.species.some((s) => B.species.includes(s))) return 0.15;
-  return 0;
+  const heritage = A.races.some((r) => B.races.includes(r)) ? 0.3 : A.species.some((s) => B.species.includes(s)) ? 0.15 : 0;
+  const alike = lib ? 0.6 * similarity(lib, sim.cultures ?? [], A, B) : A.parent === B.id || B.parent === A.id || A.blend?.includes(B.id) || B.blend?.includes(A.id) ? 0.45 : 0;
+  return Math.max(heritage, alike);
 }
 /** Acceptance between two cultures (−1 hostile … 1 close); a culture fully accepts itself. */
 export function acceptance(sim: SimState, a: string, b: string): number {
@@ -121,13 +125,13 @@ export function cultureChangeYear(c: ChangeContext): void {
     const A = cultures[i];
     const B = cultures[j];
     const contact = near(A.id, B.id, 400);
-    const rel = relation(sim, A.id, B.id);
+    const rel = relation(sim, A.id, B.id, c.lib);
     if (!contact && !rel.fights && !rel.trades) {
       rel.together = Math.max(0, rel.together - 1);
       continue;
     }
     const grudge = sim.grudges.some((g) => (A.races.includes(g.race) && B.races.includes(g.against)) || (B.races.includes(g.race) && A.races.includes(g.against)));
-    const target = Math.max(-1, Math.min(1, baseAcceptance(sim, A.id, B.id) + (contact ? 0.15 : 0) + Math.min(0.5, rel.trades * 0.06) - Math.min(1.2, rel.fights * 0.2) - (grudge ? 0.5 : 0)));
+    const target = Math.max(-1, Math.min(1, baseAcceptance(sim, A.id, B.id, c.lib) + (contact ? 0.15 : 0) + Math.min(0.5, rel.trades * 0.06) - Math.min(1.2, rel.fights * 0.2) - (grudge ? 0.5 : 0)));
     // Xenophobes warm slowly and the hospitable quickly (their readiness to deal with others).
     const warmth = Math.max(0.2, Math.min(2, (2 - cultureFx(sim, A.id).otherRace) * (2 - cultureFx(sim, B.id).otherRace)));
     const rate = target > rel.acc ? 0.08 * warmth : 0.25;

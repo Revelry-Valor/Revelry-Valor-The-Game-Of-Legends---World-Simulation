@@ -1239,6 +1239,29 @@ The simulation follows people, not places: each province holds groups of people 
 - *Kept small:* a pop under 2% of its place (or 20 people) merges into the most alike pop of its own class; a class is never folded away while it has people.
 - *Shown:* a town's card lists its people (people, race, culture, language, faith, class); a province's hover shows its peoples ("70% Celtic, 30% Roman"); the population heat map (View) has a *Cultures* choice colouring each province by its cultures, blended by their shares.
 
+**Built (step 2): a culture as a bundle of traits** (`sim/traits.ts`)
+- *Seven traits, each with its speed* (the years a people takes to change it under steady pressure, for step 3):
+
+  | Trait | Core or regional | Speed | How it changes |
+  |---|---|---|---|
+  | Material culture (building, dress, food) | Regional | Fast (about 20 years) | Copied from whoever looks successful |
+  | Ways of life (the land and work traditions: Seafaring, Miners…) | Regional | Decades (about 40) | Shaped by the land and the work |
+  | Customs (the other traditions: Clan loyalty, Storytellers…) | Core | Decades (about 40) | Copied from neighbours and the powerful |
+  | Law and kinship | Core | Decades (about 50) | Set by rulers and custom |
+  | Values (its ethos, who fights) | Core | Generations (about 80) | Passed parent to child |
+  | Religion (its people's main faith) | Core | Slow (about 120) | Needs believers nearby |
+  | Language | Core | Slowest (about 90, three generations) | Mostly at births |
+
+- *Each year a culture's traits follow its people:*
+  - *Material culture:* what most of its people build with (by the land: timber halls in forest, mud brick in dry country, fieldstone or cut stone in the hills once masonry is known, reed and thatch by hot water, tents for peoples on the move, carved halls underground), wear (furs, wool, linen, light cotton, by the cold and heat) and eat (from its towns' work: bread and porridge of their crop, fish, meat and milk of their herds, game and wild plants).
+  - *Religion:* the main faith among all its people (towns, tribes and the wild folk).
+  - *Law:* its realms' law where they have one (lords' justice, written law, religious law…), else what it has learned (written law, a tribal council, the custom of the elders).
+  - *Kinship:* clans where clan loyalty runs deep, else extended families, or households where most live in towns.
+- *The tree:* a family (the root of its parent links), its cultures, and their subcultures (sister cultures are subcultures for now). Nearness in the tree: the same culture 1, parent and child (or a blend and its parents) 0.75, sisters 0.6, one family 0.4, otherwise 0.
+- *Similarity* (0–1) = a third from the tree, two thirds from shared traits: language 25%, customs 15%, material culture 15%, religion 15%, values 10%, law 10%, kinship 5%, ways of life 5%.
+- *Acceptance* between two cultures now starts from how alike they are (up to 0.6 for two alike in everything), or their shared race or species where that is more.
+- *Shown:* the culture card lists its family and level, its core traits and its way of life, how fast each changes, and the three living cultures most like it ("Kador 72% (a sister), Vesh 41%").
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

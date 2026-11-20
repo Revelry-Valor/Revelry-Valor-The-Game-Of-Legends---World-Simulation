@@ -438,6 +438,11 @@ export interface LiveCulture {
   /** The culture it grew from, if any (or the two it blended from). */
   parent: string;
   blend?: string[];
+  /** Its traits as its people live now (traits.ts): material culture, its people's main faith, law, kinship. */
+  material?: { building: string; dress: string; food: string };
+  faith?: string;
+  law?: string;
+  kinship?: string;
   /** A sister culture: the changes its region lived by that set it apart from its parent ("+seafaring", "-tillers"). */
   sister?: string[];
   /** Its colour on the map of cultures. */

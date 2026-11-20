@@ -14,6 +14,7 @@ import { hasArchive, keepers } from '../sim/tech';
 import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
+import { bundleOf, familyName, levelOf, similarity, TRAITS, treeNearness } from '../sim/traits';
 import type { Army, Battle, Clan, LiveCulture, LiveFaith, War } from '../sim/state';
 import type { Pop } from '../sim/pops';
 import { kindName, total, UNIT_KINDS } from '../sim/battle';
@@ -1894,6 +1895,35 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       h('div', { class: 'muted' }, 'Tolerance its people have gained over the generations by living where their race once found it too hard (up to two levels; adaptable races such as humans adapt three times as fast). Their kin elsewhere bear no more than before.'),
     ];
   };
+  /** A culture's traits (traits.ts): its family and level, core and regional traits, how fast each changes, and the cultures most like it. */
+  const traitsPart = (cu: LiveCulture): (HTMLElement | null)[] => {
+    const L = lib();
+    const s = sim!;
+    const all = s.cultures ?? [];
+    const b = bundleOf(L, cu);
+    const tn = (id: string) => L.traditions.find((t) => t.id === id)?.name ?? id;
+    const row = (label: string, value: string) => h('div', {}, h('span', { class: 'muted' }, `${label}: `), value || '—');
+    const living = all.filter((q) => q !== cu && (s.settlements.some((st) => !st.ruined && st.culture === q.id) || s.tribes.some((t) => t.culture === q.id)));
+    const near = living.map((q) => ({ q, v: similarity(L, all, cu, q) })).sort((x, y) => y.v - x.v).slice(0, 3);
+    const tie = (q: LiveCulture) => (q.id === cu.parent ? 'its parent' : q.parent === cu.id ? 'grown from it' : q.parent && q.parent === cu.parent ? 'a sister' : treeNearness(all, cu, q) > 0 ? 'same family' : '');
+    return [
+      h('div', {}, `${levelOf(cu) === 'subculture' ? 'A subculture' : 'A culture'} of ${familyName(all, cu)}.`),
+      h('div', { class: 'econ-head' }, 'Core traits (who they are)'),
+      row('Language', b.language),
+      row('Religion', faithOf(s, b.religion)?.name ?? ''),
+      row('Values', `${b.values || '—'}; ${b.fighting ? b.fighting.toLowerCase() : 'who fights unsettled'}`),
+      row('Law', b.law),
+      row('Kinship', b.kinship),
+      row('Customs', b.customs.map(tn).join(', ')),
+      h('div', { class: 'econ-head' }, 'Way of life (varies by region)'),
+      row('Ways', [...b.ways.map(tn), ...cu.lifestyles.filter((l) => !b.ways.some((w) => tn(w).startsWith(l)))].join(', ')),
+      row('Builds with', b.material.building),
+      row('Wears', b.material.dress),
+      row('Eats', b.material.food),
+      h('div', { class: 'muted small' }, `How fast each changes: ${TRAITS.map((t) => `${t.name.toLowerCase()} ${t.speed}`).join('; ')}.`),
+      near.length ? h('div', {}, h('span', { class: 'muted' }, 'Most alike: '), near.map(({ q, v }) => `${q.name} ${Math.round(v * 100)}%${tie(q) ? ` (${tie(q)})` : ''}`).join(', ')) : null,
+    ];
+  };
   const cultureCard = (cu: LiveCulture): HTMLElement => {
     const L = lib();
     const s = sim!;
@@ -1919,7 +1949,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           return h('div', {}, `Family of the ${fam.root.name}: ${fam.kin.map((q) => q.name).join(', ')}`);
         })(),
         h('div', {}, `Heritage: ${cu.races.map(raceName).join(', ')}`),
-        h('div', {}, `Ethos: ${cu.ethos || '—'} · Who fights: ${cu.martial || '—'} · Ways of life: ${cu.lifestyles.join(', ') || 'none settled on'}`),
+        ...traitsPart(cu),
         sample ? h('div', { class: 'muted' }, `Its sounds: ${sample}`) : null,
         h('div', { class: 'econ-head' }, `Traditions (${held.length} of about ${MAX_TRADITIONS})`),
         held.length
