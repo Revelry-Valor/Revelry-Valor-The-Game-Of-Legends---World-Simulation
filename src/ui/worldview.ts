@@ -591,9 +591,11 @@ export function showWorld(app: App, start: World): () => void {
     });
     return h('label', { class: 'field' }, h('span', { class: 'label' }, 'Attraction'), sel, h('span', { class: 'muted small hint' }, 'Where a race would want to live: each province from red (poor) through yellow to green (much wanted); dark where it won’t live at all (no fresh water within a short walk and too dry to live off the rain, or a climate past what it can bear). Hover for the reasons.'));
   }
+  let densitySel: HTMLSelectElement | null = null;
   /** The wilderness density map: hidden, everyone, or one race (the races living in the wild now). */
   function densityField(): HTMLElement {
     const sel = h('select', { 'aria-label': 'Population density' }) as HTMLSelectElement;
+    densitySel = sel;
     const fill = () => {
       const races = peoples?.densityRaces() ?? [];
       sel.replaceChildren(
@@ -972,6 +974,15 @@ export function showWorld(app: App, start: World): () => void {
     openPeoples: () => showTab('peoples'),
     provinces: () => provinces?.map() ?? null,
     density: () => look.density,
+    showCultures: () => {
+      if (look.density === 'culture') return;
+      look.density = 'culture';
+      if (densitySel) {
+        if (![...densitySel.options].some((o) => o.value === 'culture')) densitySel.append(h('option', { value: 'culture' }, 'Cultures'));
+        densitySel.value = 'culture';
+      }
+      map.redraw();
+    },
     attraction: () => look.attraction,
     layerProvinces: () => {
       const air = airProv?.maps();

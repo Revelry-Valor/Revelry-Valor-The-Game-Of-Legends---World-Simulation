@@ -16,6 +16,8 @@ import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange'
 import { familyOf } from '../sim/sister';
 import { coreDistanceOf, stageOf } from '../sim/drift';
 import { identitySummary, STANCE_WORDS } from '../sim/identity';
+import { snapshotAt } from '../sim/history';
+import { openTimeline } from './timeline';
 import { langName, languageOf, speakers, speechOf } from '../sim/languages';
 import { bundleOf, familyName, levelOf, similarity, TRAITS, treeNearness } from '../sim/traits';
 import type { Army, Battle, Clan, LiveCulture, LiveFaith, LiveLanguage, War } from '../sim/state';
@@ -71,6 +73,8 @@ export interface PeoplesDeps {
   openPeoples?(): void;
   /** The wilderness density to show: 'off', 'total', or a race id. */
   density?(): string;
+  /** Show the map's cultures (the population heat map's Cultures choice). */
+  showCultures?(): void;
   /** The race whose attraction the map shows ('off' or a race id). */
   attraction?(): string;
   /** The other layers' provinces, as far as they have been made (the peoples hold them too). */
@@ -222,6 +226,8 @@ function drawDensity(s: SimState, e: Env, which: string): HTMLCanvasElement {
 }
 
 export function createPeoples(d: PeoplesDeps): Peoples {
+  /** The day the history of peoples is scrubbed to (the map's cultures as they were), or null. */
+  let historyDay: number | null = null;
   let env: Env | null = null;
   let sim: SimState | null = null;
   let pending: PackedSim | null = d.world().sim ?? null;
@@ -630,9 +636,18 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const dShow = d.density?.() ?? 'off';
       const dpm = d.provinces();
       if (dShow !== 'off' && dpm && e.prov.real && e.prov.count === dpm.rings.length) {
-        const key = `${dShow}|${s.day}|${s.settlements.length}`;
+        const key = `${dShow}|${s.day}|${s.settlements.length}|${historyDay}`;
         if (key !== densityKey || !densityFills.length) {
-          if (dShow === 'culture') {
+          if (dShow === 'culture' && historyDay !== null) {
+            // As it was on the day scrubbed in the history of peoples.
+            const snap = snapshotAt(s, historyDay);
+            const byId = new Map<number, string>();
+            for (const [pid, cu] of Object.entries(snap?.provs ?? {})) byId.set(Number(pid), cu);
+            densityFills = Array.from({ length: e.prov.count }, (_, p) => {
+              const cu = byId.get(e.prov.ids[p]);
+              return e.prov.kind[p] === PK.land && cu ? cultureFill(s, new Map([[cu, 1]])) : null;
+            });
+          } else if (dShow === 'culture') {
             const by = provinceCultures(s, e);
             densityFills = Array.from({ length: e.prov.count }, (_, p) => (e.prov.kind[p] === PK.land ? cultureFill(s, by.get(p)) : null));
           } else {
@@ -2362,7 +2377,12 @@ export function createPeoples(d: PeoplesDeps): Peoples {
 
     // Cultures: each with its pillars, traditions, behaviours and people.
     const living = (s.cultures ?? []).filter((cu) => s.settlements.some((q) => !q.ruined && q.culture === cu.id) || s.tribes.some((t) => t.culture === cu.id));
-    if (living.length) parts.push(h('h3', {}, 'Cultures'), ...living.map((cu) => cultureCard(cu)));
+    if (living.length)
+      parts.push(
+        h('h3', {}, 'Cultures'),
+        h('button', { type: 'button', class: 'ghost small', onclick: () => openTimeline({ sim: () => sim, lib, cultureColour: (cu) => cultureColour(sim!, cu), scrub: (day) => { historyDay = day; if (day !== null) d.showCultures?.(); d.redraw(); } }) }, 'History of peoples…'),
+        ...living.map((cu) => cultureCard(cu)),
+      );
     if (sim?.languages?.length) parts.push(h('h3', {}, 'Languages'), languagesCard());
 
     // Faiths and the gods.

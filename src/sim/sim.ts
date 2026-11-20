@@ -20,6 +20,7 @@ import { cultureFx, cultureOf, cultureYear, ensureCulture, leanAt, leansOf, loca
 import { acceptance, cultureChangeYear, noteBetween, offshoot } from './cultureChange';
 import { coreDistanceOf, driftTick } from './drift';
 import { identityYear } from './identity';
+import { historyTick } from './history';
 import { ensureLanguages, languagesTick, soundsFor } from './languages';
 import { ensureRealm, LAND_ENFORCE, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
@@ -1301,6 +1302,8 @@ function yearly(sim: SimState, env: Env, lib: Library, info: Info): void {
     });
     // Dialects, new languages and creoles (languages.ts).
     languagesTick({ sim, env, provAt: (x, y) => provAt(env, x, y), rand: () => rand(sim), log: (text, x, y) => log(sim, text, x, y) });
+    // A snapshot for the history of peoples (history.ts).
+    historyTick(sim, env, (x, y) => provAt(env, x, y));
   }
   // The other layers: drifting islands carry their towns; tunnelers join their towns underground.
   if (env.layers) {

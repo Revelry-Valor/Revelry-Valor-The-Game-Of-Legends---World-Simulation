@@ -1,4 +1,5 @@
 import type { Pop } from './pops';
+import type { History } from './history';
 import type { Horde, Tide } from './monsters';
 import type { Rift } from './rifts';
 
@@ -470,6 +471,8 @@ export interface LiveCulture {
   faith?: string;
   law?: string;
   kinship?: string;
+  /** The day its last people became another's or died (history.ts). */
+  ended?: number;
   /** A subculture: a region grown apart from its parent (drift.ts). */
   level?: 'subculture';
   /** A sister culture: the changes its region lived by that set it apart from its parent ("+seafaring", "-tillers"). */
@@ -661,6 +664,8 @@ export interface SimState {
   country?: Record<string, Pop[]>;
   /** Every tongue spoken or once spoken (languages.ts). */
   languages?: LiveLanguage[];
+  /** Snapshots and lineage events of cultures, languages and races, for the timeline (history.ts). */
+  history?: History;
   /** Each region's core distance from its culture's heartland, by culture and province id (drift.ts). */
   coreDist?: Record<string, number>;
   /** Culture ticks two cultures have shared a province as a good part of it each (toward a blend). */

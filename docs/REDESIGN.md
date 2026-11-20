@@ -1311,6 +1311,18 @@ The simulation follows people, not places: each province holds groups of people 
 - *Shown:* a town's card sums up its people ("Belonging to the realm 64%, grievance 20%; 30% Celtic marginalized"); its people table gives each group's stance; the realm's card its accepted cultures.
 - On the saved world over 100 years (its cultures living apart): belonging rose to about 0.9 on average, grievance stayed near 0.06, a few hundred people of other cultures integrating or keeping apart, four restless towns of 293 and no risings.
 
+**Built (step 7): the history of peoples** (`sim/history.ts`, `ui/timeline.ts`)
+- *What is kept:* each culture tick (five years) a snapshot of the people of every culture, language and race, and each province's main culture. Past 240 snapshots the older half is thinned (every other one kept), so a long history stays small; events are kept in full. Saved with the world.
+- *Lineage events,* read from the changes between snapshots: a culture or tongue appearing (there at the start, split from its parent, a blend or creole of two), a dialect grown into a language (promoted), one ending (absorbed into the culture its last town took on, or extinct), a culture living again, and major changes without a split (most of a people taking another faith, or another tongue). A culture's end is kept on it (the day).
+- *The view* (Peoples tab, *History of peoples…*): a panel docked at the bottom, the map left in view above it. Three tabs, one drawing for each: *Cultures*, *Languages*, *Races and subraces*.
+  - Time left to right; each line a band, main lines thick and subcultures, dialects and subraces thin, each thickening and thinning with its people (a dialect grown into a language thickens from that day).
+  - Children sit just below their parent; lanes freed by a line that ended are used again. Coloured by family.
+  - Splits and blends are connectors from the parent lines, absorption a curve into the absorber, extinction an end cap, a change of faith or tongue a diamond.
+  - Wheel to zoom along time, drag to move; *Fit* to see it all. Hide subcultures and dialects; filter by family or by realm (the peoples living in its towns now).
+  - Hover a line to light its ancestry and descendants; click it for its panel: its span, its people now and at its most, the provinces where it is the main people, its values, law and ways, what happened to it, and links to its tongue and races in the other tabs (and a tongue's to the cultures that speak it).
+  - Scrub a date (the slider) to mark it on the timeline; with *Show the map's cultures at this date* ticked, the map shows the Cultures view as it was then.
+- In the browser on the saved world over 80 years: four cultures and one subculture; four language families with seven dialects and a young language; the races; a line clicked shows its story, and scrubbing recolours the map.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.
