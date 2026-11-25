@@ -101,3 +101,4 @@ describe('rings round a city (settlements and population, step 5)', () => {
     expect(got![1]).toBeGreaterThan(0);
   });
 });
+

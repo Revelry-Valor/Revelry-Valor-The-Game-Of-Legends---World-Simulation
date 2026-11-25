@@ -6,7 +6,8 @@ import { defaultSettings } from '../src/core/settings';
 import { KM_PER_DEGREE } from '../src/core/units';
 import type { Library } from '../src/core/library';
 import { buildEnv, type Env } from '../src/sim/env';
-import { addDawnCity, addTribe, clanLand, eligibleRaces, newSim, placeStart, stepDays } from '../src/sim/sim';
+import { addDawnCity, addTribe, attractionFor, clanLand, eligibleRaces, newSim, placeStart, populateProvince, stepDays } from '../src/sim/sim';
+import { countryOf } from '../src/sim/pops';
 import { DAYS_PER_YEAR, dateText, type Clan, type Hero, type Settlement, type SimState } from '../src/sim/state';
 import { fight, total, type Ground, type Side } from '../src/sim/battle';
 import { borderMap } from '../src/ui/borders';
@@ -23,7 +24,7 @@ import { updatePrices } from '../src/sim/trade';
 import { bestWay, knows, pathCells, pathSpeed } from '../src/sim/ways';
 import { armsMight, clanKnows } from '../src/sim/tech';
 import { acceptance, noteBetween } from '../src/sim/cultureChange';
-import { PK, provAt, setHolder, transferAll } from '../src/sim/land';
+import { holderOf, PK, provAt, setHolder, transferAll } from '../src/sim/land';
 import { manaAtPlace, manaLinesNow, manaNow, manaYear, TOWER_MANA } from '../src/sim/mana';
 import { PERMANENT_MANA, RIFT_KINDS, riftsYear, type Rift } from '../src/sim/rifts';
 import { hordesDay, monstersMonth } from '../src/sim/monsters';
@@ -333,6 +334,41 @@ describe('settlements and their economy', () => {
     // It herds as well as farms.
     expect(Object.keys(city.economy!.jobs).some((k) => k.startsWith('herd:'))).toBe(true);
   }, 60000);
+});
+
+describe('the population brush (Peoples tab)', () => {
+  it('sets a race’s people in a province’s countryside, as its clan’s people, where it can live, and they live on there', () => {
+    const sim = newSim(env, 47);
+    const att = attractionFor(env, lib, humanId())!;
+    // Good farmland the race likes, and a neighbouring point as good.
+    const good = (q: number) => q >= 0 && env.land[q] && [7, 8, 9, 10].includes(cl.zone[q]) && env.mzone[q] === 0 && env.res.grain[q] >= 0.4 && att.score(q) >= 0;
+    const k = [...env.land.keys()].find((q) => good(q) && good(q + 1))!;
+    const at = (q: number) => ({ x: env.x0 + (q % env.w) * env.step, y: env.y0 + Math.floor(q / env.w) * env.step });
+    const city = addDawnCity(sim, env, lib, humanId(), at(k).x, at(k).y, 800, ['agriculture'])!;
+    const p = provAt(env, at(k + 1).x, at(k + 1).y);
+    const P = env.prov;
+    const inP = () => [...P.cells.subarray(P.start[p], P.start[p + 1])].reduce((n, q) => n + sim.density![humanId()][q], 0);
+    const wildOf = () => countryOf(sim, env, p).filter((q) => q.race === humanId()).reduce((n, q) => n + q.n, 0);
+    expect(populateProvince(sim, env, lib, humanId(), p, 2000, city.clan)).toBe(true);
+    expect(inP()).toBeCloseTo(2000, 0);
+    expect(wildOf()).toBeCloseTo(2000, 0);
+    expect(countryOf(sim, env, p).find((q) => q.race === humanId())!.culture).toBe(city.culture);
+    expect(holderOf(sim, p)).toBe(city.clan);
+    // Painting it again replaces them; none clears them.
+    populateProvince(sim, env, lib, humanId(), p, 500, city.clan);
+    expect(inP()).toBeCloseTo(500, 0);
+    expect(wildOf()).toBeCloseTo(500, 0);
+    populateProvince(sim, env, lib, humanId(), p, 0, -1);
+    expect(inP()).toBe(0);
+    // No clan to belong to, or land the race can't live on: nothing.
+    expect(populateProvince(sim, env, lib, humanId(), p, 500, 9999)).toBe(false);
+    const bleak = [...env.land.keys()].find((q) => env.land[q] && att.score(q) < 0);
+    if (bleak !== undefined) expect(populateProvince(sim, env, lib, humanId(), P.of[bleak], 500, city.clan)).toBe(false);
+    // A farming clan's people keep to their land through a year.
+    populateProvince(sim, env, lib, humanId(), p, 800, city.clan);
+    stepDays(sim, env, lib, DAYS_PER_YEAR);
+    expect(inP()).toBeGreaterThan(400);
+  }, 120000);
 });
 
 describe('markets and trade', () => {

@@ -2,7 +2,7 @@ import { COVER_BRUSHES } from '../core/paint';
 import { raceMissing, type Library, type Race, type Species } from '../core/library';
 import { hordesDay, monstersMonth } from './monsters';
 import { holdLayersYear } from './layerprovs';
-import { canLiveTogether, densityMonth, seedDensity, type DensityRace } from './density';
+import { canLiveTogether, densityMonth, densityOf, seedDensity, type DensityRace } from './density';
 import { digYear, driftYear, layerFood, layerRoom, layerSpot, layerWays, LAYER_NAMES, type LayerContext, type LayerLand, type LayerWays } from './layers';
 import { riftPull, riftsYear, riftSpringNear } from './rifts';
 import { manaYear } from './mana';
@@ -29,10 +29,11 @@ import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { traitsYear } from './traits';
 import { addFarmFood, farmLayer, farmYear, isFarmed, sitesYear, type RuralContext, type VillageSite } from './rural';
+import { arableAt, fertilityAt } from './food';
 import { CITY, MARKET, TIERS, tierOf, tiersYear, TOWN_FIELDS_KM } from './tiers';
 import { catchmentYear, deliverMonth, drawsFood, farmShareOf, RENT, TO_TOWN } from './catchment';
 import { CULTURE_TICK, cultureTick } from './culturetick';
-import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
+import { classShares, classYear, countryOf, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
 
 /**
@@ -315,6 +316,46 @@ function rulerContext(sim: SimState, lib: Library) {
     name: (cultureId: string) => makeName(sim, lib, cultureId),
     lifespan: (raceId: string) => lib.species.flatMap((s) => s.races).find((r) => r.id === raceId)?.lifespan ?? 70,
   };
+}
+
+/**
+ * Set how many people of a race live in a province's countryside (the Peoples tab's population brush,
+ * to start a world further on): its families there of that race are replaced by `people` of them,
+ * spread over its land (by farmland where their clan farms, else by what the wild offers), and its
+ * wild folk become that many of the clan's culture, tongue and faith. The clan takes the province
+ * if no one holds it. People 0 empties it of that race. Returns false where there is no land the
+ * race can live on, or no clan to belong to.
+ */
+export function populateProvince(sim: SimState, env: Env, lib: Library, raceId: string, p: number, people: number, clanId: number): boolean {
+  const P = env.prov;
+  if (p < 0 || p >= P.count || P.kind[p] !== 0) return false;
+  const ri = raceInfo(lib, raceId);
+  const all = [...P.cells.subarray(P.start[p], P.start[p + 1])].filter((k) => env.land[k]);
+  // Only where the race can live (elsewhere they would be gone within the month).
+  const cells = ri ? all.filter((k) => liveScore(env, ri, k) >= 0) : [];
+  if (!all.length || (people > 0 && !cells.length)) return false;
+  const clan = sim.clans.find((c) => c.id === clanId);
+  if (people > 0 && !clan) return false;
+  // Out with the old: that race's families and wild folk there.
+  const D = densityOf(sim, env, raceId);
+  for (const k of all) D[k] = 0;
+  const wild = countryOf(sim, env, p);
+  for (let i = wild.length - 1; i >= 0; i--) if (wild[i].race === raceId) wild.splice(i, 1);
+  if (people <= 0 || !clan) return true;
+  // In with the new: over the farmland if they farm, else where the wild feeds most.
+  const farms = clanKnows(lib, clan, 'agriculture');
+  const weight = cells.map((k) => (farms ? arableAt(env, k) * fertilityAt(env, k) + 0.02 : env.plant[0][k] + env.plant[1][k] + 0.01));
+  const sum = weight.reduce((a, b) => a + b, 0) || 1;
+  cells.forEach((k, i) => (D[k] += (people * weight[i]) / sum));
+  // Who they are: the clan's people (as its nearest town or tribe of the race is).
+  const kin =
+    [...sim.settlements.filter((q) => !q.ruined && q.clan === clan.id), ...sim.tribes.filter((t) => t.clan === clan.id)].sort((a, b) => dist(env, a.x, a.y, P.x[p], P.y[p]) - dist(env, b.x, b.y, P.x[p], P.y[p]))[0] ?? null;
+  const culture = kin?.culture ?? clan.culture;
+  toCountry(sim, env, p, [{ race: raceId, culture, language: tongueOf(sim, culture), faith: kin?.faith ?? '', cls: 'commoner', n: people }]);
+  if (holderOf(sim, p) < 0) setHolder(sim, env, p, clan.id);
+  // The farmland's food is worked out again with them on it.
+  if (farms) farmYear(ruralContext(sim, env, lib, (t) => raceInfo(lib, t.race, t.culture, sim.cultures)));
+  return true;
 }
 
 export function addTribe(sim: SimState, env: Env, lib: Library, raceId: string, x: number, y: number, clanId = -1, pop = 150): Tribe | null {

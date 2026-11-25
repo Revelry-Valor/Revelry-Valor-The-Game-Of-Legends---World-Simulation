@@ -1421,6 +1421,12 @@ Food sets how many people the land can hold, and transport how far food can trav
 - *Shown:* a town's card says its fields run about 3 miles past its edge, the first 2 its gardens and dairy; a village site's hover says when it lies in a town's inner ring.
 - On the stand-in world over 80 years (from 40): 234 village sites, 38 of them in towns' inner rings, holding 290 people each against 180 elsewhere; towns 21,000 (19,000 before), the inner ring's yield feeding more of them. Herds bring in little yet (about 70 people's food a year): this tropical land has little grazing.
 
+**Built (the designer's ask): a population brush in the Peoples tab** (`populateProvince` in `sim/sim.ts`)
+- *To start a world further on:* while placing tribes and dawn cities, the map tool *Add* has a third choice, *People in provinces*: pick a race and how many people per province (none, 100 … 25,000, or an exact number), and whose people they are (the nearest clan of that race, or the selected tribe's or town's clan). Click a province, or drag across several, and each gets that many of the race living in its countryside.
+- It replaces the race's people already there (none clears them). They are laid over the province's land where the race can live: by farmland if the clan farms, else where the wild feeds most. Its wild folk become that many of the clan's culture, tongue and faith (as its nearest town or tribe), and the clan takes the province if no one holds it.
+- A farming clan's people stay, up to what its farms feed; others live off the wild, which feeds far fewer, so the rest die back. A province the race can't live in at all (its climate or ground is against them, per the Library) is refused with a message. Village sites form on painted farmland at the first year's turn.
+- The population heat map (View) shows them at once.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.

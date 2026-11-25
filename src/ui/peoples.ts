@@ -9,7 +9,7 @@ import { packSim, unpackSim, type PackedSim } from '../sim/pack';
 import { isFood, NEEDS, resInfoOf } from '../sim/economy';
 import { baseWorth } from '../sim/trade';
 import { bestWay, buildCost, knows, WAYS } from '../sim/ways';
-import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
+import { addDawnCity, addTribe, populateProvince, attractionFor, wantsOf, clanLand, eligibleRaces, log, moveSettlement, moveTribe, newSim, placeStart, raceInfo, removeSettlement, removeTribe, settlementTier, stepDays, techOutlook } from '../sim/sim';
 import { clanKnows, hasArchive, keepers } from '../sim/tech';
 import { ALL_FOOD_TECH, foodTechFrom, provinceFood, provinceLand } from '../sim/food';
 import { farmLayer, villagesOf } from '../sim/rural';
@@ -256,7 +256,12 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let selectedBattle: number | null = null;
   let mode: 'select' | 'add' = 'select';
   let addRace = '';
-  let addWhat: 'tribe' | 'dawn' = 'tribe';
+  let addWhat: 'tribe' | 'dawn' | 'people' = 'tribe';
+  /** The population brush: people per province, whose people they are, the provinces painted this stroke, and a count of changes (for the heat map). */
+  let addPeople = 500;
+  let addPeopleClan: 'nearest' | 'selected' = 'nearest';
+  let painting: Set<number> | null = null;
+  let paintRev = 0;
   let addClan: 'new' | 'selected' = 'new';
   let showLand = true;
   let showBeast = '';
@@ -275,6 +280,42 @@ export function createPeoples(d: PeoplesDeps): Peoples {
   let densityPaths: Path2D[] = [];
   let densityPathsFor: unknown = null;
   let densityKey = "";
+  /** The population brush on a province (once a stroke): set its people of the chosen race. */
+  const paintAt = (x: number, y: number) => {
+    if (!painting || !ready()) return;
+    const s = sim!;
+    const e = env!;
+    const p = provAt(e, x, y);
+    if (p < 0 || painting.has(p)) return;
+    painting.add(p);
+    if (e.prov.kind[p] !== 0) return;
+    // Whose people: the nearest clan of the race (by its towns and tribes), or the selected one's.
+    let clan = -1;
+    if (addPeopleClan === 'selected') clan = s.tribes.find((t) => t.id === selected)?.clan ?? s.settlements.find((q) => q.id === selected)?.clan ?? -1;
+    else {
+      let best = Infinity;
+      for (const q of [...s.settlements.filter((st) => !st.ruined), ...s.tribes]) {
+        if (q.race !== addRace) continue;
+        const dd = Math.hypot(q.x - x, q.y - y);
+        if (dd < best) [best, clan] = [dd, q.clan];
+      }
+    }
+    if (addPeople > 0 && clan < 0) {
+      painting.clear();
+      toast(addPeopleClan === 'selected' ? 'Select a tribe or town first: its clan’s people are the ones added.' : `Place a tribe or dawn city of the ${raceName(addRace)} first: the people added are its clan’s.`);
+      painting = null;
+      return;
+    }
+    if (populateProvince(s, e, lib(), addRace, p, addPeople, clan)) {
+      paintRev++;
+      landDirty = true;
+      d.redraw();
+    } else if (addPeople > 0 && !warned) {
+      warned = true;
+      toast(`The ${raceName(addRace)} can’t live in that province (its climate or ground is against them, per the Library).`);
+    }
+  };
+  let warned = false;
   let resImg: HTMLCanvasElement | null = null;
   let follow = true;
   let playing = false;
@@ -653,7 +694,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       const dShow = d.density?.() ?? 'off';
       const dpm = d.provinces();
       if (dShow !== 'off' && dpm && e.prov.real && e.prov.count === dpm.rings.length) {
-        const key = `${dShow}|${s.day}|${s.settlements.length}|${historyDay}`;
+        const key = `${dShow}|${s.day}|${s.settlements.length}|${historyDay}|${paintRev}`;
         if (key !== densityKey || !densityFills.length) {
           if (dShow === 'food') {
             // What each province's land can feed, fully farmed (people per square mile).
@@ -702,7 +743,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           g.restore();
         }
       } else if (dShow !== 'off' && s.density) {
-        const key = `${dShow}|${s.day}`;
+        const key = `${dShow}|${s.day}|${paintRev}`;
         if (key !== densityKey || !densityImg) {
           densityImg = drawDensity(s, e, dShow);
           densityKey = key;
@@ -1386,6 +1427,16 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           return false;
         }
       }
+      if (mode === 'add' && addWhat === 'people') {
+        if (!addRace) {
+          toast('Choose which race to add first.');
+          return true;
+        }
+        painting = new Set();
+        warned = false;
+        paintAt(x, y);
+        return true;
+      }
       if (mode === 'add' && !hit && !hitCity) {
         if (!addRace) {
           toast('Choose which race to add first.');
@@ -1430,12 +1481,25 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       return !!(hit || hitCity);
     },
     drag(x, y) {
+      if (painting) {
+        paintAt(x, y);
+        return;
+      }
       const m = dragging ?? draggingCity;
       if (!m) return;
       m.x = x;
       m.y = y;
     },
     up(x, y) {
+      if (painting) {
+        const n = painting.size;
+        painting = null;
+        if (n) {
+          d.changed();
+          render();
+        }
+        return;
+      }
       if (draggingCity && ready()) {
         const st = draggingCity;
         draggingCity = null;
@@ -2330,12 +2394,19 @@ export function createPeoples(d: PeoplesDeps): Peoples {
         choice<'select' | 'add'>('Map tool', [{ value: 'select', label: 'Select & move' }, { value: 'add', label: 'Add' }], mode, (v) => { mode = v; render(); }),
         mode === 'add'
           ? h('div', { class: 'group' },
-              choice<'tribe' | 'dawn'>('What', [{ value: 'tribe', label: 'A tribe' }, { value: 'dawn', label: 'The dawn city' }], addWhat, (v) => { addWhat = v; render(); }),
+              choice<'tribe' | 'dawn' | 'people'>('What', [{ value: 'tribe', label: 'A tribe' }, { value: 'dawn', label: 'The dawn city' }, { value: 'people', label: 'People in provinces' }], addWhat, (v) => { addWhat = v; render(); }),
               h('div', { class: 'field' }, h('label', {}, 'Race'), h('select', { onchange: (e: Event) => { addRace = (e.target as HTMLSelectElement).value; } }, ...ok.map((o) => h('option', { value: o.race.id, selected: o.race.id === addRace }, raceName(o.race.id))))),
               addWhat === 'tribe'
                 ? choice<'new' | 'selected'>('Clan', [{ value: 'new', label: 'A new clan' }, { value: 'selected', label: 'The selected tribe’s clan', disabled: selected === null }], addClan, (v) => { addClan = v; })
                 : null,
-              h('p', { class: 'muted small' }, addWhat === 'dawn' ? 'Click the map to set the race’s dawn city there (each race has one: if it has one already, it moves).' : 'Click the map to place a tribe there.'),
+              addWhat === 'people'
+                ? h('div', {},
+                    h('div', { class: 'field' }, h('label', {}, 'People per province'), h('select', { onchange: (e: Event) => { addPeople = Number((e.target as HTMLSelectElement).value); render(); } }, ...[0, 100, 250, 500, 1000, 2500, 5000, 10000, 25000].map((v) => h('option', { value: String(v), selected: v === addPeople }, v ? v.toLocaleString() : 'None (clear)')))),
+                    numberField({ label: 'Or exactly', value: addPeople, min: 0, max: 100000, step: 50, change: (v) => { addPeople = Math.max(0, Math.min(100000, Math.round(v))); } }),
+                    choice<'nearest' | 'selected'>('Whose people', [{ value: 'nearest', label: 'The nearest clan of the race' }, { value: 'selected', label: 'The selected one’s clan', disabled: selected === null }], addPeopleClan, (v) => { addPeopleClan = v; }),
+                  )
+                : null,
+              h('p', { class: 'muted small' }, addWhat === 'dawn' ? 'Click the map to set the race’s dawn city there (each race has one: if it has one already, it moves).' : addWhat === 'people' ? 'Click a province, or drag across several, to give each that many of the race living in its countryside (it replaces the race’s people already there; None clears them). They are the clan’s people, of its culture and faith, and the clan takes any province no one holds. A farming clan’s people fill the land up to what its farms feed; others live off the wild, which feeds far fewer, so the rest die back. Show the population heat map (View) to see them.' : 'Click the map to place a tribe there.'),
             )
           : h('p', { class: 'muted small' }, 'Click a tribe or dawn city to see it; drag it to move it (a tribe’s summer and winter grounds move with it).'),
       );
