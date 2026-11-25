@@ -35,7 +35,7 @@ const town = (id: number, x: number, y: number, pop: number, techs: string[] = [
 const cctx = (sim: SimState, farms: FarmLayer): CatchmentContext => ({ sim, env, farms, provAt: (x, y) => provAt(env, x, y), cellOf: (x, y) => landCell(env, x, y), eats: (st) => st.pop, knows: (st, id) => (st.techs ?? []).includes(id), dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by) });
 const layer = (surplus: (p: number) => number): FarmLayer => {
   const n = env.prov.count;
-  return { farm: new Float32Array(env.n), farmed: new Uint8Array(env.n), food: new Float32Array(n), rural: new Float32Array(n), labour: new Float32Array(n).fill(1), surplus: Float32Array.from({ length: n }, (_, p) => surplus(p)), ate: new Float32Array(n) };
+  return { farm: new Float32Array(env.n), farmed: new Uint8Array(env.n), food: new Float32Array(n), rural: new Float32Array(n), labour: new Float32Array(n).fill(1), surplus: Float32Array.from({ length: n }, (_, p) => surplus(p)), ate: new Float32Array(n), herds: new Float32Array(n) };
 };
 /** A river point near an x (km): the river is drawn on whichever grid row it falls nearest. */
 const onRiver = (x: number) => {

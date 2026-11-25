@@ -29,7 +29,7 @@ import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { traitsYear } from './traits';
 import { addFarmFood, farmLayer, farmYear, isFarmed, sitesYear, type RuralContext, type VillageSite } from './rural';
-import { CITY, MARKET, tierOf, tiersYear, TOWN_FIELDS_KM } from './tiers';
+import { CITY, MARKET, TIERS, tierOf, tiersYear, TOWN_FIELDS_KM } from './tiers';
 import { catchmentYear, deliverMonth, drawsFood, farmShareOf, RENT, TO_TOWN } from './catchment';
 import { CULTURE_TICK, cultureTick } from './culturetick';
 import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
@@ -1100,7 +1100,7 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
       const near = mine.length
         ? () => [...new Set([st, ...mine].flatMap((q) => cellsNear(env, q.x, q.y, R)))]
         : (x: number, y: number, r: number) => cellsNear(env, x, y, r);
-      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: townFx(sim, st), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, landCell(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(drawsFood(st) && tierOf(st) >= MARKET && !st.besieged ? { fieldKm: TOWN_FIELDS_KM, farmShare: farmShareOf(st, st.pop * ri.need) } : {}), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
+      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: townFx(sim, st), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, landCell(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(drawsFood(st) && tierOf(st) >= MARKET && !st.besieged ? { fieldKm: TIERS[tierOf(st)].footprint + TOWN_FIELDS_KM, fieldEdge: TIERS[tierOf(st)].footprint, farmShare: farmShareOf(st, st.pop * ri.need) } : {}), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
     }
     // On another layer: less from the land below, and what the layer itself grows (layers.ts).
     if (st.layer && !town) {

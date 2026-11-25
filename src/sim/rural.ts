@@ -2,7 +2,7 @@ import type { Library } from '../core/library';
 import type { Env } from './env';
 import { arableAt, fertilityAt, foodTechFrom, provinceFood, provinceLand, type FoodTech } from './food';
 import type { Clan, Settlement, SimState } from './state';
-import { TIERS, tierOf } from './tiers';
+import { INNER_RING_KM, INNER_RING_SPACING, INNER_RING_YIELD, MARKET, ringOf, TIERS, tierOf } from './tiers';
 
 /**
  * Rural people and village sites (REDESIGN.md, "Settlements and population", step 2).
@@ -62,6 +62,8 @@ export interface FarmLayer {
   labour: Float32Array;
   /** By province: what its rural people living there now grow for themselves (rations a year): what rent is taken from, beside the surplus. */
   ate: Float32Array;
+  /** By province: the share of its food from herds (what can walk to a market from further off, catchment.ts). */
+  herds: Float32Array;
 }
 
 export interface RuralContext {
@@ -92,6 +94,7 @@ export function farmYear(c: RuralContext): FarmLayer {
   const labour = new Float32Array(P.count);
   const townsEat = new Float32Array(P.count);
   const ate = new Float32Array(P.count);
+  const herds = new Float32Array(P.count);
   // The rural people living in each province now (the farmers whose surplus towns draw on).
   const ruralNow = new Float32Array(P.count);
   for (const D of Object.values(sim.density ?? {})) for (let k = 0; k < D.length; k++) if (D[k] > 0 && P.of[k] >= 0) ruralNow[P.of[k]] += D[k];
@@ -109,8 +112,10 @@ export function farmYear(c: RuralContext): FarmLayer {
     let t = techOf.get(clan.id);
     if (!t) techOf.set(clan.id, (t = foodTechFrom((id) => c.knows(clan, id))));
     if (!t.agriculture) continue;
-    const f = provinceFood(land[p], t).total;
+    const pf = provinceFood(land[p], t);
+    const f = pf.total;
     food[p] = f;
+    herds[p] = f > 0 ? pf.herds / f : 0;
     // Its land employs as many as it takes to grow its food (each growing their own and their surplus):
     // the rural people can be no more; what the land grows beyond what they eat is its surplus.
     labour[p] = workersFor(f, t);
@@ -138,7 +143,7 @@ export function farmYear(c: RuralContext): FarmLayer {
       farm[k] = (rural[p] * wt[i]) / sum / 12;
     }
   }
-  const layer = { farm, farmed, food, rural, surplus, labour, ate };
+  const layer = { farm, farmed, food, rural, surplus, labour, ate, herds };
   layers.set(sim, layer);
   return layer;
 }
@@ -209,6 +214,9 @@ export function sitesYear(c: RuralContext): void {
   const people = new Float32Array(P.count);
   for (const D of Object.values(sim.density ?? {})) for (let k = 0; k < D.length; k++) if (D[k] > 0 && P.of[k] >= 0) people[P.of[k]] += D[k];
   const towns = sim.settlements.filter((s) => !s.ruined && !s.layer);
+  // Market towns and bigger have rings round them (tiers.ts): hamlets packed close in the first.
+  const markets = towns.filter((t) => tierOf(t) >= MARKET);
+  const inner = (x: number, y: number) => markets.some((t) => ringOf(t, x, y) === 1);
   for (let p = 0; p < P.count; p++) {
     const key = String(P.ids[p]);
     const farmedHere = (layer?.rural[p] ?? 0) > 0;
@@ -225,8 +233,11 @@ export function sitesYear(c: RuralContext): void {
     const want = Math.min(SITE_MAX, Math.max(1, Math.floor(R / VILLAGE_POP + 1e-6)));
     const area = Math.max(1, P.area[p]);
     const spacing = villageSpacing(land[p].arableHa / 100 / area);
-    const tooNear = (x: number, y: number) =>
-      sites.some((s) => Math.hypot(s.x - x, s.y - y) < spacing) || towns.some((t) => Math.hypot(t.x - x, t.y - y) < Math.max(TIERS[tierOf(t)].footprint, FOOTPRINT_KM, spacing * 0.5));
+    // Close round a town the hamlets pack tighter; anywhere outside a market town's footprint will do.
+    const tooNear = (x: number, y: number) => {
+      const gap = inner(x, y) ? Math.min(spacing, INNER_RING_SPACING) : spacing;
+      return sites.some((s) => Math.hypot(s.x - x, s.y - y) < gap) || towns.some((t) => Math.hypot(t.x - x, t.y - y) < (tierOf(t) >= MARKET ? TIERS[tierOf(t)].footprint + 0.3 : Math.max(TIERS[tierOf(t)].footprint, FOOTPRINT_KM, spacing * 0.5)));
+    };
     // New sites at the best free spots.
     if (sites.length < want) {
       const country = sim.country?.[key] ?? [];
@@ -250,10 +261,28 @@ export function sitesYear(c: RuralContext): void {
           cand.push({ x, y, v: siteDraw(sim, env, kk) * (0.9 + 0.2 * hash(k, t, 7)) });
         }
       }
+      // Spots in the inner ring round its towns (closer than its points lie apart).
+      for (const t of markets) {
+        const fp = TIERS[tierOf(t)].footprint;
+        if (Math.hypot(t.x - P.x[p], t.y - P.y[p]) > Math.sqrt(area) + fp + INNER_RING_KM + env.step) continue;
+        for (const d of [0.6, 1.4, 2.2]) for (let a = 0; a < 8; a++) {
+          const ang = ((a + d) / 8) * Math.PI * 2;
+          const x = t.x + Math.cos(ang) * (fp + d);
+          const y = t.y + Math.sin(ang) * (fp + d);
+          const kk = cellAt(env, x, y);
+          if (kk < 0 || !env.land[kk] || P.of[kk] !== p) continue;
+          cand.push({ x, y, v: siteDraw(sim, env, kk) * INNER_RING_YIELD * (0.9 + 0.2 * hash(t.id, a, Math.round(d * 10))) });
+        }
+      }
       cand.sort((a, b) => b.v - a.v);
+      // No more than half its villages in the inner rings: most stay out among the grain fields.
+      let innerN = sites.filter((q) => inner(q.x, q.y)).length;
       for (const s of cand) {
         if (sites.length >= want) break;
         if (tooNear(s.x, s.y)) continue;
+        const isInner = inner(s.x, s.y);
+        if (isInner && innerN >= Math.max(1, Math.floor(want / 2))) continue;
+        if (isInner) innerN++;
         sites.push({ id: sim.nextId++, name: c.name(culture), x: s.x, y: s.y, pop: 0, founded: sim.day, culture });
       }
     } else if (sites.length > want + 1) {
@@ -263,7 +292,8 @@ export function sitesYear(c: RuralContext): void {
     }
     // The villagers shared out by each site's draw (the rest scattered hamlets and farms).
     const villagers = Math.min(R, sites.length * VILLAGE_POP);
-    const draws = sites.map((s) => siteDraw(sim, env, cellAt(env, s.x, s.y)));
+    // (The inner ring's land feeds more: its hamlets draw half as much again.)
+    const draws = sites.map((s) => siteDraw(sim, env, cellAt(env, s.x, s.y)) * (inner(s.x, s.y) ? INNER_RING_YIELD : 1));
     const sum = draws.reduce((a, b) => a + b, 0) || 1;
     sites.forEach((s, i) => {
       const target = (villagers * draws[i]) / sum;

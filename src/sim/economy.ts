@@ -4,6 +4,7 @@ import { canWork, techEffects } from './tech';
 import { markThinned } from './thinned';
 import type { CultureFx } from './culture';
 import { arableAt, fertilityAt, foodTechFrom, netYield } from './food';
+import { INNER_RING_KM, INNER_RING_YIELD } from './tiers';
 
 /**
  * A settlement's economy (REDESIGN.md 8.4h, Phase 7 step 1), counted in units: one unit of a food
@@ -154,7 +155,16 @@ export interface MonthContext {
    * Not given: all its reach, and up to nearly all its workers (a village, a camp).
    */
   fieldKm?: number;
+  /** Where its fields begin (km from its middle: its footprint); the first rings of them are worked hardest (REDESIGN.md, step 5). */
+  fieldEdge?: number;
   farmShare?: number;
+}
+
+/** A town's fields (the inner ring worked hardest, tiers.ts) from its edge out to a distance from its middle, in km² of ordinary farmland (the inner ring counted at its yield). */
+export function fieldRings(edge: number, outer: number): number {
+  const disc = (r: number) => Math.PI * r * r;
+  const inner = Math.min(outer, edge + INNER_RING_KM);
+  return Math.max(0, disc(inner) - disc(edge)) * INNER_RING_YIELD + Math.max(0, disc(outer) - disc(inner));
 }
 
 /** The farmland close round a town (its own fields): its arable share and fertility (plain and watered), from the points there. */
@@ -237,7 +247,8 @@ export function economyMonth(c: MonthContext): number {
   if (fk < 1 && crop.id && yearGrowth > 0) {
     const fl = fieldLand(env, st, c.fieldKm!, c.cellsNear);
     const ft = foodTechFrom(c.has);
-    const rations = Math.PI * c.fieldKm! * c.fieldKm! * 100 * fl.arable * netYield(ft.irrigation && R.river ? fl.wet : fl.fert, ft);
+    const perKm2 = 100 * fl.arable * netYield(ft.irrigation && R.river ? fl.wet : fl.fert, ft);
+    const rations = perKm2 * fieldRings(c.fieldEdge ?? 0, c.fieldKm!);
     fieldCap = rations / Math.max(1e-6, FARM * crop.v * yearGrowth);
   }
   if (crop.id && yearGrowth > 0) jobs.push({ key: `farm:${crop.id}`, y: FARM * crop.v * yearGrowth, cap: Math.max(10, fieldCap) });

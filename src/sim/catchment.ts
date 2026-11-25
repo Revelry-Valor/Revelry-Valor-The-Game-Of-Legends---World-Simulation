@@ -3,7 +3,7 @@ import { cropYear, isFood, PROVISIONS } from './economy';
 import type { FarmLayer } from './rural';
 import { baseWorth, spareAll } from './trade';
 import type { Settlement, SimState } from './state';
-import { FARM_SHARE, MARKET, tierOf } from './tiers';
+import { FARM_SHARE, GRAZING_KM, MARKET, tierOf } from './tiers';
 
 /**
  * Catchments and food competition (REDESIGN.md, "Settlements and population", step 4), yearly.
@@ -11,7 +11,8 @@ import { FARM_SHARE, MARKET, tierOf } from './tiers';
  * Every town (a market town or bigger, or a dawn city) draws food from the surplus of the farmed
  * provinces it can reach (rural.ts: what their land grows beyond what its working farmers, herders
  * and fishers eat). How far it reaches depends on transport:
- * - over land, about 15 km past a province's edge (its own province, and one it stands at the edge of);
+ * - over land, about 15 km past a province's edge (its own province, and those it stands near); and
+ *   from the grazing ring, 15–30 km off, only the herds, driven in on the hoof;
  * - by river (with rafts and canoes), from a town on a river along the river provinces it runs
  *   through, up to 150 km, at a seventh of the cost of hauling by land;
  * - by sea (with sailing), from a coastal town to coastal provinces up to 600 km off (1,200 with
@@ -60,7 +61,7 @@ const HEADROOM = 1.1;
 /** Share of the country people its land can't employ who move to a town each year. */
 export const TO_TOWN = 0.2;
 
-export type Mode = 'land' | 'river' | 'sea' | 'rent';
+export type Mode = 'land' | 'river' | 'sea' | 'rent' | 'herd';
 export interface Imports {
   /** Rations a year drawn, and from where (province id, rations, how). */
   rations: number;
@@ -143,12 +144,23 @@ export function reachOf(c: CatchmentContext, st: Settlement): Map<number, { e: n
   const p0 = c.provAt(st.x, st.y);
   if (p0 < 0) return out;
   const radius = (p: number) => Math.sqrt(P.area[p] / Math.PI);
-  // Over land.
+  // Over land: grain from about 15 km; herds walk in from up to 30 (the grazing ring, tiers.ts).
   put(p0, 0, 'land');
-  for (let i = P.nbStart[p0]; i < P.nbStart[p0 + 1]; i++) {
-    const q = P.nb[i];
-    const past = c.dist(st.x, st.y, P.x[q], P.y[q]) - radius(q);
-    if (past <= LAND_KM) put(q, Math.max(0, past), 'land');
+  const seen = new Set([p0]);
+  let front = [p0];
+  for (let step = 0; step < 3 && front.length; step++) {
+    const next: number[] = [];
+    for (const p of front) for (let i = P.nbStart[p]; i < P.nbStart[p + 1]; i++) {
+      const q = P.nb[i];
+      if (seen.has(q) || P.kind[q] !== 0) continue;
+      seen.add(q);
+      const past = Math.max(0, c.dist(st.x, st.y, P.x[q], P.y[q]) - radius(q));
+      if (past <= LAND_KM) put(q, past, 'land');
+      else if (past <= GRAZING_KM) put(q, past, 'herd');
+      else continue;
+      next.push(q);
+    }
+    front = next;
   }
   const k = c.cellOf(st.x, st.y);
   // On the river: any of its points river, or right beside one (a river is marked only every few points).
@@ -258,7 +270,7 @@ export function catchmentYear(c: CatchmentContext): void {
     }
   }
   // A town on the water deals in grain: it buys more, to sell on (trade.ts).
-  for (const st of towns) if ([...reach.get(st)!.values()].some((r) => r.mode !== 'land')) {
+  for (const st of towns) if ([...reach.get(st)!.values()].some((r) => r.mode === 'river' || r.mode === 'sea')) {
     want.set(st, want.get(st)! + c.eats(st) * DEAL);
     got.get(st)!.deal = true;
   }
@@ -274,18 +286,22 @@ export function catchmentYear(c: CatchmentContext): void {
   }
   for (const [p, list] of [...byProv].sort((a, b) => a[1].length - b[1].length)) {
     let rest = left[p];
-    let open = list.filter((q) => want.get(q.st)! > 0.5);
+    // From the grazing ring only its herds come (on the hoof).
+    let herdRest = rest * (farms.herds?.[p] ?? 0);
+    let open = list.filter((q) => want.get(q.st)! > 0.5 && (q.mode !== 'herd' || herdRest > 0.5));
     for (let pass = 0; pass < 4 && rest > 0.5 && open.length; pass++) {
       const W = open.reduce((n, q) => n + q.w, 0);
       let given = 0;
       for (const q of open) {
-        const take = Math.min(want.get(q.st)!, (rest * q.w) / W);
+        let take = Math.min(want.get(q.st)!, (rest * q.w) / W);
+        if (q.mode === 'herd') take = Math.min(take, herdRest);
         if (take <= 0) continue;
         give(q.st, p, take, q.mode);
+        if (q.mode === 'herd') herdRest -= take;
         given += take;
       }
       rest -= given;
-      open = open.filter((q) => want.get(q.st)! > 0.5);
+      open = open.filter((q) => want.get(q.st)! > 0.5 && (q.mode !== 'herd' || herdRest > 0.5));
     }
   }
   const round = (im: Imports): Imports => ({ ...im, rations: Math.round(im.rations), rent: Math.round(im.rent ?? 0), market: Math.round(im.market ?? 0), from: im.from.map(([id, n, m]) => [id, Math.round(n), m] as [number, number, Mode]).filter((f) => f[1] > 0).sort((a, b) => b[1] - a[1]) });

@@ -44,7 +44,29 @@ export const MARKET = 2;
  * what the countryside sells them or owes their lords (catchment.ts).
  */
 export const FARM_SHARE = [0.95, 0.9, 0.4, 0.2, 0.08, 0.03];
-/** A town's own fields: how far round it its farmers walk out to work (km). */
+/**
+ * Rings round a town (REDESIGN.md, "Settlements and population", step 5; von Thünen), measured from
+ * its edge (its footprint): the land nearest it is worth most, so it is farmed hardest.
+ * - Ring 1, the first 3 km: gardens, dairy, orchards and the town's dung on the fields: half as much
+ *   again from the land, and hamlets packed close (one every 1–1.5 km).
+ * - Ring 2, 3–6 km: woodland for fuel and timber (not kept apart yet).
+ * - Ring 3, 6–15 km: the grain fields that feed it (its market's reach, catchment.ts), villages at
+ *   the land's own spacing.
+ * - Ring 4, 15–30 km: grazing; herds walk to its market from there (catchment.ts), and beyond it
+ *   food comes only by water.
+ */
+export const INNER_RING_KM = 3;
+export const INNER_RING_YIELD = 1.5;
+/** Hamlets in the inner ring keep this far apart (km). */
+export const INNER_RING_SPACING = 1.25;
+/** Herds walk to a town's market from up to this far past its edge (km). */
+export const GRAZING_KM = 30;
+/** Where a point stands among a town's rings: 1–4 (0 inside its footprint, 5 beyond). */
+export function ringOf(st: Settlement, x: number, y: number, dist: (ax: number, ay: number, bx: number, by: number) => number = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by)): number {
+  const d = dist(st.x, st.y, x, y) - TIERS[tierOf(st)].footprint;
+  return d < 0 ? 0 : d < INNER_RING_KM ? 1 : d < 6 ? 2 : d < 15 ? 3 : d < GRAZING_KM ? 4 : 5;
+}
+/** A town's own fields: how far past its edge its farmers walk out to work (km). */
 export const TOWN_FIELDS_KM = 5;
 export const CITY = 4;
 /** Drops a tier below this share of what it needed to rise. */
