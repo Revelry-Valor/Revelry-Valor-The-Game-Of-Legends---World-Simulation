@@ -1,4 +1,5 @@
-import { ALT, COLD, DRY, HEAT, levelNeeded, WET, type Wants } from './attraction';
+import { harshness } from '../core/habitat';
+import { ALT, COLD, DRY, HEAT, levelNeeded, placeAt, WET, type Wants } from './attraction';
 import type { Env } from './env';
 import type { LiveCulture, SimState } from './state';
 
@@ -65,8 +66,8 @@ export function adaptYear(c: AdaptContext): void {
       let past = 0;
       let by = 0;
       for (const g of groups) {
-        const need = levelsNeeded(c.env, g.k)[key];
-        const over = need - g.wants.tolerances[key];
+        // Past its survivable limit: drawn ranges (core/habitat.ts), else its tolerance levels.
+        const over = g.wants.ranges ? harshness(g.wants.ranges, placeAt(c.env, g.k)).over[key] : levelsNeeded(c.env, g.k)[key] - (g.wants.tolerances?.[key] ?? 3);
         if (over > 0.05) {
           past += g.pop;
           by += over * g.pop;

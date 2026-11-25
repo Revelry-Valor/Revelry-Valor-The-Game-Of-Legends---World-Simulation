@@ -1,5 +1,6 @@
 import { COVER_BRUSHES } from '../core/paint';
-import { raceMissing, type Library, type Race, type Species } from '../core/library';
+import { fromTolerances, RANGE_KEYS, widen, type Ranges, type Tolerances, type TolKey } from '../core/habitat';
+import { raceMissing, type Library, type Profile, type Race, type Species } from '../core/library';
 import { hordesDay, monstersMonth } from './monsters';
 import { holdLayersYear } from './layerprovs';
 import { canLiveTogether, densityMonth, densityOf, seedDensity, type DensityRace } from './density';
@@ -93,6 +94,18 @@ export function eligibleRaces(lib: Library): { species: Species; race: Race }[] 
   return lib.species.filter((s) => !s.setAside).flatMap((s) => s.races.filter((r) => !raceMissing(r).length).map((race) => ({ species: s, race })));
 }
 
+/**
+ * Children an average family raises to grow up (the Library's Life section; by its size where not
+ * set, or from an older library's young per birth and years between births). A people's births a
+ * year are its deaths a year times this over 2: 2 just keeps its numbers, more grows them.
+ */
+export function childrenPerFamily(p: Profile, size: Race['size'], lifespan: number): number {
+  if (p.children !== null && p.children !== undefined && p.children >= 0) return p.children;
+  const O = p.offspring ?? (size === 'Tiny' ? 3 : size === 'Small' ? 2 : 1);
+  const Y = p.birthEveryYears ?? Math.max(1, Math.min(40, lifespan / 25));
+  return Y > 0 ? (0.128 * O * 0.8 * lifespan) / Y : 0;
+}
+
 export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures: LiveCulture[] = []): RaceInfo | null {
   for (const species of lib.species) {
     const race = species.races.find((r) => r.id === raceId);
@@ -102,8 +115,7 @@ export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures:
     const A = race.fightingAge ?? 16;
     const p = species.profile;
     const traits = new Set([...species.traits.filter((t) => !race.removeTraits.includes(t)), ...race.addTraits]);
-    const O = p.offspring ?? (race.size === 'Tiny' ? 3 : race.size === 'Small' ? 2 : 1);
-    const Y = p.birthEveryYears ?? Math.max(1, Math.min(40, L / 25));
+    const C = childrenPerFamily(p, race.size, L);
     const culture = cultures.find((c) => c.id === cultureId) ?? lib.cultures.find((c) => c.id === cultureId);
     const martial = culture?.martial ? MARTIAL_SHARE[culture.martial] ?? 0.5 : 0.5;
     const adultShare = Math.max(0.2, Math.min(0.65, (0.6 * L - A) / (0.8 * L)));
@@ -115,7 +127,7 @@ export function raceInfo(lib: Library, raceId: string, cultureId = '', cultures:
       need: SIZE_NEED[race.size ?? 'Medium'] ?? 1,
       speed: 15 * (speed / 30),
       range: 22 * Math.sqrt(Math.max(10, speed) / 30),
-      births: (0.128 * O) / Y * (traits.has('fertile') ? 1.4 : 1),
+      births: (C / (0.8 * L)) * (traits.has('fertile') ? 1.4 : 1),
       deaths: 1 / (0.4 * L),
       warShare: adultShare * martial,
       workShare: Math.max(0.3, Math.min(0.7, adultShare * 1.2)),
@@ -378,13 +390,26 @@ export function addTribe(sim: SimState, env: Env, lib: Library, raceId: string, 
  * water need and priorities (the Library's race options), else its species', with its traits'
  * effects on the tolerances (Cold-adapted, Heat-adapted…); unset tolerances are the middle, 3.
  */
-export function wantsOf(env: Env, ri: RaceInfo): Wants {
+export function wantsOf(env: Env, ri: RaceInfo): Wants & { tolerances: Tolerances } {
   const p = ri.species.profile;
   const own = ri.race.living;
   // The race's (or species') tolerance, its traits', and what its culture's people have gained in hard country.
   const tol = (key: 'heat' | 'cold' | 'wet' | 'dry' | 'altitude', label: string) => Math.max(1, Math.min(7, Math.min(5, (own?.[key] ?? p[key] ?? 3) + ri.traitEffect(label)) + (ri.adapt?.[key] ?? 0)));
+  const tolerances = { heat: tol('heat', 'Heat tolerance'), cold: tol('cold', 'Cold tolerance'), wet: tol('wet', 'Wet tolerance'), dry: tol('dry', 'Dry tolerance'), altitude: tol('altitude', 'Altitude tolerance') };
+  // Ranges drawn on the habitat sliders (the race's, else its species'), widened by its traits and
+  // what its culture has gained; what isn't drawn comes from the tolerances, as before.
+  const drawn = RANGE_KEYS.filter((k) => own?.ranges?.[k] ?? p.ranges?.[k]);
+  let ranges: Ranges | undefined;
+  if (drawn.length) {
+    const from = fromTolerances(tolerances);
+    const base = Object.fromEntries(RANGE_KEYS.map((k) => [k, own?.ranges?.[k] ?? p.ranges?.[k] ?? from[k]])) as unknown as Ranges;
+    const lv = (key: TolKey, label: string) => (ri.traitEffect(label) + (ri.adapt?.[key] ?? 0));
+    const wide = widen(base, { heat: lv('heat', 'Heat tolerance'), cold: lv('cold', 'Cold tolerance'), wet: lv('wet', 'Wet tolerance'), dry: lv('dry', 'Dry tolerance'), altitude: lv('altitude', 'Altitude tolerance') });
+    ranges = Object.fromEntries(RANGE_KEYS.map((k) => [k, drawn.includes(k) ? wide[k] : from[k]])) as unknown as Ranges;
+  }
   return {
-    tolerances: { heat: tol('heat', 'Heat tolerance'), cold: tol('cold', 'Cold tolerance'), wet: tol('wet', 'Wet tolerance'), dry: tol('dry', 'Dry tolerance'), altitude: tol('altitude', 'Altitude tolerance') },
+    tolerances,
+    ...(ranges ? { ranges, drawn: true } : {}),
     climates: ri.race.climates.length ? ri.race.climates : p.climates,
     covers: own?.covers.length ? own.covers : p.covers,
     heights: own?.heights.length ? own.heights : p.mountainZones,

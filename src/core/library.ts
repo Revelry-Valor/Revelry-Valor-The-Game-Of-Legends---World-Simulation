@@ -1,3 +1,4 @@
+import { readRanges, type Ranges } from './habitat';
 /**
  * The library (REDESIGN.md, 8.2–8.3 and SPECIES.md): the data the simulation reads, made in the
  * creators: traits, resources, sentient species and their races, and beasts. One shared library
@@ -124,6 +125,12 @@ export interface Profile {
   naturalWeapons: string;
   movement: string[];
   adulthood: number | null;
+  /**
+   * Children an average family raises to grow up (2 just replaces the parents; 2.5 grows slowly;
+   * 5 or more grows fast). Null: by its size.
+   */
+  children: number | null;
+  /** (Older libraries: young per birth, and years between births; read when children isn't set.) */
   offspring: number | null;
   birthEveryYears: number | null;
   diet: string;
@@ -140,6 +147,8 @@ export interface Profile {
   dry: number | null;
   altitude: number | null;
   layers: string[];
+  /** Where it can live, drawn on the habitat sliders (core/habitat.ts): what isn't drawn comes from the tolerances above. */
+  ranges: Partial<Ranges>;
   needs: string;
   attitude: string;
   /** Per-species exceptions to the general attitude, and who they can have children with. */
@@ -182,6 +191,8 @@ export interface RaceLiving {
   wet: number | null;
   dry: number | null;
   altitude: number | null;
+  /** Its own habitat ranges, drawn on the sliders (missing: as the species). */
+  ranges: Partial<Ranges>;
   /** Its own preferred ground covers and mountain zones (empty: as the species). */
   covers: string[];
   heights: number[];
@@ -195,7 +206,7 @@ export interface RaceLiving {
   always: string[];
 }
 
-export const emptyLiving = (): RaceLiving => ({ heat: null, cold: null, wet: null, dry: null, altitude: null, covers: [], heights: [], water: '', priorities: { food: 1, water: 1, resources: 1, trade: 1 }, adaptable: '', always: [] });
+export const emptyLiving = (): RaceLiving => ({ heat: null, cold: null, wet: null, dry: null, altitude: null, ranges: {}, covers: [], heights: [], water: '', priorities: { food: 1, water: 1, resources: 1, trade: 1 }, adaptable: '', always: [] });
 
 export function readLiving(v: unknown): RaceLiving {
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
@@ -208,6 +219,7 @@ export function readLiving(v: unknown): RaceLiving {
     wet: tol(o.wet),
     dry: tol(o.dry),
     altitude: tol(o.altitude),
+    ranges: readRanges(o.ranges),
     covers: Array.isArray(o.covers) ? o.covers.filter((x): x is string => typeof x === 'string') : [],
     heights: Array.isArray(o.heights) ? o.heights.filter((x): x is number => typeof x === 'number') : [],
     water: typeof o.water === 'string' && (WATER_NEEDS as readonly string[]).includes(o.water) ? o.water : '',
@@ -466,6 +478,7 @@ export const emptyProfile = (): Profile => ({
   naturalWeapons: '',
   movement: [],
   adulthood: null,
+  children: null,
   offspring: null,
   birthEveryYears: null,
   diet: '',
@@ -480,6 +493,7 @@ export const emptyProfile = (): Profile => ({
   dry: null,
   altitude: null,
   layers: [],
+  ranges: {},
   needs: '',
   attitude: '',
   attitudes: [],
@@ -556,7 +570,8 @@ function readProfile(v: unknown): Profile {
   for (const k of ['build', 'naturalWeapons', 'diet', 'dietSpecial', 'active', 'needs', 'attitude'] as const) p[k] = str(o[k]);
   for (const k of ['limbs', 'senses', 'movement', 'covers', 'layers'] as const) p[k] = strs(o[k]);
   for (const k of ['climates', 'mountainZones'] as const) p[k] = nums(o[k]);
-  for (const k of ['adulthood', 'offspring', 'birthEveryYears', 'heat', 'cold', 'wet', 'dry', 'altitude'] as const) p[k] = num(o[k]);
+  for (const k of ['adulthood', 'children', 'offspring', 'birthEveryYears', 'heat', 'cold', 'wet', 'dry', 'altitude'] as const) p[k] = num(o[k]);
+  p.ranges = readRanges(o.ranges);
   p.attitudes = arr(o.attitudes, (x) => (x && typeof x === 'object' ? { species: str((x as Record<string, unknown>).species), attitude: str((x as Record<string, unknown>).attitude) } : null));
   p.interbreeds = arr(o.interbreeds, (x) => (x && typeof x === 'object' ? { species: str((x as Record<string, unknown>).species), result: str((x as Record<string, unknown>).result) } : null));
   return p;

@@ -450,3 +450,21 @@ button.link { background: none; border: none; padding: 0 0.3rem 0 0; color: var(
   .timeline-body { flex-direction: column; }
   .timeline-side { width: auto; max-height: 30%; }
 }
+.hover-help { position: fixed; z-index: 1100; max-width: min(22rem, calc(100vw - 16px)); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,0.22); padding: 0.5rem 0.7rem; font-size: 0.85rem; line-height: 1.4; pointer-events: none; }
+.hover-help strong { display: block; margin-bottom: 0.15rem; }
+.hover-help div { color: var(--ink); }
+.range4 { margin: 0.4rem 0 0.6rem; }
+.range4-track { position: relative; height: 1.6rem; margin: 0.4rem 0.6rem 0; border-radius: 0.8rem; background: color-mix(in srgb, #b8493a 22%, var(--panel)); touch-action: none; }
+.range4-track.derived { opacity: 0.6; }
+.range4-band { position: absolute; top: 0; bottom: 0; border-radius: 0.8rem; }
+.range4-band.survive { background: color-mix(in srgb, #d9a33a 45%, var(--panel)); }
+.range4-band.comfort { top: 0.3rem; bottom: 0.3rem; background: color-mix(in srgb, #4f9a52 70%, var(--panel)); }
+.range4-dot { position: absolute; top: 50%; width: 1.1rem; height: 1.1rem; margin: -0.55rem 0 0 -0.55rem; padding: 0; min-height: 0; border-radius: 50%; border: 2px solid var(--ink); background: var(--panel); cursor: ew-resize; touch-action: none; }
+.range4-dot.inner { z-index: 2; width: 0.8rem; height: 0.8rem; margin: -0.4rem 0 0 -0.4rem; background: #4f9a52; border-width: 1.5px; }
+.range4-dot.outer { z-index: 1; width: 1.45rem; height: 1.45rem; margin: -0.725rem 0 0 -0.725rem; background: color-mix(in srgb, #d9a33a 35%, transparent); border: 3px solid #b9821f; }
+.range4-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.range4-marks { position: relative; height: 2.4rem; margin: 0.15rem 0.6rem 0; font-size: 0.68rem; color: var(--muted, #776c5a); }
+.range4-marks span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.range4-marks span:nth-child(even) { top: 1.1rem; }
+.range4-marks span:first-child { transform: none; }
+.range4-marks span:last-child { transform: translateX(-100%); }

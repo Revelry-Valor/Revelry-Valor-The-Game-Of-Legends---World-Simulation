@@ -7,6 +7,7 @@ import { autoSkyCover, driftPerYear, skyClimate } from '../core/skyclimate';
 import { shapeOf, underdarkAt, underStrokes, waysDown } from '../core/underdark';
 import type { Settlement, SimState } from './state';
 import { rockSites, type LayerProvs } from './layerprovs';
+import { skyPos, type Range4 } from '../core/habitat';
 
 /**
  * The peoples on every layer (Phase 12 step 4). A town on another layer stands at a place on the
@@ -152,6 +153,8 @@ export interface LayerWays {
   sky: boolean;
   /** Sees in the dark (at home below). */
   dark: boolean;
+  /** Its altitude range, where drawn on the habitat sliders: which sky layers it lives on comfortably, which it bears, and which are beyond it. */
+  alt?: Range4;
 }
 export function layerWays(lib: Library, species: Species, race: Race): LayerWays {
   const ids = new Set([...species.traits.filter((t) => !race.removeTraits.includes(t)), ...race.addTraits]);
@@ -161,12 +164,15 @@ export function layerWays(lib: Library, species: Species, race: Race): LayerWays
   const prefers = (l: string) => (p.layers ?? []).includes(l);
   const moves = (m: string) => (p.movement ?? []).includes(m);
   const digs = fx.has('Digs tunnels') || moves('Digs');
+  const alt = race.living?.ranges?.alt ?? p.ranges?.alt;
   return {
     digs,
     under: prefers('Underdark') || digs,
     trees: prefers('Trees') || fx.has('Lives in trees') || moves('Tree-dwelling'),
-    sky: prefers('Sky') || fx.has('Flies between layers'),
+    // At home in the sky: by its ways, or comfortable as high as the first sky layer.
+    sky: prefers('Sky') || fx.has('Flies between layers') || (!!alt && alt.hi >= skyPos(1)),
     dark: fx.has('Sees in the dark') || prefers('Underdark'),
+    ...(alt ? { alt } : {}),
   };
 }
 
@@ -261,7 +267,15 @@ export function layerSpot(c: LayerContext, st: Settlement, ri: { flies: boolean;
       }
       if (!reach) continue;
       const cold = isl.summerT < 5 ? 0.6 : isl.summerT < 10 ? 0.25 : 0;
-      const pref = lw.sky ? 0.6 : ri.flies ? 0.3 : -0.1;
+      let pref = lw.sky ? 0.6 : ri.flies ? 0.3 : -0.1;
+      // Its altitude range (where drawn): a sky layer past what it survives it won't settle; one
+      // between its comfort and its limit it settles less gladly; within its comfort it is at home.
+      if (lw.alt && isl.layer >= 1) {
+        const at = skyPos(isl.layer);
+        if (at > lw.alt.max) continue;
+        if (at > lw.alt.hi) pref = Math.min(pref, -0.1) - 0.4 * ((at - lw.alt.hi) / Math.max(1e-6, lw.alt.max - lw.alt.hi));
+        else pref = Math.max(pref, 0.6);
+      }
       for (let i = 0; i < 6; i++) {
         const k = Math.floor((c.rand() * isl.spots.length) / 2) * 2;
         const x = isl.spots[k] + dx;

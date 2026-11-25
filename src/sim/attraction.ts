@@ -1,6 +1,8 @@
 import { RAIN_VERY_WET, RAIN_WET } from '../core/climate';
 import { COVER_BRUSHES } from '../core/paint';
 import { PLANT_K, type Env } from './env';
+import { fromTolerances, harshness, type Ranges, type Tolerances } from '../core/habitat';
+export { ALT, COLD, DRY, HEAT, levelNeeded, limitAt, WET, type Tolerances } from '../core/habitat';
 
 /**
  * Where a people wants to live (REDESIGN.md, "Where peoples live: requirements and attraction").
@@ -12,10 +14,10 @@ import { PLANT_K, type Env } from './env';
  *   to live off the rain (very wet in one season, wet in the other: rainforest, monsoon). Salt
  *   water alone is no use: an island people lives off its rain, or not at all (until a later
  *   technology: wells, carrying water).
- * - **Climate (a requirement).** The race's tolerances (1 poor to 5 excellent) for heat, cold,
- *   wet, dry and altitude, against the place's hottest and coldest seasons, its rain and its
- *   height. The further past a tolerance, the harder the place; far enough past, and they won't
- *   even try to live there, however rich it is.
+ * - **Climate (a requirement).** The race's ranges (core/habitat.ts) for temperature, rainfall and
+ *   altitude, against the place's hottest and coldest seasons, its rain and its height: easy
+ *   inside the comfortable range, harder out toward the survivable limits, much harder past them;
+ *   far enough past, and they won't even try to live there, however rich it is.
  * - **Pulls (added up).** Food (wild plants, game, fish), the race's preferred climates, ground
  *   covers and heights, resources, trade (a coast, a river), and mana for those who feel it.
  * - Pushes (crowding, others' land, enemies) depend on who is about, and are taken off where
@@ -36,18 +38,14 @@ export const SHORT_WALK_KM = 10;
 /** Below this the climate is too harsh to try at all. */
 export const CLIMATE_OFF = 0.15;
 
-/** How well a race bears heat, cold, wet, dry and altitude (1 poor to 5 excellent). */
-export interface Tolerances {
-  heat: number;
-  cold: number;
-  wet: number;
-  dry: number;
-  altitude: number;
-}
-
 /** What a race asks of a place, and what draws it. */
 export interface Wants {
-  tolerances: Tolerances;
+  /** Its comfortable and survivable ranges (with what its traits and culture have added); else from its tolerances. */
+  ranges?: Ranges;
+  /** Its older 1–5 tolerances (heat, cold, wet, dry, altitude), for what isn't drawn as a range. */
+  tolerances?: Tolerances;
+  /** Its ranges were drawn on the habitat sliders: being comfortable draws it (otherwise its preferred climates and heights do, as before). */
+  drawn?: boolean;
   /** Preferred climate zones, ground covers and mountain zones (empty: no preference). */
   climates: number[];
   covers: string[];
@@ -75,37 +73,6 @@ export const WATER: Record<string, { walkKm: number; rain: 'very' | 'wet' | 'nev
 };
 
 
-// Each tolerance's limit, by level 1–5, and how much past the limit makes the place one step harsher.
-/** Hottest season's mean temperature (°C). */
-export const HEAT = [26, 30, 34, 38, 44];
-/** Coldest season's mean temperature (°C). */
-export const COLD = [8, 0, -10, -20, -35];
-/** The wetter season's rain index at least (dry country). */
-export const DRY = [0.35, 0.22, 0.12, 0.06, 0.02];
-/** The drier season's rain index at most (rain all year): a middling tolerance bears rainforest. */
-export const WET = [0.35, 0.6, 0.9, 1.3, 2];
-/** Height (km). */
-export const ALT = [0.8, 1.6, 2.5, 3.5, 5];
-/**
- * A tolerance's limit at a level, between the levels too (a people part way adapted), and past
- * 5 by the last step again (up to 7: a people adapted past what its kind could ever bear).
- */
-export function limitAt(table: number[], level: number): number {
-  const t = Math.max(1, Math.min(7, level || 3)) - 1;
-  if (t >= 4) return table[4] + (table[4] - table[3]) * (t - 4);
-  const i = Math.floor(t);
-  return table[i] + (table[i + 1] - table[i]) * (t - i);
-}
-/** The tolerance level a place calls for (continuous; 1 when it is easy), for each kind. */
-export function levelNeeded(table: number[], value: number, higherIsHarder: boolean): number {
-  // Find the level whose limit just covers the value (tables run easy to hard as level rises).
-  for (let l = 1; l <= 7; l += 0.05) {
-    const lim = limitAt(table, l);
-    if (higherIsHarder ? value <= lim : value >= lim) return l;
-  }
-  return 7;
-}
-
 /** The parts of a place's attraction, each shown in the breakdown. */
 export interface Attraction {
   /** Off limits: why (a requirement failed), or ''. */
@@ -124,6 +91,20 @@ export interface Attraction {
   mana: number;
   /** The total: water × climate × pulls (−1 off limits). */
   score: number;
+}
+
+/** A people's ranges: as drawn, else from its tolerances (the middle, 3, where none are given). */
+export const rangesOf = (w: Wants): Ranges => w.ranges ?? fromTolerances(w.tolerances ?? { heat: 3, cold: 3, wet: 3, dry: 3, altitude: 3 });
+
+/** A climate point's seasons, rain and height (for the habitat ranges). */
+export function placeAt(env: Env, k: number) {
+  return {
+    hot: Math.max(env.temp[0][k], env.temp[1][k]),
+    cold: Math.min(env.temp[0][k], env.temp[1][k]),
+    wetSeason: Math.max(env.rain?.[0][k] ?? 0.2, env.rain?.[1][k] ?? 0.2),
+    drySeason: Math.min(env.rain?.[0][k] ?? 0.2, env.rain?.[1][k] ?? 0.2),
+    heightKm: env.height?.[k] ?? 0,
+  };
 }
 
 /** Whether a place's rain is enough to live on without a river or lake (for a people needing the usual; 'wet' for those needing little). */
@@ -153,25 +134,9 @@ export function attraction(env: Env, w: Wants, k: number): Attraction {
   // How much being right by the water matters to them (1 usual; 0 not at all, 2 twice as much).
   if (water > 0) water = Math.pow(water, pri.water);
   // ---- Climate ----
-  const t = w.tolerances;
-  const hot = Math.max(env.temp[0][k], env.temp[1][k]);
-  const cold = Math.min(env.temp[0][k], env.temp[1][k]);
-  const wetSeason = Math.max(env.rain?.[0][k] ?? 0.2, env.rain?.[1][k] ?? 0.2);
-  const drySeason = Math.min(env.rain?.[0][k] ?? 0.2, env.rain?.[1][k] ?? 0.2);
-  const height = env.height?.[k] ?? 0;
-  const harsh: string[] = [];
-  let past = 0;
-  const over = (amount: number, step: number, what: string) => {
-    if (amount <= 0) return;
-    past += amount / step;
-    harsh.push(what);
-  };
-  over(hot - limitAt(HEAT, t.heat), 6, 'too hot');
-  over(limitAt(COLD, t.cold) - cold, 8, 'too cold');
-  over(limitAt(DRY, t.dry) - wetSeason, 0.08, 'too dry');
-  over(drySeason - limitAt(WET, t.wet), 0.3, 'too wet');
-  over(height - limitAt(ALT, t.altitude), 0.7, 'too high');
-  const climate = Math.exp(-past);
+  const hz = harshness(rangesOf(w), placeAt(env, k));
+  const harsh = hz.harsh;
+  const climate = Math.exp(-hz.past);
   // ---- Pulls ----
   const plants = (env.plant[0][k] + env.plant[1][k]) / 2 / PLANT_K;
   let game = 0;
@@ -181,9 +146,13 @@ export function attraction(env: Env, w: Wants, k: number): Attraction {
   const zone = env.zone?.[k] ?? -1;
   const cover = env.cover[k] >= 0 ? COVER_BRUSHES[env.cover[k]] : '';
   let prefer = 0;
-  if (w.climates.length && zone >= 0) prefer += w.climates.includes(zone) ? 0.3 : -0.2;
+  // Comfortable on every count draws it (ranges drawn on the sliders); else its preferred climates and heights.
+  if (w.drawn) prefer += hz.comfortable ? 0.45 : -0.2;
+  else {
+    if (w.climates.length && zone >= 0) prefer += w.climates.includes(zone) ? 0.3 : -0.2;
+    if (w.heights.length) prefer += w.heights.includes(env.mzone[k]) ? 0.15 : -0.1;
+  }
   if (w.covers.length && cover) prefer += w.covers.includes(cover) ? 0.15 : -0.05;
-  if (w.heights.length) prefer += w.heights.includes(env.mzone[k]) ? 0.15 : -0.1;
   prefer += w.lean?.(k) ?? 0;
   let res = 0;
   for (const r of env.resInfo) if ((env.res[r.id]?.[k] ?? 0) > 0.4) res += 0.03;

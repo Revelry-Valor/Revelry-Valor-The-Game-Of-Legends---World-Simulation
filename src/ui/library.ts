@@ -87,7 +87,46 @@ import {
 import { defaultLibrary, libraryFile, loadSharedLibrary, parseLibraryFile, saveSharedLibrary } from '../core/libstore';
 import { BRUSHES, COVER_BRUSHES } from '../core/paint';
 import type { World } from '../core/world';
-import { h, toast } from './dom';
+import { h, hoverHelp, toast } from './dom';
+import { fromTolerances, SCALES, type Range4, type RangeKey } from '../core/habitat';
+
+/**
+ * What each trait effect does in the simulation, for a trait's hover help. Effects marked "later"
+ * are kept with the trait but not read by the simulation yet.
+ */
+const EFFECT_HELP: Record<string, string> = {
+  'Heat tolerance': 'bears hotter seasons before a place grows hard to live in',
+  'Cold tolerance': 'bears colder seasons before a place grows hard to live in',
+  'Altitude tolerance': 'lives higher up before a place grows hard to live in',
+  'Digs tunnels': 'can reach and settle the Underdark',
+  'Flies between layers': 'at home on the sky islands; can reach them',
+  'Lives in trees': 'at home in the canopy of giant trees',
+  'Sees in the dark': 'at home in the dark of the Underdark',
+  Seafaring: 'its culture leans to the sea: coasts draw it, fishing and sailing come easier',
+};
+/** Traits whose effect the simulation reads from the trait itself (by what it is). */
+const TRAIT_HELP: Record<string, string> = {
+  fertile: 'More children: its people are born 40% faster.',
+  'mountain-born': 'Crosses high mountains and settles on mountainsides.',
+  'mana-sensitive': 'Drawn to dense mana (and unsettled where it is thin).',
+  adaptable: 'Its cultures come to bear climates past what their kind once could, over generations.',
+};
+function traitHelp(t: Trait): string {
+  const amount = (target: string, n: number) => (/\(%\)$/.test(target) ? `${n > 0 ? '+' : ''}${n}%` : n === 1 && !STAT_KEYS.some((k) => STAT_NAMES[k] === target) && !/tolerance/.test(target) ? 'yes' : `${n > 0 ? '+' : ''}${n}`);
+  const statHint = (target: string) => {
+    const k = STAT_KEYS.find((q) => STAT_NAMES[q] === target);
+    return k ? STAT_HINTS[k] : undefined;
+  };
+  const lines = [t.name, t.description || '(No description yet.)'];
+  if (TRAIT_HELP[t.id]) lines.push(`In the world: ${TRAIT_HELP[t.id]}`);
+  for (const e of t.effects) {
+    const what = EFFECT_HELP[e.target];
+    const stat = statHint(e.target);
+    lines.push(`• ${e.target} ${amount(e.target, e.amount)}: ${what ?? (stat ? `${stat.replace(/\.$/, '')} (kept for later: the simulation doesn’t add trait bonuses to stats yet)` : 'kept for later: the simulation doesn’t use this yet')}.`);
+  }
+  if (!t.effects.length && !TRAIT_HELP[t.id]) lines.push('No effects set.');
+  return lines.join('\n');
+}
 import type { App } from './main';
 
 /**
@@ -163,6 +202,105 @@ export function showLibrary(app: App, world: World | null): () => void {
     });
     return field(label, h('div', { class: 'field-row' }, input, opts.unit ? h('span', { class: 'unit' }, opts.unit) : null), opts.hint, id);
   };
+  /**
+   * A habitat slider (core/habitat.ts): four dots on one scale, the inner two the comfortable range,
+   * the outer two the survivable limits. Undrawn, it shows what the older settings give (faded) and
+   * takes a range of its own the moment a dot is moved.
+   */
+  const rangeField = (key: RangeKey, get: () => Range4 | undefined, set: (r: Range4 | undefined) => void, fallback: () => Range4, fallbackNote: string, hint: string) => {
+    const S = SCALES[key];
+    const pct = (v: number) => ((Math.max(S.min, Math.min(S.max, v)) - S.min) / (S.max - S.min)) * 100;
+    const field = h('div', { class: 'field wide range4' });
+    const NAMES = { min: 'lowest it survives', lo: 'comfortable from', hi: 'comfortable to', max: 'highest it survives' } as const;
+    const render = () => {
+      const own = get();
+      const r = own ?? fallback();
+      const track = h('div', { class: `range4-track${own ? '' : ' derived'}` });
+      const band = (a: number, b: number, cls: string) => h('div', { class: `range4-band ${cls}`, style: `left:${pct(a)}%;width:${Math.max(0, pct(b) - pct(a))}%` });
+      track.append(band(r.min, r.max, 'survive'), band(r.lo, r.hi, 'comfort'));
+      const order = ['min', 'lo', 'hi', 'max'] as const;
+      const move = (which: (typeof order)[number], v: number) => {
+        const cur = { ...(get() ?? fallback()) };
+        const step = S.step;
+        v = Math.round(Math.max(S.min, Math.min(S.max, v)) / step) * step;
+        cur[which] = v;
+        // Keep the dots in order: pushing one past another carries it along.
+        const i = order.indexOf(which);
+        for (let j = i + 1; j < 4; j++) cur[order[j]] = Math.max(cur[order[j]], cur[order[j - 1]]);
+        for (let j = i - 1; j >= 0; j--) cur[order[j]] = Math.min(cur[order[j]], cur[order[j + 1]]);
+        set(cur);
+        changed();
+        render();
+        (field.querySelector(`[data-dot="${which}"]`) as HTMLElement | null)?.focus();
+      };
+      for (const which of order) {
+        const dot = h('button', { type: 'button', class: `range4-dot ${which === 'lo' || which === 'hi' ? 'inner' : 'outer'}`, 'data-dot': which, role: 'slider', 'aria-label': `${S.label}: ${NAMES[which]}`, 'aria-valuemin': S.min, 'aria-valuemax': S.max, 'aria-valuenow': r[which], 'aria-valuetext': S.read(r[which]), title: `${NAMES[which][0].toUpperCase()}${NAMES[which].slice(1)}: ${S.read(r[which])}`, style: `left:${pct(r[which])}%` });
+        dot.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          dot.setPointerCapture(e.pointerId);
+          const box = track.getBoundingClientRect();
+          const at = (x: number) => S.min + ((x - box.left) / box.width) * (S.max - S.min);
+          const onMove = (ev: PointerEvent) => {
+            const cur = { ...(get() ?? fallback()) };
+            const v = Math.round(Math.max(S.min, Math.min(S.max, at(ev.clientX))) / S.step) * S.step;
+            cur[which] = v;
+            const i = order.indexOf(which);
+            for (let j = i + 1; j < 4; j++) cur[order[j]] = Math.max(cur[order[j]], cur[order[j - 1]]);
+            for (let j = i - 1; j >= 0; j--) cur[order[j]] = Math.min(cur[order[j]], cur[order[j + 1]]);
+            set(cur);
+            // Live: move the dots and bands without rebuilding (so the drag holds).
+            for (const w of order) {
+              const d = track.querySelector<HTMLElement>(`[data-dot="${w}"]`);
+              if (d) d.style.left = `${pct(cur[w])}%`;
+            }
+            const [sv, cm] = track.querySelectorAll<HTMLElement>('.range4-band');
+            sv.style.left = `${pct(cur.min)}%`;
+            sv.style.width = `${pct(cur.max) - pct(cur.min)}%`;
+            cm.style.left = `${pct(cur.lo)}%`;
+            cm.style.width = `${pct(cur.hi) - pct(cur.lo)}%`;
+            track.classList.remove('derived');
+            summary.textContent = sumText(cur);
+          };
+          const onUp = () => {
+            dot.removeEventListener('pointermove', onMove);
+            dot.removeEventListener('pointerup', onUp);
+            changed();
+            render();
+          };
+          dot.addEventListener('pointermove', onMove);
+          dot.addEventListener('pointerup', onUp);
+        });
+        dot.addEventListener('keydown', (e) => {
+          const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          move(which, (get() ?? fallback())[which] + d * S.step * (e.shiftKey ? 4 : 1));
+        });
+        track.append(dot);
+      }
+      const marks = h('div', { class: 'range4-marks' }, ...S.marks.map((m) => h('span', { style: `left:${pct(m.at)}%` }, m.label)));
+      const sumText = (q: Range4) => `Comfortable: ${S.read(q.lo)} to ${S.read(q.hi)} · Survives: ${S.read(q.min)} to ${S.read(q.max)}`;
+      const summary = h('div', { class: 'small' }, sumText(r));
+      field.replaceChildren(
+        h('span', { class: 'label' }, S.label),
+        track,
+        marks,
+        summary,
+        own
+          ? h('button', { type: 'button', class: 'ghost small', onclick: () => { set(undefined); changed(); render(); } }, fallbackNote.startsWith('As the species') ? 'Use the species’' : 'Clear')
+          : h('small', { class: 'muted' }, fallbackNote),
+        h('small', {}, hint),
+      );
+    };
+    render();
+    return field;
+  };
+  const RANGE_HINT: Record<RangeKey, string> = {
+    temp: 'Its seasons’ average warmth: the coldest season against the left dots, the hottest against the right.',
+    rain: 'Rain in its wetter season against the left dots (too dry), in its drier season against the right (too wet).',
+    alt: 'How high it lives, from the sea up past the peaks to the sky layers.',
+  };
+  const RANGE_LEAD = 'Inner dots: where it lives comfortably (such places draw it). Outer dots: the most it survives; between the inner and outer dots life is harder (fewer births, more deaths), and past the outer dots much harder still, soon too harsh to live at all.';
   const select = (label: string, options: readonly string[], get: () => string, set: (v: string) => void, opts: { hint?: string; blank?: string; names?: string[] } = {}) => {
     const id = nextId();
     const sel = h('select', { id }, h('option', { value: '' }, opts.blank ?? '—'), ...options.map((o, i) => h('option', { value: o }, opts.names?.[i] ?? o))) as HTMLSelectElement;
@@ -176,19 +314,21 @@ export function showLibrary(app: App, world: World | null): () => void {
   const scale = (label: string, get: () => number | null, set: (v: number | null) => void, names: string[], hint?: string) =>
     select(label, names.map((_, i) => String(i + 1)), () => (get() === null ? '' : String(get())), (v) => set(v ? Number(v) : null), { hint, names });
   /** A set of chips to tick. Values are strings or numbers (indices). */
-  const multi = <T extends string | number>(label: string, options: readonly T[], names: readonly string[], get: () => T[], set: (v: T[]) => void, hint?: string) => {
+  const multi = <T extends string | number>(label: string, options: readonly T[], names: readonly string[], get: () => T[], set: (v: T[]) => void, hint?: string, tips?: (o: T) => string) => {
     const box = h('div', { class: 'chips', role: 'group', 'aria-label': label });
     const render = () => {
       const now = get();
       box.replaceChildren(
         ...options.map((o, i) => {
           const on = now.includes(o);
-          return h('button', { type: 'button', class: 'chip', 'aria-pressed': on ? 'true' : 'false', onclick: () => {
+          const chip = h('button', { type: 'button', class: 'chip', 'aria-pressed': on ? 'true' : 'false', onclick: () => {
             const cur = get();
             set(cur.includes(o) ? cur.filter((x) => x !== o) : [...cur, o]);
             changed();
             render();
           } }, names[i]);
+          if (tips) hoverHelp(chip, () => tips(o));
+          return chip;
         }),
       );
     };
@@ -301,13 +441,21 @@ export function showLibrary(app: App, world: World | null): () => void {
     section(
       'Life',
       num('Age of adulthood', () => p.adulthood, (v) => (p.adulthood = v), { unit: 'years', min: 0 }),
-      num('Offspring per birth', () => p.offspring, (v) => (p.offspring = v), { min: 0, step: 0.1 }),
-      num('A birth every', () => p.birthEveryYears, (v) => (p.birthEveryYears = v), { unit: 'years', min: 0, step: 0.1 }),
+      num('Children per family', () => p.children, (v) => (p.children = v), { min: 0, max: 20, step: 0.1, hint: 'How many children an average family raises to grow up. 2 just replaces the parents; 2.5 grows slowly; 4 or more grows fast. Blank: by its size (about 2.6 for medium-sized peoples, 5 small, 8 tiny).' }),
       select('Diet', DIETS, () => p.diet, (v) => (p.diet = v)),
       text('Special diet', () => p.dietSpecial, (v) => (p.dietSpecial = v), { hint: 'For a special diet: mana, minerals, sunlight…' }),
       select('Active', ACTIVE, () => p.active, (v) => (p.active = v)),
     ),
-    section(
+    sentient
+      ? section(
+          'Environment',
+          h('p', { class: 'muted small lib-wide' }, `Where its races live (each race can draw its own). ${RANGE_LEAD}`),
+          ...(['temp', 'rain', 'alt'] as const).map((k) => rangeField(k, () => (p.ranges ??= {})[k], (v) => { p.ranges ??= {}; if (v) p.ranges[k] = v; else delete p.ranges[k]; }, () => fromTolerances({ heat: p.heat ?? 3, cold: p.cold ?? 3, wet: p.wet ?? 3, dry: p.dry ?? 3, altitude: p.altitude ?? 3 })[k], 'Not drawn yet: shown from its older tolerances. Move a dot to draw its own.', RANGE_HINT[k])),
+          multi('Preferred ground cover', COVER_BRUSHES, COVER_BRUSHES.map(coverName), () => p.covers, (v) => (p.covers = v)),
+          multi('Layer', LAYERS_PREF, LAYERS_PREF, () => p.layers, (v) => (p.layers = v)),
+          text('Special needs or benefits', () => p.needs, (v) => (p.needs = v), { hint: 'E.g. dense mana, near water, sunlight.' }),
+        )
+      : section(
       'Environment',
       multi('Preferred climates', ZONE_INFO.map((_, i) => i), ZONE_NAMES, () => p.climates, (v) => (p.climates = v)),
       multi('Preferred ground cover', COVER_BRUSHES, COVER_BRUSHES.map(coverName), () => p.covers, (v) => (p.covers = v)),
@@ -329,7 +477,7 @@ export function showLibrary(app: App, world: World | null): () => void {
   ];
   const traitPicker = (label: string, forWho: 'sentient' | 'beast', get: () => string[], set: (v: string[]) => void, hint?: string) => {
     const ts = lib.traits.filter((t) => t.for.includes(forWho));
-    return multi(label, ts.map((t) => t.id), ts.map((t) => t.name), get, set, hint);
+    return multi(label, ts.map((t) => t.id), ts.map((t) => t.name), get, set, `${hint ? `${hint} ` : ''}Rest the pointer on a trait for what it does.`, (id) => traitHelp(ts.find((t) => t.id === id)!));
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -349,8 +497,7 @@ export function showLibrary(app: App, world: World | null): () => void {
       text('Specialty skills', () => r.specialty, (v) => (r.specialty = v), { hint: 'Unique racial abilities.' }),
       select('Lifestyle', LIFESTYLES, () => r.lifestyle, (v) => (r.lifestyle = v), { blank: `As the species${sp.lifestyle ? ` (${sp.lifestyle})` : ''}` }),
       traitPicker('Extra traits', 'sentient', () => r.addTraits, (v) => (r.addTraits = v), 'On top of the species’ traits.'),
-      multi('Lacks these species traits', sp.traits, sp.traits.map((id) => lib.traits.find((t) => t.id === id)?.name ?? id), () => r.removeTraits, (v) => (r.removeTraits = v)),
-      multi('Own preferred climates', ZONE_INFO.map((_, i) => i), ZONE_NAMES, () => r.climates, (v) => (r.climates = v), 'Leave empty to share the species’.'),
+      multi('Lacks these species traits', sp.traits, sp.traits.map((id) => lib.traits.find((t) => t.id === id)?.name ?? id), () => r.removeTraits, (v) => (r.removeTraits = v), undefined, (id) => { const t = lib.traits.find((q) => q.id === id); return t ? traitHelp(t) : id; }),
       text('Notes', () => r.notes, (v) => (r.notes = v), { long: true }),
       livingEditor(sp, r),
     );
@@ -359,24 +506,17 @@ export function showLibrary(app: App, world: World | null): () => void {
     r.living ??= emptyLiving();
     const L = r.living;
     const p = sp.profile;
-    const tolField = (label: string, key: 'heat' | 'cold' | 'wet' | 'dry' | 'altitude', what: string) =>
-      select(label, ['1', '2', '3', '4', '5'], () => (L[key] === null ? '' : String(L[key])), (v) => (L[key] = v ? Number(v) : null), { names: TOL, blank: `As the species (${p[key] ?? '3, not set'})`, hint: what });
     const PRI_VALUES = ['0', '0.5', '1', '1.5', '2'];
     const PRI_NAMES = ['Not at all', 'Little', 'Usual', 'Much', 'Very much'];
     const priField = (key: (typeof PRIORITIES)[number], label: string, what: string) =>
       select(label, PRI_VALUES, () => (L.priorities[key] === 1 ? '' : String(L.priorities[key])), (v) => (L.priorities[key] = v ? Number(v) : 1), { names: PRI_NAMES, blank: 'Usual', hint: what });
     const hasTrait = sp.traits.includes('adaptable') ? !r.removeTraits.includes('adaptable') : r.addTraits.includes('adaptable');
     return h('details', { class: 'lib-section lib-wide', open: true }, h('summary', {}, 'Where it lives'),
-      h('p', { class: 'muted small' }, 'What this race needs from a place, and what draws it. A place failing a need is off limits however rich; past a tolerance life gets harder the further past. Leave a tolerance blank to share the species’. See them at work in View → Attraction.'),
+      h('p', { class: 'muted small' }, `What this race needs from a place, and what draws it. ${RANGE_LEAD} A place failing its water need is off limits however rich. See them at work in View → Attraction.`),
       h('div', { class: 'lib-grid' },
-        tolField('Heat tolerance', 'heat', 'The hottest season it can bear (1: about 79 °F, 3: 93 °F, 5: 111 °F).'),
-        tolField('Cold tolerance', 'cold', 'The coldest season it can bear (1: about 46 °F, 3: 14 °F, 5: −31 °F).'),
-        tolField('Wet tolerance', 'wet', 'Rain all year round (3 bears rainforest).'),
-        tolField('Dry tolerance', 'dry', 'Little rain (1 needs moist country, 5 bears near desert).'),
-        tolField('Altitude tolerance', 'altitude', 'Height it can live at (1: about 2,600 ft, 3: 8,200 ft, 5: 16,400 ft).'),
+        ...(['temp', 'rain', 'alt'] as const).map((k) => rangeField(k, () => (L.ranges ??= {})[k], (v) => { L.ranges ??= {}; if (v) L.ranges[k] = v; else delete L.ranges[k]; }, () => p.ranges?.[k] ?? fromTolerances({ heat: L.heat ?? p.heat ?? 3, cold: L.cold ?? p.cold ?? 3, wet: L.wet ?? p.wet ?? 3, dry: L.dry ?? p.dry ?? 3, altitude: L.altitude ?? p.altitude ?? 3 })[k], p.ranges?.[k] ? 'As the species (drawn there). Move a dot to give this race its own.' : 'As the species (not drawn yet: shown from the older tolerances). Move a dot to give this race its own.', RANGE_HINT[k])),
         select('Fresh water it needs', WATER_NEEDS, () => L.water, (v) => (L.water = v), { blank: 'Normal', names: ['High: right by a river or lake', 'Normal: within a short walk (about 6 mi), or rain enough to live on', 'Low: within a long walk (about 19 mi), or some rain', 'None: it doesn’t drink'] }),
         multi('Own preferred ground cover', COVER_BRUSHES, COVER_BRUSHES.map(coverName), () => L.covers, (v) => (L.covers = v), 'Leave empty to share the species’.'),
-        multi('Own heights', [0, 1, 2, 3, 4], MOUNTAIN_ZONES, () => L.heights, (v) => (L.heights = v), 'Where it likes to live, lowland to peaks. Leave empty to share the species’.'),
         priField('food', 'Draws it: food', 'Wild food, game and fish.'),
         priField('water', 'Draws it: being by water', 'How much it prefers right by a river or lake over a walk away.'),
         priField('resources', 'Draws it: resources', 'Wood, stone, metals and the like.'),
@@ -962,7 +1102,12 @@ export function showLibrary(app: App, world: World | null): () => void {
       'div',
       { class: 'lib-groups' },
       ...[...groups].map(([g, list]) =>
-        h('div', { class: 'lib-group' }, h('h3', {}, g), ...list.map((it) => h('button', { type: 'button', class: 'lib-item', 'aria-pressed': it.id === selected ? 'true' : 'false', onclick: () => { selected = it.id; raceSel = 0; renderList(); renderEditor(); } }, it.name, it.flag ? h('span', { class: 'badge', title: it.flag }, it.flag) : null))),
+        h('div', { class: 'lib-group' }, h('h3', {}, g), ...list.map((it) => {
+          const b = h('button', { type: 'button', class: 'lib-item', 'aria-pressed': it.id === selected ? 'true' : 'false', onclick: () => { selected = it.id; raceSel = 0; renderList(); renderEditor(); } }, it.name, it.flag ? h('span', { class: 'badge', title: it.flag }, it.flag) : null);
+          const tr = tab === 'traits' ? lib.traits.find((t) => t.id === it.id) : undefined;
+          if (tr) hoverHelp(b, () => traitHelp(tr));
+          return b;
+        })),
       ),
     );
     const searchBox = h('input', { type: 'search', placeholder: 'Search…', value: search, 'aria-label': 'Search' }) as HTMLInputElement;

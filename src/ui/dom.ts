@@ -79,3 +79,35 @@ export function toast(text: string, ms = 6000): void {
   clearTimeout(Number(el.dataset.timer));
   el.dataset.timer = String(window.setTimeout(() => (el!.hidden = true), ms));
 }
+
+/**
+ * A help card that opens when the pointer rests on an element (or it holds keyboard focus) for a
+ * while: four seconds by default, so it stays out of the way of quick clicking.
+ */
+export function hoverHelp(el: HTMLElement, text: () => string, delayMs = 4000): void {
+  let timer = 0;
+  let card: HTMLElement | null = null;
+  const close = () => {
+    clearTimeout(timer);
+    card?.remove();
+    card = null;
+  };
+  const open = () => {
+    close();
+    timer = window.setTimeout(() => {
+      if (!el.isConnected) return;
+      card = h('div', { class: 'hover-help', role: 'tooltip' });
+      for (const [i, line] of text().split('\n').entries()) card.append(i ? h('div', {}, line) : h('strong', {}, line));
+      document.body.append(card);
+      const r = el.getBoundingClientRect();
+      const c = card.getBoundingClientRect();
+      const left = Math.max(8, Math.min(window.innerWidth - c.width - 8, r.left));
+      const top = r.bottom + 6 + c.height > window.innerHeight ? r.top - c.height - 6 : r.bottom + 6;
+      card.style.left = `${left}px`;
+      card.style.top = `${Math.max(8, top)}px`;
+    }, delayMs);
+  };
+  el.addEventListener('pointerenter', open);
+  el.addEventListener('focus', open);
+  for (const ev of ['pointerleave', 'blur', 'pointerdown', 'keydown']) el.addEventListener(ev, close);
+}
