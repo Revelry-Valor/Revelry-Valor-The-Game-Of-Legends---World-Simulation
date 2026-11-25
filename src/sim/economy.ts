@@ -3,6 +3,7 @@ import type { Economy, Settlement, SimState } from './state';
 import { canWork, techEffects } from './tech';
 import { markThinned } from './thinned';
 import type { CultureFx } from './culture';
+import { arableAt, fertilityAt, foodTechFrom, netYield } from './food';
 
 /**
  * A settlement's economy (REDESIGN.md 8.4h, Phase 7 step 1), counted in units: one unit of a food
@@ -146,6 +147,27 @@ export interface MonthContext {
   has: (techId: string) => boolean;
   /** What its culture is good at (culture.ts). */
   cfx?: CultureFx;
+  /**
+   * A town's own fields (REDESIGN.md, "Settlements and population", food supply): its people farm,
+   * herd, gather and hunt only this far round it (km; a walk out and back in a day), and at most this
+   * share of its workers work for food; the rest of its food comes from the countryside (catchment.ts).
+   * Not given: all its reach, and up to nearly all its workers (a village, a camp).
+   */
+  fieldKm?: number;
+  farmShare?: number;
+}
+
+/** The farmland close round a town (its own fields): its arable share and fertility (plain and watered), from the points there. */
+const fieldLands = new WeakMap<Settlement, { env: Env; x: number; y: number; km: number; arable: number; fert: number; wet: number }>();
+function fieldLand(env: Env, st: Settlement, km: number, cellsNear: (x: number, y: number, r: number) => number[]) {
+  const old = fieldLands.get(st);
+  if (old && old.env === env && old.x === st.x && old.y === st.y && old.km === km) return old;
+  let cells = cellsNear(st.x, st.y, Math.max(km, env.step * 0.75)).filter((k) => env.land[k]);
+  if (!cells.length) cells = cellsNear(st.x, st.y, env.step * 1.5).filter((k) => env.land[k]);
+  const avg = (f: (k: number) => number) => (cells.length ? cells.reduce((n, k) => n + f(k), 0) / cells.length : 0);
+  const out = { env, x: st.x, y: st.y, km, arable: avg((k) => arableAt(env, k)), fert: avg((k) => fertilityAt(env, k)), wet: avg((k) => fertilityAt(env, k, true)) };
+  fieldLands.set(st, out);
+  return out;
 }
 
 /** One month of a settlement's work, eating and stores. Returns how well it was fed (1 = enough). */
@@ -158,6 +180,10 @@ export function economyMonth(c: MonthContext): number {
   const need = pop * c.need;
   // Those away with a caravan don't work at home.
   const W = Math.max(1, Math.round(pop * c.workShare) - (e.away ?? 0));
+  // A town's own fields are the land close round it: its food work has that share of its reach.
+  const fk = c.fieldKm !== undefined && c.fieldKm < c.r ? (c.fieldKm / c.r) ** 2 : 1;
+  // (Herders, hunters, fishers and gatherers range wide: only the crop fields are held close.)
+  const foodMax = Math.min(0.95, c.farmShare ?? 0.95);
   const S = e.stores;
   const foodStock = Object.entries(S).reduce((n, [id, v]) => n + (isFood(env, id) ? v : 0), 0);
   // ---- Food jobs: aim to eat, and to build up stores toward four months.
@@ -202,12 +228,23 @@ export function economyMonth(c: MonthContext): number {
   // Each job: what a worker brings in on average, and how many workers before it gets crowded.
   type Job = { key: string; y: number; cap: number };
   const jobs: Job[] = [];
-  const landKm2 = R.cells.length * env.cellArea * R.share;
-  if (crop.id && yearGrowth > 0) jobs.push({ key: `farm:${crop.id}`, y: FARM * crop.v * yearGrowth, cap: Math.max(10, landKm2 * crop.v * 2) });
-  if (fish.id) jobs.push({ key: `fish:${fish.id}`, y: FISH * fish.v, cap: Math.max(10, 40 + landKm2 * 0.05) });
+  // Fields close round it; herds, hunters and gatherers range over all its land.
+  const wideKm2 = R.cells.length * env.cellArea * R.share;
+  const landKm2 = wideKm2 * fk;
+  // A town's own fields give no more than their land grows (food.ts: its farmland's yield with what is
+  // known): more farmers crowd toward that; the wide land round a village is worked thinly, where it is best.
+  let fieldCap = landKm2 * crop.v * 2;
+  if (fk < 1 && crop.id && yearGrowth > 0) {
+    const fl = fieldLand(env, st, c.fieldKm!, c.cellsNear);
+    const ft = foodTechFrom(c.has);
+    const rations = Math.PI * c.fieldKm! * c.fieldKm! * 100 * fl.arable * netYield(ft.irrigation && R.river ? fl.wet : fl.fert, ft);
+    fieldCap = rations / Math.max(1e-6, FARM * crop.v * yearGrowth);
+  }
+  if (crop.id && yearGrowth > 0) jobs.push({ key: `farm:${crop.id}`, y: FARM * crop.v * yearGrowth, cap: Math.max(10, fieldCap) });
+  if (fish.id) jobs.push({ key: `fish:${fish.id}`, y: FISH * fish.v, cap: Math.max(10, 40 + wideKm2 * 0.05) });
   // Herds graze what the pasture offers (steppe is herding land, however dry).
   const pasture = 0.5 + 0.5 * Math.min(1, Math.max(R.growth[0], R.growth[1]) * 2);
-  if (herd.id) jobs.push({ key: `herd:${herd.id}`, y: HERD * herd.v * pasture, cap: Math.max(10, landKm2 * herd.v * 0.5) });
+  if (herd.id) jobs.push({ key: `herd:${herd.id}`, y: HERD * herd.v * pasture, cap: Math.max(10, wideKm2 * herd.v * 0.5) });
   jobs.push({ key: 'gather', y: 1.2, cap: Math.max(1, pool / 1.2) });
   jobs.push({ key: 'hunt', y: 1.5 * HUNT, cap: Math.max(1, gameStock / 1.5) });
   const count: Record<string, number> = {};
@@ -225,11 +262,19 @@ export function economyMonth(c: MonthContext): number {
     // everyone else on food (herding, fishing, hunting all year) bring in the year's need.
     const otherYear = 12 * 0.7 * bestOther;
     if (perYear / 12 < bestOther * 0.8) e.farmers = 0;
-    else if (perYear <= otherYear) e.farmers = Math.round(W * 0.3);
-    else e.farmers = Math.round(Math.max(0, Math.min(W * 0.85, (yearNeed - W * 0.9 * otherYear) / (perYear - otherYear))));
+    else if (perYear <= otherYear) e.farmers = Math.round(W * Math.min(0.3, foodMax));
+    else {
+      // (No more on the other food work than it has room for: little game and wild food round a town.)
+      const others0 = Math.min(W * 0.9, others.reduce((n, j) => n + j.cap, 0));
+      // The fields' worth of farmers it takes, then as many more as crowding on the land asks.
+      const E = Math.max(0, (yearNeed - others0 * otherYear) / (perYear - otherYear));
+      const cap = farm.cap;
+      const n = E < cap * 0.9 ? E / (1 - E / cap) : Infinity;
+      e.farmers = Math.round(Math.min(W * Math.min(0.85, foodMax), n));
+    }
   }
   if (!farm) e.farmers = 0;
-  const farmers = farm && gNow > 0 ? Math.min(e.farmers ?? 0, Math.round(W * 0.85)) : 0;
+  const farmers = farm && gNow > 0 ? Math.min(e.farmers ?? 0, Math.round(W * Math.min(0.85, foodMax))) : 0;
   if (farmers > 0) count[farm!.key] = farmers;
   // The rest of the food work: whatever the stores can't cover until the next harvest (or, not
   // farming, to eat and build stores toward four months).
@@ -252,7 +297,7 @@ export function economyMonth(c: MonthContext): number {
   const chunk = Math.max(1, Math.round(W / 50));
   let planned = 0;
   let foodWorkers = farmers;
-  while (planned < target && foodWorkers + chunk <= W * 0.95) {
+  while (planned < target && foodWorkers + chunk <= W * foodMax) {
     let bj: Job | null = null;
     let bm = 0;
     for (const j of others) {

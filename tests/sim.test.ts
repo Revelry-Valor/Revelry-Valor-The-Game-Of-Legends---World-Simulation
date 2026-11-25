@@ -327,7 +327,9 @@ describe('settlements and their economy', () => {
     stepDays(sim, env, lib, DAYS_PER_YEAR * 10);
     expect(city.ruined).toBe(false);
     expect(city.pop).toBeLessThan(600);
-    expect(city.pop).toBeGreaterThan(200);
+    // (A town's own fields are only the land close round it, which here feeds few: it falls back to a
+    // village working all the land round it, and holds there.)
+    expect(city.pop).toBeGreaterThan(100);
     // It herds as well as farms.
     expect(Object.keys(city.economy!.jobs).some((k) => k.startsWith('herd:'))).toBe(true);
   }, 60000);
@@ -343,7 +345,8 @@ describe('markets and trade', () => {
     a.economy = newEconomy(300, 1, 20);
     a.economy.stores = { grain: 9000 };
     other.economy = newEconomy(300, 1, 20);
-    other.economy.stores = { [Object.keys(other.economy.stores)[0]]: 6000, salt: 600 };
+    // (Food for five months: its own fields keep it fed, but grain is worth more there.)
+    other.economy.stores = { [Object.keys(other.economy.stores)[0]]: 1500, salt: 600 };
     return { sim, a, other };
   };
   it('prices goods dear where they are short and cheap where they are plentiful', () => {

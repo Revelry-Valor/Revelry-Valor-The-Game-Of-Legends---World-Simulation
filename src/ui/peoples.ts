@@ -13,8 +13,8 @@ import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces,
 import { clanKnows, hasArchive, keepers } from '../sim/tech';
 import { ALL_FOOD_TECH, foodTechFrom, provinceFood, provinceLand } from '../sim/food';
 import { farmLayer, villagesOf } from '../sim/rural';
-import { surplusGoesTo } from '../sim/catchment';
-import { tierName } from '../sim/tiers';
+import { drawsFood, farmShareOf, surplusGoesTo } from '../sim/catchment';
+import { FARM_SHARE, MARKET, tierName, tierOf, TOWN_FIELDS_KM } from '../sim/tiers';
 import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
@@ -2558,13 +2558,22 @@ export function createPeoples(d: PeoplesDeps): Peoples {
             ? (() => {
                 const im = st.imports!;
                 const eats = Math.max(1, st.pop * (ri?.need ?? 1));
-                const how = [...new Set(im.from.map((f) => f[2]))].map((m) => (m === 'land' ? 'over land' : m === 'river' ? 'by river' : 'by sea')).join(', ');
-                return h('div', {}, h('span', { class: 'muted' }, 'Food brought in: '), `about ${Math.round(im.rations).toLocaleString()} people’s food a year (${Math.round((im.rations / eats) * 100)}% of what it eats) from ${im.from.length} province${im.from.length === 1 ? '' : 's'}, ${how}`);
+                const n = (v: number) => Math.round(v).toLocaleString();
+                const way = (m: string) => (m === 'land' ? 'over land' : m === 'river' ? 'by river' : m === 'sea' ? 'by sea' : 'as rent');
+                const market = im.from.filter((f) => f[2] !== 'rent');
+                const how = [...new Set(market.map((f) => f[2]))].map(way).join(', ');
+                const rentFrom = new Set(im.from.filter((f) => f[2] === 'rent').map((f) => f[0])).size;
+                const parts: string[] = [];
+                if (im.rent) parts.push(`${n(im.rent)} owed as rent and tax from ${rentFrom} province${rentFrom === 1 ? '' : 's'}`);
+                if (im.market) parts.push(`${n(im.market)} offered at market ${how}${im.boughtLast !== undefined ? `; last year it bought ${n(im.boughtLast / 12)} a year there, paid for in its goods` : ''}`);
+                if (!parts.length) parts.push(`from ${im.from.length} province${im.from.length === 1 ? '' : 's'}, ${[...new Set(im.from.map((f) => f[2]))].map(way).join(', ')}`);
+                return h('div', {}, h('span', { class: 'muted' }, 'Food brought in: '), `about ${n(im.rations)} people’s food a year (${Math.round((im.rations / eats) * 100)}% of what it eats): ${parts.join('; ')}`);
               })()
             : null,
           !st.ruined && identitySummary(st, (id) => cultureOf(s, id)?.name ?? '?') ? h('div', {}, identitySummary(st, (id) => cultureOf(s, id)?.name ?? '?')) : null,
           !st.ruined && st.pops?.length ? popsTable(st.pops) : null,
           s.started && !st.ruined ? h('div', {}, `Food last month: ${Math.round(Math.min(9.99, st.fed) * 100)}% of need${st.fed < 0.8 ? ' (hungry)' : ''}`) : null,
+          ri && !st.ruined && drawsFood(st) && tierOf(st) >= MARKET ? h('div', { class: 'muted' }, `Its own fields: within about ${Math.round(TOWN_FIELDS_KM * 0.621)} miles, worked by up to ${Math.round(farmShareOf(st, st.pop * ri.need) * 100)}% of its workers (${Math.round(FARM_SHARE[tierOf(st)] * 100)}% for a ${tierName(st).toLowerCase()} the countryside feeds); the rest of its food comes from the countryside.`) : null,
           ri && !st.ruined ? h('div', { class: 'muted' }, `Works the land about ${Math.round(ri.range * (st.kind === 'dawn' ? 2.2 : 1.5) * 0.621)} miles around. When it fills up it sends people out: new tribes, or villages nearby.`) : null,
         ),
         !st.ruined && st.economy && ri ? economyCard(st, ri.need) : null,
@@ -2767,7 +2776,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
           const L = farmLayer(s);
           if (L && L.labour[index] > 0) {
             const to = surplusGoesTo(s, env.prov.ids[index]);
-            out.push({ label: 'Surplus', value: `${n(L.labour[index])} can work its land; it grows about ${n(L.surplus[index])} people’s food a year beyond what they eat${to.length ? `: to ${to.slice(0, 3).map((q) => `${q.st.name} ${n(q.rations)}${q.mode === 'land' ? '' : ` (by ${q.mode})`}`).join(', ')}` : ' (no town reaches it)'}` });
+            out.push({ label: 'Surplus', value: `${n(L.labour[index])} can work its land; it grows about ${n(L.surplus[index])} people’s food a year beyond what they eat${to.length ? `: to ${to.slice(0, 3).map((q) => `${q.st.name} ${n(q.rations)}${q.mode === 'land' ? '' : q.mode === 'rent' ? ' (as rent)' : ` (by ${q.mode})`}`).join(', ')}` : ' (no town reaches it)'}` });
           }
           const vs = villagesOf(s, env, index);
           if (vs.sites.length) out.push({ label: 'Village sites', value: `${vs.sites.length} (about ${n(vs.villagers)} people; the biggest ${[...vs.sites].sort((a, b) => b.pop - a.pop).slice(0, 3).map((q) => q.name).join(', ')})` });

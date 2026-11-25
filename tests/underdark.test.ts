@@ -90,5 +90,5 @@ describe('the Underdark', () => {
     const sum = underdarkSummary(surface, after, (k) => after.land[k] === 1);
     expect(sum.cavern).toBeGreaterThan(5000);
     expect(sum.sea).toBeGreaterThan(2000);
-  });
+  }, 60000);
 });

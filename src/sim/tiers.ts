@@ -37,6 +37,15 @@ export const TIERS: TierInfo[] = [
   { name: 'Great city', min: 100000, footprint: 5, exclusion: 150 },
 ];
 export const MARKET = 2;
+/**
+ * The most of a settlement's workers who work for food, by tier (hamlet to great city): a village
+ * feeds itself; a market town is still a third to a half farmers; a large town a tenth to a quarter;
+ * a city under a tenth; a great city a few in a hundred. The rest work at crafts and trade, and eat
+ * what the countryside sells them or owes their lords (catchment.ts).
+ */
+export const FARM_SHARE = [0.95, 0.9, 0.4, 0.2, 0.08, 0.03];
+/** A town's own fields: how far round it its farmers walk out to work (km). */
+export const TOWN_FIELDS_KM = 5;
 export const CITY = 4;
 /** Drops a tier below this share of what it needed to rise. */
 export const HYSTERESIS = 0.8;

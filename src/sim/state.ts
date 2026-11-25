@@ -339,6 +339,8 @@ export interface Settlement {
   smallYears?: number;
   /** Food it draws from the surplus of the provinces it reaches this year (catchment.ts). */
   imports?: Imports;
+  /** Its food shortfall this year so far (the sum over months of how far short it ate, 0–1 a month); a town short of food sends people back to the land (sim.ts). */
+  hungry?: number;
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
   control?: number;
   /** Its loyalty to its realm (0–1), and the years it has been discontented. */

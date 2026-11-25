@@ -4,8 +4,8 @@ import { defaultLibrary } from '../src/core/libstore';
 import type { Library } from '../src/core/library';
 import { brushDefaults, type BrushId, type Stroke, type Surface } from '../src/core/paint';
 import { defaultSettings } from '../src/core/settings';
-import { catchmentYear, reachOf, surplusGoesTo, type CatchmentContext } from '../src/sim/catchment';
-import { newEconomy } from '../src/sim/economy';
+import { catchmentYear, DEAL, deliverMonth, reachOf, RENT, surplusGoesTo, type CatchmentContext } from '../src/sim/catchment';
+import { cropYear, newEconomy, PROVISIONS } from '../src/sim/economy';
 import { buildEnv, landCell, type Env } from '../src/sim/env';
 import { ALL_FOOD_TECH } from '../src/sim/food';
 import { provAt } from '../src/sim/land';
@@ -35,7 +35,7 @@ const town = (id: number, x: number, y: number, pop: number, techs: string[] = [
 const cctx = (sim: SimState, farms: FarmLayer): CatchmentContext => ({ sim, env, farms, provAt: (x, y) => provAt(env, x, y), cellOf: (x, y) => landCell(env, x, y), eats: (st) => st.pop, knows: (st, id) => (st.techs ?? []).includes(id), dist: (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by) });
 const layer = (surplus: (p: number) => number): FarmLayer => {
   const n = env.prov.count;
-  return { farm: new Float32Array(env.n), farmed: new Uint8Array(env.n), food: new Float32Array(n), rural: new Float32Array(n), labour: new Float32Array(n).fill(1), surplus: Float32Array.from({ length: n }, (_, p) => surplus(p)) };
+  return { farm: new Float32Array(env.n), farmed: new Uint8Array(env.n), food: new Float32Array(n), rural: new Float32Array(n), labour: new Float32Array(n).fill(1), surplus: Float32Array.from({ length: n }, (_, p) => surplus(p)), ate: new Float32Array(n) };
 };
 /** A river point near an x (km): the river is drawn on whichever grid row it falls nearest. */
 const onRiver = (x: number) => {
@@ -43,6 +43,12 @@ const onRiver = (x: number) => {
   return { x: env.x0 + (k % env.w) * env.step, y: env.y0 + Math.floor(k / env.w) * env.step };
 };
 const riverY = () => onRiver(1500).y;
+/** A year whose harvest in a province is an ordinary one (at least as good as usual). */
+const fairYear = (p: number) => {
+  for (let y = 0; y < 200; y++) if (cropYear(env, env.prov.x[p], env.prov.y[p], y) >= 1) return y;
+  return 0;
+};
+const harvest = (sim: SimState, p: number) => cropYear(env, env.prov.x[p], env.prov.y[p], Math.floor(sim.day / 360));
 
 describe('catchments and food competition (settlements and population, step 4)', () => {
   it('lets the land employ as many as grow its food, each sparing a tenth to a quarter more by their tools: the rest its surplus', () => {
@@ -78,10 +84,12 @@ describe('catchments and food competition (settlements and population, step 4)',
     const near = town(1, a0.x, a0.y, 2000);
     const far = town(2, b0.x, b0.y, 2000, ['rafts']);
     sim.settlements = [near, far];
+    sim.day = fairYear(p0) * 360;
+    const yr = harvest(sim, p0);
     catchmentYear(cctx(sim, layer((p) => (p === p0 ? 1000 : 0))));
     const a = near.imports?.from.find((f) => f[0] === env.prov.ids[p0])?.[1] ?? 0;
     const b = far.imports?.from.find((f) => f[0] === env.prov.ids[p0])?.[1] ?? 0;
-    expect(a + b).toBeCloseTo(1000, -1);
+    expect(a + b).toBeCloseTo(1000 * yr, -1);
     expect(a).toBeGreaterThan(b);
     expect(surplusGoesTo(sim, env.prov.ids[p0])[0].st).toBe(near);
     // A small town takes no more than it needs; the rest goes to the other.
@@ -89,6 +97,73 @@ describe('catchments and food competition (settlements and population, step 4)',
     catchmentYear(cctx(sim, layer((p) => (p === p0 ? 1000 : 0))));
     expect(near.imports!.rations).toBeLessThanOrEqual(110);
     expect(far.imports!.rations).toBeGreaterThan(800);
+  });
+
+  it('takes rent and tax for the lord’s seat and the capital first, then the market sells the rest for goods', () => {
+    const sim = newSim(env, 4);
+    const a0 = onRiver(1500);
+    const p0 = provAt(env, a0.x, a0.y);
+    const seat = town(1, a0.x, a0.y, 2000);
+    sim.settlements = [seat];
+    sim.day = fairYear(p0) * 360;
+    const yr = harvest(sim, p0);
+    const farms = layer((p) => (p === p0 ? 1000 : 0));
+    farms.ate[p0] = 4000;
+    farms.rural[p0] = 4000;
+    const feudal = RENT['Great lords with vassals (feudal)'];
+    catchmentYear({ ...cctx(sim, farms), lords: (p) => (p === p0 ? { share: feudal.share, toCapital: feudal.capital, seat, capital: null } : null) });
+    const im = seat.imports!;
+    // The feudal share of the crop (5,000 rations in a usual year) as rent; the rest of the surplus at market.
+    expect(im.rent).toBeCloseTo(5000 * yr * feudal.share, -1);
+    expect(im.market).toBeCloseTo(5000 * yr - 4000 - im.rent!, -1);
+    expect(im.from.some((f) => f[2] === 'rent')).toBe(true);
+    // Rent past the farmers' surplus bites into their own food.
+    const lean = layer((p) => (p === p0 ? 100 : 0));
+    lean.ate[p0] = 4000;
+    lean.rural[p0] = 4000;
+    lean.farm.fill(1);
+    catchmentYear({ ...cctx(sim, lean), lords: (p) => (p === p0 ? { share: 0.15, toCapital: 0, seat, capital: null } : null) });
+    const k = env.prov.cells[env.prov.start[p0]];
+    expect(lean.farm[k]).toBeLessThan(1);
+    // The market is paid for in goods: a town with nothing to spare gets only its rent.
+    seat.imports = { rations: 300, from: [], rent: 100, market: 200 };
+    seat.economy = newEconomy(2000, 1, 3);
+    const before = seat.economy.stores[PROVISIONS];
+    deliverMonth(env, seat, 1);
+    expect(seat.economy.stores[PROVISIONS] - before).toBeCloseTo(100, 3);
+    // With wares to sell it buys it all, and the wares go to the country.
+    const ware = env.resInfo.find((r) => !r.food && r.category === 'Metal')!.id;
+    seat.economy.stores[ware] = 5000;
+    const had = seat.economy.stores[PROVISIONS];
+    deliverMonth(env, seat, 1);
+    expect(seat.economy.stores[PROVISIONS] - had).toBeCloseTo(300, 3);
+    expect(seat.economy.stores[ware]).toBeLessThan(5000);
+    expect(seat.imports.bought).toBeCloseTo(200, 3);
+  });
+
+  it('lets a town on the water buy grain beyond its own need, to deal in; a failed harvest leaves less', () => {
+    const sim = newSim(env, 5);
+    const a0 = onRiver(1500);
+    const p0 = provAt(env, a0.x, a0.y);
+    const port = town(1, a0.x, a0.y, 1000, ['rafts']);
+    const inland = town(2, a0.x, a0.y, 1000);
+    sim.day = fairYear(p0) * 360;
+    sim.settlements = [port];
+    catchmentYear(cctx(sim, layer(() => 100000)));
+    expect(port.imports!.rations).toBeGreaterThan(1000 * (1.1 + DEAL) - 5);
+    sim.settlements = [inland];
+    catchmentYear(cctx(sim, layer(() => 100000)));
+    expect(inland.imports!.rations).toBeLessThanOrEqual(1100 + 1);
+    // A failed harvest: what the farmers grow falls short of what they eat; nothing to sell, and they go hungry.
+    let bad = 0;
+    while (cropYear(env, env.prov.x[p0], env.prov.y[p0], bad) > 0.6) bad++;
+    sim.day = bad * 360;
+    const farms = layer((p) => (p === p0 ? 400 : 0));
+    farms.ate[p0] = 4000;
+    farms.farm.fill(1);
+    catchmentYear(cctx(sim, farms));
+    expect(inland.imports).toBeUndefined();
+    expect(farms.farm[env.prov.cells[env.prov.start[p0]]]).toBeLessThan(1);
   });
 
   it('feeds a farming town from its countryside’s surplus as the world runs', () => {

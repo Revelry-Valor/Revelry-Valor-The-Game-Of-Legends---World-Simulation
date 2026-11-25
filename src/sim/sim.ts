@@ -12,7 +12,7 @@ import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, pro
 import { landCell, PLANT_K, type Env } from './env';
 import { attraction, hardBirths, hardDeaths, type Wants } from './attraction';
 import { adaptYear } from './adapt';
-import { economyMonth, newEconomy, PROVISIONS } from './economy';
+import { economyMonth, newEconomy } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
@@ -22,15 +22,15 @@ import { coreDistanceOf, driftTick } from './drift';
 import { identityYear } from './identity';
 import { historyTick } from './history';
 import { ensureLanguages, languagesTick, soundsFor } from './languages';
-import { ensureRealm, LAND_ENFORCE, nationsYear, tribalRule } from './nations';
+import { ensureRealm, govOf, LAND_ENFORCE, nationsYear, tribalRule } from './nations';
 import { diplomacyFactor, noteAttack, politicsYear, spiesDay } from './politics';
 import { championMight, faithHostility, faithLoyalty, faithYear } from './faith';
 import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { traitsYear } from './traits';
 import { addFarmFood, farmLayer, farmYear, isFarmed, sitesYear, type RuralContext, type VillageSite } from './rural';
-import { CITY, MARKET, tierOf, tiersYear } from './tiers';
-import { catchmentYear, TO_TOWN } from './catchment';
+import { CITY, MARKET, tierOf, tiersYear, TOWN_FIELDS_KM } from './tiers';
+import { catchmentYear, deliverMonth, drawsFood, farmShareOf, RENT, TO_TOWN } from './catchment';
 import { CULTURE_TICK, cultureTick } from './culturetick';
 import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
@@ -1070,7 +1070,8 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
   }
   // Settlements: fed from the land round them, worked harder than a tribe can (gardens and stores).
   // Towns: and with the food they draw from the provinces they reach (catchment.ts), a month's share into their stores.
-  for (const st of sim.settlements) if (st.imports && !st.ruined && st.economy) st.economy.stores[PROVISIONS] = (st.economy.stores[PROVISIONS] ?? 0) + st.imports.rations;
+  // Food from outside: rent and tax, and what the country sells at market for the town's goods (catchment.ts).
+  for (const st of sim.settlements) if (st.imports && !st.ruined && st.economy) deliverMonth(env, st, info(st)?.need ?? 1);
   const lc = layerContext(sim, env, lib);
   // Towns and their joined villages (REDESIGN.md 8.0): the towns first, each working and eating as
   // one with its villages; then the villages, fed as their town is.
@@ -1099,13 +1100,14 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
       const near = mine.length
         ? () => [...new Set([st, ...mine].flatMap((q) => cellsNear(env, q.x, q.y, R)))]
         : (x: number, y: number, r: number) => cellsNear(env, x, y, r);
-      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: townFx(sim, st), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, landCell(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
+      st.fed = economyMonth({ sim, env, st, need: ri.need, workShare: ri.workShare * (st.besieged ? 0.25 : 1), r: st.besieged ? Math.min(R, 3) : R, cellsNear: near, left, summer: localSummerAt(env, st.x, st.y, sim.day), wasSummer: localSummerAt(env, st.x, st.y, sim.day - DAYS_PER_MONTH), has: (id) => knows(lib, st, id), cfx: townFx(sim, st), monthsLeft: monthsLeft(env, st.x, st.y, sim.day), south: env.lat[Math.max(0, landCell(env, st.x, st.y))] < 0, year: Math.floor(sim.day / DAYS_PER_YEAR), ...(drawsFood(st) && tierOf(st) >= MARKET && !st.besieged ? { fieldKm: TOWN_FIELDS_KM, farmShare: farmShareOf(st, st.pop * ri.need) } : {}), ...(mine.length ? { pop: st.pop + mine.reduce((n, q) => n + q.pop, 0), reachKey: mine.map((q) => q.id).join(',') } : {}) });
     }
     // On another layer: less from the land below, and what the layer itself grows (layers.ts).
     if (st.layer && !town) {
       const lf = layerFood(lc, st);
       st.fed = Math.max(st.fed * lf.mul, lf.floor);
     }
+    if (st.fed < 1) st.hungry = (st.hungry ?? 0) + (1 - st.fed);
     if (st.fed < 0.8) st.hardship = { famine: (st.hardship?.famine ?? 0) + (1 - st.fed) / 6, war: st.hardship?.war ?? 0 };
     if (st.fed < 0.6) note(sim, st.culture, 'famines');
     if (st.fed < 0.6 && !sim.events.some((e) => e.text.startsWith(`Famine in ${st.name}`) && sim.day - e.day < DAYS_PER_YEAR)) log(sim, `Famine in ${st.name}: its stores are gone${st.economy?.harvest && st.economy.harvest.year < 0.8 ? ' after a bad harvest' : ''}.`, st.x, st.y);
@@ -1471,6 +1473,8 @@ function backToSite(sim: SimState, env: Env, st: Settlement): void {
 export const FARMERS_OUT = 0.015;
 /** Settlements send farmers out only while their province's countryside is under this share full. */
 export const PIONEER = 0.25;
+/** The most of a hungry town's people who go back to the land in a year. */
+export const BACK_TO_LAND = 0.15;
 
 /** What the rural step needs (rural.ts). */
 function ruralContext(sim: SimState, env: Env, lib: Library, info: Info): RuralContext {
@@ -1541,6 +1545,16 @@ function popsYear(sim: SimState, env: Env, lib: Library, info: Info): void {
       eats: (st) => st.pop * (info(st)?.need ?? 1),
       knows: (st, id) => knows(lib, st, id),
       dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+      lords: (p) => {
+        const owner = sim.provOwner?.[p] ?? -1;
+        const clan = owner >= 0 ? sim.clans.find((q) => q.id === owner) : undefined;
+        if (!clan) return null;
+        const land = govOf(lib, clan.realm?.gov ?? '')?.land || 'Clans and tribes';
+        const r = RENT[land] ?? RENT['Clans and tribes'];
+        const seat = sim.settlements.find((q) => q.seat && !q.ruined && !q.layer && q.clan === clan.id && provAt(env, q.x, q.y) === p) ?? null;
+        const capital = clan.realm ? sim.settlements.find((q) => q.id === clan.realm!.capital && !q.ruined) ?? null : null;
+        return { share: r.share, toCapital: r.capital, seat, capital };
+      },
     });
     // The country people the land can't employ move to the town that draws most on their province.
     const P2 = env.prov;
@@ -1560,6 +1574,28 @@ function popsYear(sim: SimState, env: Env, lib: Library, info: Info): void {
       if (take < 1) continue;
       for (let q = P2.start[p]; q < P2.start[p + 1]; q++) D[P2.cells[q]] -= (D[P2.cells[q]] * take) / have;
       joinPops(sim, town, fromCountry(sim, env, p, race, take, town));
+    }
+  }
+  // Back to the land: a town that went short of food this year sends people out to farm where its
+  // countryside has room (the farmers it can't feed become the farmers who feed it).
+  {
+    const P = env.prov;
+    const ruralNow = new Float32Array(P.count);
+    for (const D of Object.values(sim.density ?? {})) for (let k = 0; k < D.length; k++) if (D[k] > 0 && P.of[k] >= 0) ruralNow[P.of[k]] += D[k];
+    for (const st of sim.settlements) {
+      const short = st.hungry ?? 0;
+      delete st.hungry;
+      if (st.ruined || st.layer || !drawsFood(st) || short < 0.5 || st.pop < 120) continue;
+      const p = provAt(env, st.x, st.y);
+      if (p < 0 || farms.rural[p] <= 0) continue;
+      const room = farms.rural[p] / (info(st)?.need ?? 1) - ruralNow[p];
+      const n = Math.min(room * 0.5, st.pop * Math.min(BACK_TO_LAND, (short / 12) * 0.5));
+      if (n < 5) continue;
+      const near = [...P.cells.subarray(P.start[p], P.start[p + 1])].filter((k) => env.land[k] && farms.farmed[k]);
+      if (!near.length) continue;
+      toCountry(sim, env, p, takePops(sim, st, n));
+      seedDensity(sim, env, st.race, near, n);
+      ruralNow[p] += n;
     }
   }
   for (const st of sim.settlements) {

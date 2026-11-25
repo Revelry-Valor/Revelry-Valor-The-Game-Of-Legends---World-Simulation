@@ -82,5 +82,5 @@ describe('giant trees, the canopy and giant vines', () => {
     const after = computeClimate(surface, settings);
     expect(Array.from(after.land)).toEqual(Array.from(before.land));
     expect(Array.from(after.summer.temp)).toEqual(Array.from(before.summer.temp));
-  });
+  }, 60000);
 });

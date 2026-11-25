@@ -60,6 +60,8 @@ export interface FarmLayer {
   surplus: Float32Array;
   /** By province: how many people its land can employ (farmers, herders, fishers). */
   labour: Float32Array;
+  /** By province: what its rural people living there now grow for themselves (rations a year): what rent is taken from, beside the surplus. */
+  ate: Float32Array;
 }
 
 export interface RuralContext {
@@ -89,6 +91,7 @@ export function farmYear(c: RuralContext): FarmLayer {
   const surplus = new Float32Array(P.count);
   const labour = new Float32Array(P.count);
   const townsEat = new Float32Array(P.count);
+  const ate = new Float32Array(P.count);
   // The rural people living in each province now (the farmers whose surplus towns draw on).
   const ruralNow = new Float32Array(P.count);
   for (const D of Object.values(sim.density ?? {})) for (let k = 0; k < D.length; k++) if (D[k] > 0 && P.of[k] >= 0) ruralNow[P.of[k]] += D[k];
@@ -115,6 +118,7 @@ export function farmYear(c: RuralContext): FarmLayer {
     rural[p] = Math.min(left, labour[p]);
     // What its farmers working now spare (each a tenth to a quarter of their own food), as far as the land gives.
     surplus[p] = Math.min(left - Math.min(ruralNow[p], rural[p]), Math.min(ruralNow[p], labour[p]) * surplusPerFarmer(t));
+    ate[p] = Math.min(ruralNow[p], rural[p]);
     if (rural[p] <= 0) continue;
     // Laid over its points by farmland and fertility (a little everywhere it is land: herds, fish).
     let sum = 0;
@@ -134,7 +138,7 @@ export function farmYear(c: RuralContext): FarmLayer {
       farm[k] = (rural[p] * wt[i]) / sum / 12;
     }
   }
-  const layer = { farm, farmed, food, rural, surplus, labour };
+  const layer = { farm, farmed, food, rural, surplus, labour, ate };
   layers.set(sim, layer);
   return layer;
 }

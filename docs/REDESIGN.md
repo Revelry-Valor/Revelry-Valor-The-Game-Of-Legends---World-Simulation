@@ -1336,7 +1336,7 @@ Food sets how many people the land can hold, and transport how far food can trav
 1. *Province food capacity* (below).
 2. *Rural people and village sites:* the rural people fill each province toward its food; village count and size from the spacing formula; sites drawn on the map; hungry provinces send migrants.
 3. *Tiers and spacing:* the six tiers with hysteresis, footprints and exclusion radii, market towns founded from surplus (none within 10 km) at the best site, sites growing into towns; the one-seat-per-province rule and the 600 cap retired.
-4. *Catchments and food competition:* towns draw surplus by land (about 15 km), river (75–150 km) or sea; overlapping catchments split it by how cheaply each reaches it; shortage raises prices, stalls growth, sends people away, then shrinks a town; cities grow from rural migrants; caps emerge (about 10–15 thousand by land, 50–100 thousand by river, more by sea with imported grain).
+4. *Catchments and food competition:* towns draw surplus by land (about 15 km), river (75–150 km) or sea; overlapping catchments split it by how cheaply each reaches it; shortage raises prices, stalls growth, sends people away, then shrinks a town; cities grow from rural migrants; caps emerge (about 10–15 thousand by land, 50–100 thousand by river, more by sea with imported grain). Then (the designer's call) food reaches towns as it did historically: a town's own fields only close round it, the share who farm by tier, and rent and tax, the market (paid in goods) and grain from afar.
 5. *Rings round a city:* the land nearest farmed harder (1.5× yield), villages packed tighter there.
 6. *Tuning* and the doc's open questions.
 
@@ -1387,6 +1387,30 @@ Food sets how many people the land can hold, and transport how far food can trav
 - *Country people to town:* the rural people a province's land can't employ move to the town drawing most on it, a fifth of them a year (when that town is fed).
 - *Shown:* a town's card says how much food it brings in, what share of what it eats, from how many provinces and how (over land, by river, by sea); a province's hover and card say how many its land employs, its surplus, and the towns it goes to.
 - On the stand-in world over 80 years: surplus grew with the farmers working the land, to about 3,800 people's food a year, of which towns drew 2,600. *Not yet:* towns still also work the land round them with their own people (out to about 33 km, 48 for a dawn city), which feeds most of them, so food doesn't yet cap their size; and the countryside, far from full, has had nobody to spare for the towns.
+
+**Built (after step 4): how food reaches towns, as it did historically** (`sim/catchment.ts`, `sim/economy.ts`, `sim/tiers.ts`; the designer's call)
+- *A town farms only near itself:* a market town or bigger works its own fields only within 5 km (a walk out and back in a day), and their harvest is no more than that land grows (step 1's yield for its farmland, with what is known; more farmers only crowd toward it). Herders, hunters, fishers and gatherers still range over all its land. Smaller settlements (and dawn cities under 500) farm like villages, all the land round them.
+- *Who farms, by tier:* where the countryside feeds it, at most this share of a town's workers work for food; the rest work at crafts and trade:
+
+  | Tier | Most who farm |
+  |---|---|
+  | Hamlet | 95% |
+  | Village | 90% |
+  | Market town | 40% |
+  | Large town | 20% |
+  | City | 8% |
+  | Great city | 3% |
+
+  Where its food from outside covers less of what it eats, more of its people farm, up to 90% with none (an early city with no countryside round it yet is a farming town, as the first cities were). So as the countryside fills and feeds it, a town turns from its fields to crafts.
+- *Food comes in three ways:*
+  - *Rent and tax in kind, first:* the realm takes a share of what each province's farmers grow, by how its land is held: clans and tribes 5%, feudal lords 15%, appointed governors 12%, the state directly 12%, temples 15%, free cities 5%. It goes to the lord's seat in the province and to the capital, if the capital can reach the province (by land, river or sea): feudal lords send a quarter to the capital, governors half, the state two thirds, temples 40%, clans a fifth, free cities 30%. A lord takes what his town eats and a tenth over, no more. Rent past what the farmers spare comes out of their own food: the country goes hungry.
+  - *The market:* the rest of the surplus is offered to the towns reaching it (shared out as before), and a town buys it with goods it can spare (whatever it has over its own needs, at its own prices; a ration is worth 1). It buys only to keep about six months of food in store, and the country takes at most half of what it can spare of any one good a month (it keeps some to trade). A town with little to sell buys little: its crafts are what feed it, and the goods the country takes are made again by its workers. On the card: "offered at market over land; last year it bought … a year there, paid for in its goods".
+  - *Grain from afar:* a town on a river (with rafts) or the coast (with sailing) deals in grain: it buys half as much again as it eats from the provinces it reaches by water and keeps a year's food in store; caravans and ships (trade.ts) carry what it can spare to wherever food is dear (food's price rises as a town's stores fall).
+- *Good and bad harvests:* each province's harvest this year is good or bad by region (the same years as the towns' own fields: a failure 1 year in 25, a poor one 1 in 10). A short one leaves less to sell and to take as rent; below what the farmers eat, the country goes hungry. Towns live on their stores (granary customs make them keep better) while food grows dear.
+- *Back to the land:* a town that went short of food during the year sends people out to farm where its province's countryside has room (up to 15% of its people a year, by how short it went).
+- *Better sowing:* a settlement setting its farmers for the year now counts only as much other food work as there is room for (little game and wild food round a big town), and as many more farmers as crowding on its fields asks.
+- *Shown:* a town's card gives its own fields (within about 3 miles, worked by up to N% of its workers, its tier's share where the countryside feeds it) and its food brought in (rent and tax from how many provinces; offered at market, how, and what it bought there last year). A province's card lists rent as going to a town "as rent".
+- On the stand-in world over 80 years (from 40): towns 19,000 (from 4,100) and countryside 59,000 (from 6,100), about a quarter in towns; before, towns had 38,000 and the countryside 53,000. The biggest towns are 1,400–2,000, fed mostly by rent (seats and the capital); towns without a seat live on their own fields and what they buy. Towns will grow as the countryside fills and the plough and crop rotation let farmers spare more.
 
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
