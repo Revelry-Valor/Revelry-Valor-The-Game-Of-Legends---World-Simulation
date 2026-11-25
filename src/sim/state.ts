@@ -330,6 +330,12 @@ export interface Settlement {
   cohesion?: number;
   /** Which clan holds it, and since when (for its people's time inside the realm, identity.ts). */
   heldBy?: { clan: number; since: number };
+  /** Its tier (tiers.ts: 0 hamlet … 5 great city), kept so it doesn't flicker at a threshold. */
+  tier?: number;
+  /** The year-day it began as a village site, if it grew from one (tiers.ts). */
+  villageSince?: number;
+  /** Years it has been too small for a town on farmed land (it goes back to a village site after three). */
+  smallYears?: number;
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
   control?: number;
   /** Its loyalty to its realm (0–1), and the years it has been discontented. */

@@ -29,7 +29,7 @@ import { PERMANENT_MANA, RIFT_KINDS, riftsYear, type Rift } from '../src/sim/rif
 import { hordesDay, monstersMonth } from '../src/sim/monsters';
 import { nextWaypoint, provinceRoute, routePlan } from '../src/sim/routes';
 import { generateProvinces } from '../src/core/provinces';
-import { VILLAGE_MAX } from '../src/sim/sim';
+import { tierOf } from '../src/sim/tiers';
 
 /** A seeded random stream for the contexts the tests build (so a run is the same every time). */
 const testRand = (() => {
@@ -1448,7 +1448,9 @@ describe('land by province', () => {
       seats.set(p, (seats.get(p) ?? 0) + 1);
     }
     expect([...seats.values()].every((n) => n === 1)).toBe(true);
-    for (const st of sim.settlements) if (!st.ruined && st.seat === false) expect(st.pop).toBeLessThanOrEqual(VILLAGE_MAX * 1.6);
+    // (No village cap now: tiers and room. No two market towns or bigger within 10 km.)
+    const towns = sim.settlements.filter((st) => !st.ruined && !st.layer && tierOf(st) >= 2);
+    for (const a of towns) for (const b of towns) if (a !== b) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(9.9);
     // Saved and back: the same holders by province.
     const back = unpackSim(JSON.parse(JSON.stringify(packSim(sim, penv))), penv)!;
     expect(Array.from(back.provOwner!)).toEqual(Array.from(sim.provOwner!));

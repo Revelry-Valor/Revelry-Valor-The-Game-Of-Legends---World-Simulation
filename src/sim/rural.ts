@@ -2,6 +2,7 @@ import type { Library } from '../core/library';
 import type { Env } from './env';
 import { arableAt, fertilityAt, foodTechFrom, provinceFood, provinceLand, type FoodTech } from './food';
 import type { Clan, Settlement, SimState } from './state';
+import { TIERS, tierOf } from './tiers';
 
 /**
  * Rural people and village sites (REDESIGN.md, "Settlements and population", step 2).
@@ -191,7 +192,7 @@ export function sitesYear(c: RuralContext): void {
     const area = Math.max(1, P.area[p]);
     const spacing = villageSpacing(land[p].arableHa / 100 / area);
     const tooNear = (x: number, y: number) =>
-      sites.some((s) => Math.hypot(s.x - x, s.y - y) < spacing) || towns.some((t) => Math.hypot(t.x - x, t.y - y) < Math.max(FOOTPRINT_KM, spacing * 0.5));
+      sites.some((s) => Math.hypot(s.x - x, s.y - y) < spacing) || towns.some((t) => Math.hypot(t.x - x, t.y - y) < Math.max(TIERS[tierOf(t)].footprint, FOOTPRINT_KM, spacing * 0.5));
     // New sites at the best free spots.
     if (sites.length < want) {
       const country = sim.country?.[key] ?? [];

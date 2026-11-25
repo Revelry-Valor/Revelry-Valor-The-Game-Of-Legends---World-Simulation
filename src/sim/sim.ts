@@ -28,7 +28,8 @@ import { championMight, faithHostility, faithLoyalty, faithYear } from './faith'
 import { armiesDay, warsMonth, warsYear, type WarContext } from './wars';
 import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, wallsMight, type TechContext } from './tech';
 import { traitsYear } from './traits';
-import { addFarmFood, farmLayer, farmYear, isFarmed, sitesYear, type RuralContext } from './rural';
+import { addFarmFood, farmLayer, farmYear, isFarmed, sitesYear, type RuralContext, type VillageSite } from './rural';
+import { CITY, MARKET, tierOf, tiersYear } from './tiers';
 import { CULTURE_TICK, cultureTick } from './culturetick';
 import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
@@ -1418,8 +1419,55 @@ export const DRAW_MAX = 0.03;
  * race that can live beside theirs), who bring their culture; and each province's wild folk are
  * brought in line with the families living there.
  */
+/** A village site grown into a market town on the same spot: its people out of the countryside (tiers.ts). */
+function foundFromSite(sim: SimState, env: Env, lib: Library, info: Info, site: VillageSite, p: number): Settlement | null {
+  const holder = sim.provOwner?.[p] ?? -1;
+  const clan = sim.clans.find((q) => q.id === holder);
+  if (!clan) return null;
+  // Its race: the province's main rural people's, else its holder's.
+  const P = env.prov;
+  const byRace = new Map<string, number>();
+  for (const [race, D] of Object.entries(sim.density ?? {})) for (let q = P.start[p]; q < P.start[p + 1]; q++) byRace.set(race, (byRace.get(race) ?? 0) + D[P.cells[q]]);
+  const race = [...byRace].sort((a, b) => b[1] - a[1])[0]?.[0] ?? clan.race;
+  const ri = info({ race, culture: site.culture || clan.culture });
+  if (!ri) return null;
+  const n = Math.round(site.pop);
+  // Out of the countryside of the province.
+  const D = sim.density?.[race];
+  if (D) {
+    let have = 0;
+    for (let q = P.start[p]; q < P.start[p + 1]; q++) have += D[P.cells[q]];
+    if (have > 0) for (let q = P.start[p]; q < P.start[p + 1]; q++) D[P.cells[q]] -= (D[P.cells[q]] * Math.min(n, have)) / have;
+  }
+  const folk = fromCountry(sim, env, p, race, n, null);
+  const culture = site.culture || mainOf(folk.filter((q) => q.culture), 'culture') || clan.culture;
+  const faith = mainOf(folk.filter((q) => q.faith), 'faith') || '';
+  const st: Settlement = { id: sim.nextId++, name: site.name, kind: 'village', clan: clan.id, species: ri.species.id, race, culture, x: site.x, y: site.y, pop: n, fed: 1, warband: Math.round(n * ri.warShare * 0.6), holyTo: [], ruined: false, founded: sim.day, ruinedOn: -1, economy: newEconomy(n, ri.need, foundingMonths(env, site.x, site.y, sim.day)), techs: [...(clan.techs ?? [])], ...(faith ? { faith } : {}) };
+  startPops(sim, st, folk);
+  sim.settlements.push(st);
+  return st;
+}
+
+/** A settlement dwindled back into a village site: its people to the countryside, its spot and name kept (tiers.ts). */
+function backToSite(sim: SimState, env: Env, st: Settlement): void {
+  const p = provAt(env, st.x, st.y);
+  if (p < 0) return;
+  const n = st.pop;
+  const P = env.prov;
+  toCountry(sim, env, p, takePops(sim, st, n));
+  const near = [...P.cells.subarray(P.start[p], P.start[p + 1])].filter((k) => env.land[k]);
+  seedDensity(sim, env, st.race, near.length ? near : cellsNear(env, st.x, st.y, env.step), n);
+  const key = String(P.ids[p]);
+  ((sim.sites ??= {})[key] ??= []).push({ id: sim.nextId++, name: st.name, x: st.x, y: st.y, pop: n, founded: st.villageSince ?? st.founded, culture: st.culture });
+  sim.routes = sim.routes.filter((r) => r.a !== st.id && r.b !== st.id);
+  sim.caravans = sim.caravans.filter((cv) => cv.from !== st.id && cv.to !== st.id);
+  removeSettlement(sim, st.id, env);
+}
+
 /** Share of a fed farming settlement's people a year who go out to farm the land round it while its province has room. */
 export const FARMERS_OUT = 0.015;
+/** Settlements send farmers out only while their province's countryside is under this share full. */
+export const PIONEER = 0.25;
 
 /** What the rural step needs (rural.ts). */
 function ruralContext(sim: SimState, env: Env, lib: Library, info: Info): RuralContext {
@@ -1446,7 +1494,10 @@ function popsYear(sim: SimState, env: Env, lib: Library, info: Info): void {
       const p = provAt(env, st.x, st.y);
       if (p < 0 || farms.rural[p] <= 0) continue;
       const ri = info(st);
-      const room = farms.rural[p] / (ri?.need ?? 1) - ruralNow[p];
+      const cap = farms.rural[p] / (ri?.need ?? 1);
+      // Only while its countryside is still being settled (under a quarter full): then it grows by itself.
+      if (ruralNow[p] >= cap * PIONEER) continue;
+      const room = cap - ruralNow[p];
       if (room < 10) continue;
       const n = Math.min(st.pop * FARMERS_OUT, room * 0.2);
       if (n < 1) continue;
@@ -1458,6 +1509,28 @@ function popsYear(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   sitesYear(rc);
+  // Tiers; village sites grown into market towns, small settlements back to village sites (tiers.ts).
+  {
+    const P = env.prov;
+    const ruralNow = new Float32Array(P.count);
+    for (const D of Object.values(sim.density ?? {})) for (let k = 0; k < D.length; k++) if (D[k] > 0 && P.of[k] >= 0) ruralNow[P.of[k]] += D[k];
+    const cellNear = (x: number, y: number) => landCell(env, x, y);
+    tiersYear({
+      sim, env,
+      provAt: (x, y) => provAt(env, x, y),
+      waterFed: (st) => {
+        const k = cellNear(st.x, st.y);
+        return k >= 0 && (env.fresh[k] === 1 || env.coast[k] === 1);
+      },
+      dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+      farmed: (p) => farms.rural[p] > 0,
+      surplus: (p) => farms.rural[p] - ruralNow[p],
+      found: (site, p) => foundFromSite(sim, env, lib, info, site, p),
+      unfound: (st) => backToSite(sim, env, st),
+      pinned: (st) => !!st.besieged || (sim.armies ?? []).some((a) => a.target === st.id || a.siege?.town === st.id || (a.from[st.id] ?? 0) > 0),
+      log: (text, x, y) => log(sim, text, x, y),
+    });
+  }
   for (const st of sim.settlements) {
     if (st.ruined) continue;
     const tier = settlementTier(st);
@@ -1544,11 +1617,7 @@ function settlementsYearly(sim: SimState, env: Env, lib: Library, info: Info): v
     if (st.ruined) continue;
     const ri = info(st);
     if (!ri) continue;
-    // A village beside its province's seat stays a village: past that its people move to the seat.
-    const seat = seatOf.get(provAt(env, st.x, st.y));
-    if (!st.seat && seat && seat.clan === st.clan && st.pop > VILLAGE_MAX) {
-      movePeople(sim, st, seat, st.pop - VILLAGE_MAX);
-    }
+    // (A village no longer stays one beside its province's seat: tiers and room decide, tiers.ts.)
     // A town on another layer is full sooner where there is little room (layers.ts).
     const room = layerRoom(lc, st);
     // Towns grow while their land feeds them (villages come from the wild now, REDESIGN.md 8.0);
@@ -1752,12 +1821,10 @@ function joinVillages(sim: SimState, env: Env, lib: Library): void {
   }
 }
 
-/** Past this a village that is not its province's seat sends its people to the seat. */
-export const VILLAGE_MAX = 600;
-
 /**
  * Each province's seat: a dawn city, else the seat it had while it stands, unless another there has
- * grown half as big again; else the biggest. Every other settlement in the province is a village.
+ * grown half as big again; else the biggest. (Its seat for the realm's business and prestige; its
+ * size and tier are its own now, tiers.ts.)
  */
 function chooseSeats(sim: SimState, env: Env): Map<number, Settlement> {
   const by = new Map<number, Settlement[]>();
@@ -1783,8 +1850,9 @@ function chooseSeats(sim: SimState, env: Env): Map<number, Settlement> {
 /** What a settlement is: a dawn city; a city or town (its province's seat, by size); or a village. */
 export function settlementTier(st: Settlement): 'Dawn city' | 'City' | 'Town' | 'Village' {
   if (st.kind === 'dawn') return 'Dawn city';
-  if (st.seat === false) return 'Village';
-  return st.pop >= 5000 ? 'City' : st.pop >= 1000 ? 'Town' : 'Village';
+  // By its tier (tiers.ts): hamlets and villages, market and large towns, cities and great cities.
+  const t = tierOf(st);
+  return t >= CITY ? 'City' : t >= MARKET ? 'Town' : 'Village';
 }
 
 /** Area (km²) each clan claims. */

@@ -13,6 +13,7 @@ import { addDawnCity, addTribe, attractionFor, wantsOf, clanLand, eligibleRaces,
 import { clanKnows, hasArchive, keepers } from '../sim/tech';
 import { ALL_FOOD_TECH, foodTechFrom, provinceFood, provinceLand } from '../sim/food';
 import { villagesOf } from '../sim/rural';
+import { tierName } from '../sim/tiers';
 import { cultureOf, localText, MAX_TRADITIONS } from '../sim/culture';
 import { acceptance, acceptanceWord, cultureColour } from '../sim/cultureChange';
 import { familyOf } from '../sim/sister';
@@ -2512,7 +2513,7 @@ export function createPeoples(d: PeoplesDeps): Peoples {
       parts.push(
         h('h3', {}, st.name),
         h('div', { class: 'tribe-card small' },
-          h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)}` : `${settlementTier(st)}${st.seat === false ? ': another settlement is its province’s seat, so it stays a village' : ''}`),
+          h('div', {}, st.kind === 'dawn' ? `Dawn city of the ${raceName(st.holyTo[0] ?? st.race)} (${tierName(st).toLowerCase()})` : `${tierName(st)}${st.villageSince !== undefined ? `, a village since year ${yearOf(st.villageSince)}` : ''}`),
           st.partOf !== undefined ? h('div', {}, `Part of ${s.settlements.find((q) => q.id === st.partOf)?.name ?? '?'}: its people work and eat with the town's, and its goods go to the town's stores.`) : null,
           st.layer ? h('div', {}, `In ${LAYER_NAMES[st.layer]}${st.layer.startsWith('sky') ? ' (on an island; it moves if the island drifts)' : st.layer === 'underdark' ? ' (fed by its fungus farms and the land above)' : ' (up a giant tree)'}.`) : null,
           st.holyTo.length ? h('div', { class: 'holy-tag' }, `Holy to all the ${st.holyTo.map(raceName).join(', ')}, wherever they are${st.ruined ? ', even in ruin' : ''}.`) : null,

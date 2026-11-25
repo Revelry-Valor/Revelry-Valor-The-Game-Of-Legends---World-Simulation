@@ -1358,6 +1358,25 @@ Food sets how many people the land can hold, and transport how far food can trav
 - *Shown:* zoomed in, each site is a dot in its holder's colour (bigger for a bigger one), named closer in; hovering one gives its people, culture, age and whether it lies on a busy way ("outgrowing a village" past 500, "a hamlet" under 100); a province's hover and card give its village sites (how many, their people, the biggest).
 - On the saved world over 60 years: the countryside of about 150 farmed provinces grew from 8,500 to 93,000 people (466 village sites holding 74,000), while the towns grew from 12,900 to 21,000: about four in five living on the land.
 
+**Built (step 3): tiers and spacing** (`sim/tiers.ts`)
+- *Six tiers*, each with the people to rise into it, a footprint (nothing founded inside) and an exclusion radius (no settlement of that tier or higher may rise within it):
+
+  | Tier | Rises at | Footprint | Exclusion |
+  |---|---|---|---|
+  | Hamlet | — | 0.3 km | 1 km |
+  | Village | 100 | 0.5 km | 1.5 km |
+  | Market town | 500 | 1 km | 10 km |
+  | Large town | 2,000 | 1.5 km | 30 km |
+  | City | 10,000 | 2.5 km | 60 km (30 on a river or coast) |
+  | Great city | 100,000 | 5 km | 150 km |
+
+  A settlement drops a tier only below 80% of what it needed to rise into it. Tiers are worked out each year, the biggest settlement first, so where there is room for one large town it is the bigger that rises. A large town holds a market, so no market town rises within 10 km of one (Bracton's rule). A settlement new to tiers starts as a hamlet and rises as far as its people and the room allow. The simulation's broader kinds follow: hamlets and villages are villages, market and large towns are towns (they draw country people in), cities and great cities are cities.
+- *Villages grow into market towns on their own spot:* each year the biggest village site of a farmed province that has 500 people (or 300 where its province has the surplus to feed a market), with no market town or bigger within 10 km and outside every settlement's footprint, becomes a market town there, keeping its name and culture, its people out of the province's countryside, its realm the province's holder, knowing what its holder knows. "Tedoma, a village since year 116, has grown into a market town." Its card says so.
+- *Back to a village:* a settlement on farmed land that has dwindled below 240 (80% of the least a village needs to become a market town) for five years goes back to being a village site on the same spot (its people back into the countryside, its routes and caravans gone): not a dawn city, a realm's capital, a holy place, a town on another layer, one with villages joined to it or one an army is about. A market town grown from a village holds its tier down to the same 240.
+- *Retired:* a village no longer stays one beside its province's seat, and the 600 cap is gone; tiers and room decide. The seat stays as the province's seat for the realm's business and prestige.
+- *Farmers out only while the land is being settled:* a farming settlement sends people out to farm only while its province's countryside is under a quarter full; past that the countryside grows by itself and towns grow from country people drawn in.
+- On a stand-in world (a tropical continent like the designer's, two peoples, run 40 years and then 80 more): the countryside grew from 6,000 to 56,000 and settlements from 4,100 to 32,000; seven market towns grew from village sites, two large towns rose, and fifteen old small villages on farmed land went back to being village sites. The peoples who don't farm yet kept their villages in the wild.
+
 **Designer's notes: towns on the coast**
 - A dawn city (or any town) stands exactly where it is dropped, right up to the painted coast; it no longer snaps to the nearest of the climate's points (10–20 km apart), which could pull it inland or refuse a drop by the sea. The page gives the simulation the painted land itself for this.
 - For its food, trade, roads and province, a town on the coast whose own climate point is sea uses the nearest land point by it.
