@@ -12,7 +12,7 @@ import { bindProvinces, claimNear, heldArea, holderOf, provAt, provinceSpan, pro
 import { landCell, PLANT_K, type Env } from './env';
 import { attraction, hardBirths, hardDeaths, type Wants } from './attraction';
 import { adaptYear } from './adapt';
-import { economyMonth, newEconomy } from './economy';
+import { economyMonth, newEconomy, PROVISIONS } from './economy';
 import { caravansDay, tradeMonth, type TradeContext } from './trade';
 import { WAYS, waysYear } from './ways';
 import { markThinned, thinned } from './thinned';
@@ -30,6 +30,7 @@ import { armsMight, canSettle, clanKnows, hasArchive, knows, outlook, techYear, 
 import { traitsYear } from './traits';
 import { addFarmFood, farmLayer, farmYear, isFarmed, sitesYear, type RuralContext, type VillageSite } from './rural';
 import { CITY, MARKET, tierOf, tiersYear } from './tiers';
+import { catchmentYear, TO_TOWN } from './catchment';
 import { CULTURE_TICK, cultureTick } from './culturetick';
 import { classShares, classYear, fromCountry, joinPops, mainOf, movePeople, popsOf, startPops, takePops, toCountry, tongueOf, countryYear } from './pops';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, northernSummer, type Clan, type Point, type LiveCulture, type Settlement, type SetupRow, type SimEvent, type SimState, type Sortie, type Tribe } from './state';
@@ -1068,6 +1069,8 @@ function monthly(sim: SimState, env: Env, lib: Library, info: Info): void {
     }
   }
   // Settlements: fed from the land round them, worked harder than a tribe can (gardens and stores).
+  // Towns: and with the food they draw from the provinces they reach (catchment.ts), a month's share into their stores.
+  for (const st of sim.settlements) if (st.imports && !st.ruined && st.economy) st.economy.stores[PROVISIONS] = (st.economy.stores[PROVISIONS] ?? 0) + st.imports.rations;
   const lc = layerContext(sim, env, lib);
   // Towns and their joined villages (REDESIGN.md 8.0): the towns first, each working and eating as
   // one with its villages; then the villages, fed as their town is.
@@ -1530,6 +1533,34 @@ function popsYear(sim: SimState, env: Env, lib: Library, info: Info): void {
       pinned: (st) => !!st.besieged || (sim.armies ?? []).some((a) => a.target === st.id || a.siege?.town === st.id || (a.from[st.id] ?? 0) > 0),
       log: (text, x, y) => log(sim, text, x, y),
     });
+    // Each town's catchment: the provinces' surplus split among the towns reaching them (catchment.ts).
+    catchmentYear({
+      sim, env, farms,
+      provAt: (x, y) => provAt(env, x, y),
+      cellOf: (x, y) => landCell(env, x, y),
+      eats: (st) => st.pop * (info(st)?.need ?? 1),
+      knows: (st, id) => knows(lib, st, id),
+      dist: (ax, ay, bx, by) => dist(env, ax, ay, bx, by),
+    });
+    // The country people the land can't employ move to the town that draws most on their province.
+    const P2 = env.prov;
+    for (let p = 0; p < P2.count; p++) {
+      const over = ruralNow[p] - farms.labour[p];
+      if (farms.labour[p] <= 0 || over < 5) continue;
+      const pid = P2.ids[p];
+      const town = sim.settlements.filter((q) => !q.ruined && q.imports?.from.some((f) => f[0] === pid)).sort((a, b) => (b.imports!.from.find((f) => f[0] === pid)![1]) - (a.imports!.from.find((f) => f[0] === pid)![1]))[0];
+      if (!town || town.fed < 0.9) continue;
+      const n = over * TO_TOWN;
+      const race = town.race;
+      const D = sim.density?.[race];
+      if (!D) continue;
+      let have = 0;
+      for (let q = P2.start[p]; q < P2.start[p + 1]; q++) have += D[P2.cells[q]];
+      const take = Math.min(n, have);
+      if (take < 1) continue;
+      for (let q = P2.start[p]; q < P2.start[p + 1]; q++) D[P2.cells[q]] -= (D[P2.cells[q]] * take) / have;
+      joinPops(sim, town, fromCountry(sim, env, p, race, take, town));
+    }
   }
   for (const st of sim.settlements) {
     if (st.ruined) continue;

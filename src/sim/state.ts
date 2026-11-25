@@ -1,6 +1,7 @@
 import type { Pop } from './pops';
 import type { History } from './history';
 import type { VillageSite } from './rural';
+import type { Imports } from './catchment';
 import type { Horde, Tide } from './monsters';
 import type { Rift } from './rifts';
 
@@ -336,6 +337,8 @@ export interface Settlement {
   villageSince?: number;
   /** Years it has been too small for a town on farmed land (it goes back to a village site after three). */
   smallYears?: number;
+  /** Food it draws from the surplus of the provinces it reaches this year (catchment.ts). */
+  imports?: Imports;
   /** How firmly its realm's orders reach it (0–1; the capital 1), from distance, ways and centralization. */
   control?: number;
   /** Its loyalty to its realm (0–1), and the years it has been discontented. */

@@ -9,7 +9,8 @@ import { TIERS, tierOf } from './tiers';
  *
  * *Farmed provinces:* a province is farmed when its holder knows agriculture. Each month its land's
  * food (food.ts: farms, herds and fish, with what the holder knows, less what the people of its
- * towns eat) is added to the food the families living there can eat, laid over its points by
+ * towns eat), up to what the people its land employs eat (each farmer grows a tenth to a quarter
+ * more than they eat, by their tools; the rest is its surplus, which towns draw on: catchment.ts), is added to the food the families living there can eat, laid over its points by
  * their farmland and fertility. The families there are its rural people: they grow toward what
  * the land feeds, and hungry ones move on to land with room (density.ts), so a full province sends
  * its migrants out. Peoples who don't farm live off the wild as before.
@@ -55,6 +56,10 @@ export interface FarmLayer {
   /** By province: its food a year with what its holder knows (rations), and what its rural people may have of it. */
   food: Float32Array;
   rural: Float32Array;
+  /** By province: the food its land gives beyond what its working farmers, herders and fishers eat (rations a year): what towns can draw on (catchment.ts). */
+  surplus: Float32Array;
+  /** By province: how many people its land can employ (farmers, herders, fishers). */
+  labour: Float32Array;
 }
 
 export interface RuralContext {
@@ -81,7 +86,12 @@ export function farmYear(c: RuralContext): FarmLayer {
   const farmed = new Uint8Array(env.n);
   const food = new Float32Array(P.count);
   const rural = new Float32Array(P.count);
+  const surplus = new Float32Array(P.count);
+  const labour = new Float32Array(P.count);
   const townsEat = new Float32Array(P.count);
+  // The rural people living in each province now (the farmers whose surplus towns draw on).
+  const ruralNow = new Float32Array(P.count);
+  for (const D of Object.values(sim.density ?? {})) for (let k = 0; k < D.length; k++) if (D[k] > 0 && P.of[k] >= 0) ruralNow[P.of[k]] += D[k];
   for (const st of sim.settlements) {
     if (st.ruined || st.layer) continue;
     const p = c.provAt(st.x, st.y);
@@ -98,7 +108,13 @@ export function farmYear(c: RuralContext): FarmLayer {
     if (!t.agriculture) continue;
     const f = provinceFood(land[p], t).total;
     food[p] = f;
-    rural[p] = Math.max(0, f - townsEat[p]);
+    // Its land employs as many as it takes to grow its food (each growing their own and their surplus):
+    // the rural people can be no more; what the land grows beyond what they eat is its surplus.
+    labour[p] = workersFor(f, t);
+    const left = Math.max(0, f - townsEat[p]);
+    rural[p] = Math.min(left, labour[p]);
+    // What its farmers working now spare (each a tenth to a quarter of their own food), as far as the land gives.
+    surplus[p] = Math.min(left - Math.min(ruralNow[p], rural[p]), Math.min(ruralNow[p], labour[p]) * surplusPerFarmer(t));
     if (rural[p] <= 0) continue;
     // Laid over its points by farmland and fertility (a little everywhere it is land: herds, fish).
     let sum = 0;
@@ -118,10 +134,24 @@ export function farmYear(c: RuralContext): FarmLayer {
       farm[k] = (rural[p] * wt[i]) / sum / 12;
     }
   }
-  const layer = { farm, farmed, food, rural };
+  const layer = { farm, farmed, food, rural, surplus, labour };
   layers.set(sim, layer);
   return layer;
 }
+
+/**
+ * What each farmer grows beyond their own food, by what is known (the designer's doc: 0.10–0.25 fits
+ * medieval-level farming): farming alone 0.1, with the plough 0.15, with the plough and crop rotation
+ * 0.25. On poorer land farmers work more of it; how many it feeds is the land's, how much each spares
+ * is the tools'.
+ */
+export function surplusPerFarmer(t: FoodTech): number {
+  if (!t.agriculture) return 0;
+  return t.plough && t.rotation ? 0.25 : t.plough ? 0.15 : 0.1;
+}
+
+/** How many people a province's land employs to grow its food (each growing their own and their surplus). */
+export const workersFor = (food: number, t: FoodTech) => food / (1 + surplusPerFarmer(t));
 
 /** Each month, before the families eat: the farmed land's food added to what they can have. */
 export function addFarmFood(sim: SimState, left: Float32Array): void {
